@@ -86,7 +86,18 @@ If a message has no `Message-ID` header, the worker uses a SHA-256 hash of the r
 
 The preferred deployment is an Azure Function timer trigger, not a VM. The function lives in `backend/function_app.py` and uses the same `app.email_intake` worker.
 
-Create a Linux Python Function App, configure the `EMAIL_INTAKE_*` app settings, then deploy the `backend/` folder. The timer schedule uses Azure Functions NCRONTAB format:
+Create a Linux Python Function App, configure the `EMAIL_INTAKE_*` app settings, then deploy the `backend/` folder. The repo deploys this automatically from `.github/workflows/function-deploy.yml` after backend changes land on `main`, and the workflow can also be run manually.
+
+The deployment workflow uses the `azure-dev` GitHub environment plus these repository values:
+
+- `AZURE_CLIENT_ID`
+- `AZURE_TENANT_ID`
+- `AZURE_SUBSCRIPTION_ID`
+- `AZURE_RESOURCE_GROUP`
+- `AZURE_FUNCTION_APP_NAME`
+- `AZURE_FUNCTION_DATABASE_URL` as a GitHub secret
+
+The timer schedule uses Azure Functions NCRONTAB format:
 
 ```env
 EMAIL_INTAKE_TIMER_SCHEDULE=0 */5 * * * *
@@ -103,7 +114,7 @@ EMAIL_INTAKE_STUB_BLOB_CONTAINER=app-assets
 EMAIL_INTAKE_STUB_BLOB_PREFIX=email-intake
 ```
 
-The Function App still needs `AZURE_STORAGE_CONNECTION_STRING` or `EMAIL_INTAKE_STUB_BLOB_CONNECTION_STRING` so it can write the JSON stub to Blob Storage.
+The Function App still needs `AZURE_STORAGE_CONNECTION_STRING` or `EMAIL_INTAKE_STUB_BLOB_CONNECTION_STRING` so it can write the JSON audit record to Blob Storage. It also needs `DATABASE_URL` for emailed attachments to appear in the portal; the deploy workflow writes this from the `AZURE_FUNCTION_DATABASE_URL` GitHub secret.
 
 Useful Azure CLI shape:
 

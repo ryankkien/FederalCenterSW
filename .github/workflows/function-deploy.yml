@@ -1,0 +1,81 @@
+name: Email Intake Function Deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+      - '.github/workflows/function-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AZURE_FUNCTION_APP_NAME: ${{ vars.AZURE_FUNCTION_APP_NAME || 'fcsw-email-intake-e7e9f2' }}
+  AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || 'federal-center-sw-dev' }}
+  AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID || '99596387-8247-4e94-9917-cf8bc695f106' }}
+  EMAIL_INTAKE_DEFAULT_DOCUMENT_TYPE: ${{ vars.EMAIL_INTAKE_DEFAULT_DOCUMENT_TYPE || 'Email Attachment' }}
+  EMAIL_INTAKE_DEFAULT_UPLOADER_ID: ${{ vars.EMAIL_INTAKE_DEFAULT_UPLOADER_ID || 'contractor-demo' }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: azure-dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install backend dependencies
+        run: python -m pip install -r backend/requirements-dev.txt
+
+      - name: Lint backend
+        run: python -m ruff check backend
+
+      - name: Test backend
+        run: python -m pytest backend/tests
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID || 'c821732f-0ded-4db0-96c8-cf2013d16974' }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Configure non-secret Function App settings
+        run: |
+          az functionapp config appsettings set \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_FUNCTION_APP_NAME" \
+            --settings \
+              EMAIL_INTAKE_DEFAULT_UPLOADER_ID="$EMAIL_INTAKE_DEFAULT_UPLOADER_ID" \
+              EMAIL_INTAKE_DEFAULT_DOCUMENT_TYPE="$EMAIL_INTAKE_DEFAULT_DOCUMENT_TYPE"
+
+      - name: Configure database Function App setting
+        env:
+          DATABASE_URL: ${{ secrets.AZURE_FUNCTION_DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::warning::AZURE_FUNCTION_DATABASE_URL is not set; emailed attachments will not persist to PostgreSQL."
+            exit 0
+          fi
+
+          az functionapp config appsettings set \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_FUNCTION_APP_NAME" \
+            --settings DATABASE_URL="$DATABASE_URL"
+
+      - name: Deploy Function App
+        uses: Azure/functions-action@v1
+        with:
+          app-name: ${{ env.AZURE_FUNCTION_APP_NAME }}
+          package: backend
+          remote-build: true
+          respect-funcignore: true

@@ -44,12 +44,14 @@ then referencing them from app settings.
 
 ## GitHub Actions
 
-The repo includes two infrastructure workflows:
+The repo includes three Azure-facing workflows:
 
 - `.github/workflows/infra-whatif.yml` runs Bicep build and Azure what-if on pull requests
   that touch infrastructure files, and can also be run manually.
 - `.github/workflows/infra-deploy.yml` runs Bicep build and deploy manually against the
   `azure-dev` GitHub environment.
+- `.github/workflows/function-deploy.yml` deploys the email intake Function App from
+  `backend/` on pushes to `main` that touch backend files, and can also be run manually.
 
 Both workflows use Azure OIDC login. Configure these GitHub repository variables:
 
@@ -59,13 +61,22 @@ Both workflows use Azure OIDC login. Configure these GitHub repository variables
 | `AZURE_TENANT_ID` | `c821732f-0ded-4db0-96c8-cf2013d16974` |
 | `AZURE_SUBSCRIPTION_ID` | `99596387-8247-4e94-9917-cf8bc695f106` |
 | `AZURE_RESOURCE_GROUP` | `federal-center-sw-dev` |
+| `AZURE_FUNCTION_APP_NAME` | `fcsw-email-intake-e7e9f2` |
+| `EMAIL_INTAKE_DEFAULT_UPLOADER_ID` | Optional override; defaults to `contractor-demo`. |
+| `EMAIL_INTAKE_DEFAULT_DOCUMENT_TYPE` | Optional override; defaults to `Email Attachment`. |
+
+Configure this GitHub repository secret for the Function App deployment:
+
+| Secret | Purpose |
+| --- | --- |
+| `AZURE_FUNCTION_DATABASE_URL` | PostgreSQL connection string written to the Function App as `DATABASE_URL`. |
 
 The Azure identity needs permission to run resource group deployments in
-`federal-center-sw-dev`. Use least privilege when possible; Contributor at the resource
-group is the simple starting point.
+`federal-center-sw-dev` and deploy to the Function App. Use least privilege when possible;
+Contributor at the resource group is the simple starting point.
 
 The Azure app registration or managed identity also needs federated credentials that match
-the GitHub workflow subjects. The deploy workflow uses the `azure-dev` GitHub environment,
+the GitHub workflow subjects. The deploy workflows use the `azure-dev` GitHub environment,
 so include that environment in the deploy federated credential.
 
 ## Drift Policy
