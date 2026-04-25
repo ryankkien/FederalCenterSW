@@ -1,0 +1,23 @@
+{
+  "name": "federal-center-sw",
+  "private": true,
+  "version": "0.1.0",
+  "description": "TypeScript frontend and Python backend workspace.",
+  "scripts": {
+    "dev": "concurrently -n frontend,backend -c cyan,green \"bun run dev:frontend\" \"bun run dev:backend\"",
+    "dev:frontend": "bun run --cwd frontend dev",
+    "dev:backend": ".venv/bin/python -m uvicorn app.main:app --app-dir backend --reload",
+    "build": "bun run --cwd frontend build",
+    "lint": "bun run --cwd frontend lint",
+    "test": "bun run --cwd frontend test && .venv/bin/python -m pytest backend/tests"
+  },
+  "workspaces": [
+    "frontend"
+  ],
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

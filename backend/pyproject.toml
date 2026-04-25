@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "federal-center-sw-api"
+version = "0.1.0"
+description = "FastAPI backend for Federal Center SW."
+requires-python = ">=3.8"
+dependencies = [
+  "fastapi==0.110.3",
+  "uvicorn[standard]==0.30.6",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx==0.27.2",
+  "pytest==8.3.5",
+  "ruff==0.11.7",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py38"
