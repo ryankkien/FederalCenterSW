@@ -185,6 +185,35 @@ AZURE_STORAGE_CONNECTION_STRING=<connection-string>
 
 Prefer managed identity or Azure app settings for deployed apps. Avoid committing storage keys or connection strings.
 
+## Local Env File
+
+Use `backend/.env.example` as the template for local configuration:
+
+```sh
+cp backend/.env.example backend/.env
+```
+
+Then fill in the real secret values locally. `backend/.env` is intentionally ignored by git.
+
+Current env variables used by the backend:
+
+| Variable | Purpose |
+| --- | --- |
+| `DATABASE_URL` | PostgreSQL connection string. |
+| `AZURE_STORAGE_ACCOUNT` | Blob Storage account name. |
+| `AZURE_STORAGE_CONTAINER` | Blob container name. |
+| `AZURE_STORAGE_CONNECTION_STRING` | Blob Storage connection string for backend code or local scripts. |
+| `EMAIL_INTAKE_HOST` | IMAP host for email intake. |
+| `EMAIL_INTAKE_PORT` | IMAP port, usually `993`. |
+| `EMAIL_INTAKE_USERNAME` | IMAP username. |
+| `EMAIL_INTAKE_PASSWORD` | IMAP password or app password. |
+| `EMAIL_INTAKE_MAILBOX` | Source mailbox, default `INBOX`. |
+| `EMAIL_INTAKE_SEARCH` | IMAP search criteria, default `UNSEEN`. |
+| `EMAIL_INTAKE_PROCESSED_MAILBOX` | Mailbox for processed messages. |
+| `EMAIL_INTAKE_FAILED_MAILBOX` | Mailbox for failed messages. |
+| `EMAIL_INTAKE_DRY_RUN` | Keep `true` until moving messages is intended. |
+| `EMAIL_INTAKE_OUTPUT_PATH` | Local JSONL output path for the current stub persistence. |
+
 ## Adding More People
 
 Invite a guest user in Microsoft Entra ID, then assign access at the resource-group scope:
