@@ -18,6 +18,7 @@ backend/.env.*
 !.env.example
 !backend/.env.example
 .azure-local/
+backend/data/
 
 # OS/editor
 .DS_Store

@@ -70,6 +70,16 @@ bun run lint
 bun run test
 ```
 
+## Email Intake
+
+The backend includes a stubbed IMAP intake worker that parses unread mailbox messages into JSONL records. It can also send an optional receipt auto-reply in commit mode. Configure it with `EMAIL_INTAKE_*` environment variables, then run:
+
+```sh
+bun run email:intake -- --limit 5
+```
+
+Use `--commit` only after dry-run output looks correct; commit mode moves processed messages to a `Processed` mailbox. See [docs/email-intake.md](docs/email-intake.md).
+
 ## Cloud
 
 Azure resource inventory, access steps, PostgreSQL commands, and Blob Storage commands are documented in [docs/cloud.md](docs/cloud.md).
