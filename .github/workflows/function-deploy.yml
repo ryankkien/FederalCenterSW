@@ -63,8 +63,8 @@ jobs:
           DATABASE_URL: ${{ secrets.AZURE_FUNCTION_DATABASE_URL }}
         run: |
           if [ -z "$DATABASE_URL" ]; then
-            echo "::warning::AZURE_FUNCTION_DATABASE_URL is not set; emailed attachments will not persist to PostgreSQL."
-            exit 0
+            echo "::error::AZURE_FUNCTION_DATABASE_URL is not set; refusing to deploy code that needs PostgreSQL."
+            exit 1
           fi
 
           az functionapp config appsettings set \
