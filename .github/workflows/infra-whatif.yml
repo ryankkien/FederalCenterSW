@@ -1,0 +1,40 @@
+name: Infra What-If
+
+on:
+  pull_request:
+    paths:
+      - 'infra/**'
+      - '.github/workflows/infra-whatif.yml'
+      - 'scripts/infra-whatif.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || 'federal-center-sw-dev' }}
+  AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID || '99596387-8247-4e94-9917-cf8bc695f106' }}
+
+jobs:
+  what-if:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID || 'c821732f-0ded-4db0-96c8-cf2013d16974' }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install Bicep
+        run: az bicep install
+
+      - name: Build Bicep
+        run: az bicep build --file infra/main.bicep
+
+      - name: Azure what-if
+        run: ./scripts/infra-whatif.sh

@@ -8,6 +8,8 @@
     "dev:frontend": "bun run --cwd frontend dev",
     "dev:backend": ".venv/bin/python -m uvicorn app.main:app --app-dir backend --reload",
     "email:intake": "PYTHONPATH=backend .venv/bin/python -m app.email_intake",
+    "infra:whatif": "./scripts/infra-whatif.sh",
+    "infra:deploy": "./scripts/infra-deploy.sh",
     "build": "bun run --cwd frontend build",
     "lint": "bun run --cwd frontend lint",
     "test": "bun run --cwd frontend test && .venv/bin/python -m pytest backend/tests"

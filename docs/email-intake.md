@@ -1,6 +1,6 @@
 # Email Intake
 
-The email intake worker fetches unread messages from an IMAP mailbox, parses them into a normalized record, and writes newline-delimited JSON to a local file. The database insert is intentionally stubbed in `backend/app/email_intake.py` until the final intake schema is chosen.
+The email intake worker fetches unread messages from an IMAP mailbox and parses them into a normalized record. The database insert is intentionally stubbed in `backend/app/email_intake.py` until the final intake schema is chosen. Locally, the stub can write newline-delimited JSON; in Azure Functions, it writes durable JSON records to Blob Storage.
 
 ## Local Run
 
@@ -80,51 +80,65 @@ For now, each record includes:
 
 Use `message_id` as the primary deduplication key when the database write is added. If a message has no `Message-ID` header, the worker uses a SHA-256 hash of the raw message.
 
-## Azure VM Timer
+## Azure Function Timer
 
-On the Azure Linux VM, install the app and Python dependencies, then create an env file readable only by the service user:
+The preferred deployment is an Azure Function timer trigger, not a VM. The function lives in `backend/function_app.py` and uses the same `app.email_intake` worker.
 
-```sh
-sudo mkdir -p /etc/federal-center-sw
-sudo nano /etc/federal-center-sw/email-intake.env
-sudo chmod 600 /etc/federal-center-sw/email-intake.env
+Create a Linux Python Function App, configure the `EMAIL_INTAKE_*` app settings, then deploy the `backend/` folder. The timer schedule uses Azure Functions NCRONTAB format:
+
+```env
+EMAIL_INTAKE_TIMER_SCHEDULE=0 */5 * * * *
 ```
 
-Example service unit at `/etc/systemd/system/fcsw-email-intake.service`:
+That example runs every five minutes. Use `0 */1 * * * *` for every minute.
+
+For serverless deployment, enable the durable JSON stub so parsed records go to Azure Blob Storage instead of an ephemeral local file:
+
+```env
+EMAIL_INTAKE_DRY_RUN=false
+EMAIL_INTAKE_STUB_BLOB_ENABLED=true
+EMAIL_INTAKE_STUB_BLOB_CONTAINER=app-assets
+EMAIL_INTAKE_STUB_BLOB_PREFIX=email-intake
+```
+
+The Function App still needs `AZURE_STORAGE_CONNECTION_STRING` or `EMAIL_INTAKE_STUB_BLOB_CONNECTION_STRING` so it can write the JSON stub to Blob Storage.
+
+Useful Azure CLI shape:
+
+```sh
+az functionapp create \
+  --resource-group federal-center-sw-dev \
+  --name <globally-unique-function-app-name> \
+  --storage-account <storage-account-name> \
+  --flexconsumption-location eastus \
+  --runtime python \
+  --runtime-version 3.11 \
+  --functions-version 4
+
+az functionapp config appsettings set \
+  --resource-group federal-center-sw-dev \
+  --name <function-app-name> \
+  --settings EMAIL_INTAKE_HOST=imap.gmail.com
+
+az functionapp deployment source config-zip \
+  --resource-group federal-center-sw-dev \
+  --name <function-app-name> \
+  --src function.zip
+```
+
+## Legacy VM Timer
+
+A VM can still run the worker, but it is no longer the preferred path for this project. If a VM is used, run `PYTHONPATH=backend .venv/bin/python -m app.email_intake --commit` from a systemd timer.
+
+Example service unit:
 
 ```ini
-[Unit]
-Description=Federal Center SW email intake
-
 [Service]
 Type=oneshot
 WorkingDirectory=/opt/federal-center-sw
 EnvironmentFile=/etc/federal-center-sw/email-intake.env
 ExecStart=/opt/federal-center-sw/.venv/bin/python -m app.email_intake --commit
 Environment=PYTHONPATH=/opt/federal-center-sw/backend
-```
-
-Example timer at `/etc/systemd/system/fcsw-email-intake.timer`:
-
-```ini
-[Unit]
-Description=Run Federal Center SW email intake every minute
-
-[Timer]
-OnBootSec=1min
-OnUnitActiveSec=1min
-Unit=fcsw-email-intake.service
-
-[Install]
-WantedBy=timers.target
-```
-
-Enable it:
-
-```sh
-sudo systemctl daemon-reload
-sudo systemctl enable --now fcsw-email-intake.timer
-sudo systemctl status fcsw-email-intake.timer
 ```
 
 View logs:

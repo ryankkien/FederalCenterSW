@@ -2,6 +2,10 @@
 
 This document records the shared Azure setup for the project. It intentionally excludes secrets, passwords, access keys, and connection strings.
 
+Infrastructure is now defined in Bicep under `infra/`. Use `bun run infra:whatif`
+before changing Azure resources and `bun run infra:deploy` to apply intended changes.
+See [infra.md](infra.md) for the Bicep/GitHub Actions workflow and drift policy.
+
 ## Azure Account
 
 - Tenant display name: `Default Directory`
@@ -21,6 +25,10 @@ Everything for this project should live in the single resource group `federal-ce
 | App database | `federal_center_sw` | `centralus` | Database inside the PostgreSQL server. |
 | Blob storage account | `fcswdevcwm2xrlu` | `eastus` | Standard LRS StorageV2 account. |
 | Blob container | `app-assets` | `eastus` | Private container for app files/assets. |
+| Function package storage account | `fcswemailfunce7e9f2` | `eastus` | Standard LRS StorageV2 account used by Azure Functions Flex Consumption deployment storage. |
+| Function package container | `app-package-fcswemailintakee7e9f2-3009836` | `eastus` | Private container for Function App package deployment. |
+| Function App plan | `ASP-federalcenterswdev-818f` | `eastus` | Flex Consumption plan. |
+| Email intake Function App | `fcsw-email-intake-e7e9f2` | `eastus` | Timer-trigger Function App for email intake. |
 
 ## Portal Links
 

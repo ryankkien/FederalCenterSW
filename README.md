@@ -70,6 +70,24 @@ bun run lint
 bun run test
 ```
 
+## Infrastructure
+
+Azure infrastructure is defined with Bicep in `infra/`.
+
+Preview infrastructure changes:
+
+```sh
+bun run infra:whatif
+```
+
+Apply infrastructure changes:
+
+```sh
+bun run infra:deploy
+```
+
+See [docs/infra.md](docs/infra.md) for the Bicep/GitHub Actions workflow and drift policy.
+
 ## Email Intake
 
 The backend includes a stubbed IMAP intake worker that parses unread mailbox messages into JSONL records. It can also send an optional receipt auto-reply in commit mode. Configure it with `EMAIL_INTAKE_*` environment variables, then run:

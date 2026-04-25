@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
+import hmac
 import imaplib
 import json
 import os
@@ -14,9 +16,12 @@ from datetime import datetime, timezone
 from email import policy
 from email.message import EmailMessage, Message
 from email.parser import BytesParser
-from email.utils import getaddresses, parsedate_to_datetime
+from email.utils import formatdate, getaddresses, parsedate_to_datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from urllib.error import HTTPError
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 
 
 DEFAULT_OUTPUT_PATH = Path(__file__).resolve().parents[1] / "data" / "email_intake.jsonl"
@@ -163,12 +168,137 @@ def save_email_intake(record: EmailIntakeRecord, output_path: Path) -> None:
     """Stub persistence layer.
 
     Replace this function with a database insert once the intake schema is settled.
-    For now it writes newline-delimited JSON so the worker can be tested end to end.
+    For now it writes JSON to Azure Blob Storage when configured, otherwise
+    newline-delimited JSON locally so the worker can be tested end to end.
     """
+
+    if _env_bool("EMAIL_INTAKE_STUB_BLOB_ENABLED", default=False):
+        save_email_intake_blob(record)
+        return
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("a", encoding="utf-8") as file:
         file.write(json.dumps(_record_to_json(record), sort_keys=True) + "\n")
+
+
+def save_email_intake_blob(record: EmailIntakeRecord) -> None:
+    connection_string = os.getenv("EMAIL_INTAKE_STUB_BLOB_CONNECTION_STRING") or os.getenv(
+        "AZURE_STORAGE_CONNECTION_STRING"
+    )
+    container_name = os.getenv("EMAIL_INTAKE_STUB_BLOB_CONTAINER") or os.getenv(
+        "AZURE_STORAGE_CONTAINER",
+        "app-assets",
+    )
+    prefix = os.getenv("EMAIL_INTAKE_STUB_BLOB_PREFIX", "email-intake")
+    if not connection_string:
+        raise RuntimeError(
+            "Missing EMAIL_INTAKE_STUB_BLOB_CONNECTION_STRING or AZURE_STORAGE_CONNECTION_STRING"
+        )
+    storage = _parse_storage_connection_string(connection_string)
+
+    received = _blob_record_datetime(record)
+    blob_name = (
+        f"{prefix}/{received:%Y/%m/%d}/"
+        f"{_safe_blob_component(record.message_id)}-{record.raw_sha256[:16]}.json"
+    )
+    payload = json.dumps(_record_to_json(record), indent=2, sort_keys=True).encode("utf-8")
+
+    _put_blob_if_absent(storage, container_name, blob_name, payload)
+
+
+def _parse_storage_connection_string(connection_string: str) -> Dict[str, str]:
+    values = {}
+    for part in connection_string.split(";"):
+        if not part or "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        values[key] = value
+
+    if "AccountName" not in values or "AccountKey" not in values:
+        raise RuntimeError("Storage connection string must include AccountName and AccountKey")
+
+    if "BlobEndpoint" not in values:
+        protocol = values.get("DefaultEndpointsProtocol", "https")
+        suffix = values.get("EndpointSuffix", "core.windows.net")
+        values["BlobEndpoint"] = f"{protocol}://{values['AccountName']}.blob.{suffix}"
+
+    return values
+
+
+def _put_blob_if_absent(
+    storage: Dict[str, str],
+    container_name: str,
+    blob_name: str,
+    payload: bytes,
+) -> None:
+    account_name = storage["AccountName"]
+    account_key = storage["AccountKey"]
+    encoded_blob_name = "/".join(quote(part, safe="") for part in blob_name.split("/"))
+    url = f"{storage['BlobEndpoint'].rstrip('/')}/{container_name}/{encoded_blob_name}"
+    date = formatdate(usegmt=True)
+    content_type = "application/json"
+    headers = {
+        "Content-Length": str(len(payload)),
+        "Content-Type": content_type,
+        "If-None-Match": "*",
+        "x-ms-blob-type": "BlockBlob",
+        "x-ms-date": date,
+        "x-ms-version": "2023-11-03",
+    }
+    headers["Authorization"] = _storage_authorization_header(
+        account_name=account_name,
+        account_key=account_key,
+        method="PUT",
+        container_name=container_name,
+        blob_name=blob_name,
+        headers=headers,
+    )
+    request = Request(url, data=payload, headers=headers, method="PUT")
+
+    try:
+        with urlopen(request, timeout=30):
+            return
+    except HTTPError as error:
+        if error.code in {409, 412}:
+            return
+        raise
+
+
+def _storage_authorization_header(
+    account_name: str,
+    account_key: str,
+    method: str,
+    container_name: str,
+    blob_name: str,
+    headers: Dict[str, str],
+) -> str:
+    canonicalized_headers = "".join(
+        f"{key.lower()}:{value}\n"
+        for key, value in sorted(headers.items())
+        if key.lower().startswith("x-ms-")
+    )
+    canonicalized_resource = f"/{account_name}/{container_name}/{blob_name}"
+    string_to_sign = (
+        f"{method}\n"
+        "\n"
+        "\n"
+        f"{headers['Content-Length']}\n"
+        "\n"
+        f"{headers['Content-Type']}\n"
+        "\n"
+        "\n"
+        "\n"
+        f"{headers['If-None-Match']}\n"
+        "\n"
+        "\n"
+        f"{canonicalized_headers}"
+        f"{canonicalized_resource}"
+    )
+    decoded_key = base64.b64decode(account_key)
+    signature = base64.b64encode(
+        hmac.new(decoded_key, string_to_sign.encode("utf-8"), hashlib.sha256).digest()
+    ).decode("ascii")
+    return f"SharedKey {account_name}:{signature}"
 
 
 def run_once(config: EmailIntakeConfig, limit: Optional[int] = None) -> int:
@@ -480,6 +610,27 @@ def _is_attachment(part: Message) -> bool:
 
 def _record_to_json(record: EmailIntakeRecord) -> Dict[str, object]:
     return asdict(record)
+
+
+def _blob_record_datetime(record: EmailIntakeRecord) -> datetime:
+    if record.received_at:
+        try:
+            return datetime.fromisoformat(record.received_at).astimezone(timezone.utc)
+        except ValueError:
+            pass
+    return datetime.now(timezone.utc)
+
+
+def _safe_blob_component(value: str) -> str:
+    safe_chars = []
+    for char in value.lower():
+        if char.isalnum():
+            safe_chars.append(char)
+        elif char in {"-", "_", "."}:
+            safe_chars.append(char)
+        else:
+            safe_chars.append("-")
+    return "".join(safe_chars).strip("-")[:120] or "message"
 
 
 if __name__ == "__main__":
