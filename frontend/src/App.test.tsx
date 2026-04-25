@@ -93,6 +93,28 @@ describe('App', () => {
     expect(await screen.findByText('Monthly progress report')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Upload Document' })).not.toBeInTheDocument();
   });
+
+  it('opens a short-lived SAS URL when downloading a document', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ access_token: 'official-token', user: officialUser }))
+      .mockResolvedValueOnce(jsonResponse([documentRecord]))
+      .mockResolvedValueOnce(jsonResponse({ url: 'https://storage.example.test/file.pdf?sas=true', expires_in_minutes: 15 }));
+    const openMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('open', openMock);
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText('Role'), { target: { value: 'official' } });
+    fireEvent.submit(screen.getByRole('button', { name: 'Continue' }).closest('form')!);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Download' }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith('/api/documents/doc-1/sas-url', expect.any(Object)),
+    );
+    expect(openMock).toHaveBeenCalledWith('https://storage.example.test/file.pdf?sas=true', '_blank', 'noopener,noreferrer');
+  });
 });
 
 function jsonResponse(body: unknown, status = 200) {

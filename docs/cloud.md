@@ -175,6 +175,14 @@ az storage blob download \
   --auth-mode login
 ```
 
+The app keeps the container private. The frontend downloads documents by calling the backend SAS endpoint:
+
+```text
+GET /api/documents/{document_id}/sas-url
+```
+
+That endpoint checks the signed-in user's document access and returns a read-only Blob URL that expires in 15 minutes. If Azure Blob Storage is not configured locally, the endpoint returns `501` and the frontend falls back to the backend download route.
+
 Example local backend env shape:
 
 ```env

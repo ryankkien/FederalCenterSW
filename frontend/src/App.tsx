@@ -28,6 +28,11 @@ type DocumentRecord = {
   created_at: string;
 };
 
+type SasUrlResponse = {
+  url: string;
+  expires_in_minutes: number;
+};
+
 const storedTokenKey = 'fcsw-token';
 
 export function App() {
@@ -104,6 +109,18 @@ export function App() {
 
     setError('');
     try {
+      const sasResponse = await fetch(`/api/documents/${document.id}/sas-url`, {
+        headers: authHeaders(token),
+      });
+      if (sasResponse.ok) {
+        const sas = (await sasResponse.json()) as SasUrlResponse;
+        window.open(sas.url, '_blank', 'noopener,noreferrer');
+        return;
+      }
+      if (sasResponse.status !== 501) {
+        await assertOk(sasResponse);
+      }
+
       const response = await fetch(`/api/documents/${document.id}/download`, {
         headers: authHeaders(token),
       });

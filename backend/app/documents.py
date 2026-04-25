@@ -30,6 +30,11 @@ ALLOWED_CONTENT_TYPES = {
 }
 
 
+class DocumentSasUrlResponse(BaseModel):
+    url: str
+    expires_in_minutes: int
+
+
 class DocumentResponse(BaseModel):
     id: str
     title: str
@@ -105,18 +110,31 @@ def download_document(
     db: Session = Depends(get_db),
     storage: BlobStorage = Depends(get_blob_storage),
 ) -> Response:
-    document = db.get(DocumentUpload, document_id)
-    if document is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
-    if user.role == "contractor" and document.uploader_id != user.id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
-
+    document = _get_authorized_document(document_id, user, db)
     data = storage.download_bytes(document.blob_path)
     return Response(
         content=data,
         media_type=document.content_type,
         headers={"Content-Disposition": f'attachment; filename="{document.original_filename}"'},
     )
+
+
+@router.get("/{document_id}/sas-url", response_model=DocumentSasUrlResponse)
+def document_sas_url(
+    document_id: str,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    storage: BlobStorage = Depends(get_blob_storage),
+) -> DocumentSasUrlResponse:
+    document = _get_authorized_document(document_id, user, db)
+    try:
+        url = storage.create_read_url(document.blob_path)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="SAS URLs require Azure Blob Storage configuration",
+        ) from exc
+    return DocumentSasUrlResponse(url=url, expires_in_minutes=15)
 
 
 def _validate_file(filename: str, content_type: str) -> None:
@@ -132,6 +150,15 @@ def _clean_filename(filename: str) -> str:
     name = filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].strip()
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip(".-")
     return cleaned or "document"
+
+
+def _get_authorized_document(document_id: str, user: CurrentUser, db: Session) -> DocumentUpload:
+    document = db.get(DocumentUpload, document_id)
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    if user.role == "contractor" and document.uploader_id != user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    return document
 
 
 def _document_response(document: DocumentUpload) -> DocumentResponse:

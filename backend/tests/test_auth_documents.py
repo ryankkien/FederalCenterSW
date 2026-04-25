@@ -20,6 +20,9 @@ class FakeBlobStorage:
     def download_bytes(self, path: str) -> bytes:
         return self.files[path]
 
+    def create_read_url(self, path: str, expires_in_minutes: int = 15) -> str:
+        return f"https://storage.example.test/app-assets/{path}?sas=true&expires={expires_in_minutes}"
+
 
 def test_mock_login_and_me() -> None:
     client = TestClient(app)
@@ -77,6 +80,16 @@ def test_contractor_uploads_document_and_official_can_review(tmp_path) -> None:
     assert download.status_code == 200
     assert download.content == b"contractor document"
 
+    sas_url = client.get(
+        f"/api/documents/{body['id']}/sas-url",
+        headers={"Authorization": f"Bearer {official_token}"},
+    )
+    assert sas_url.status_code == 200
+    assert sas_url.json() == {
+        "url": f"https://storage.example.test/app-assets/documents/contractor-demo/{body['id']}/progress.pdf?sas=true&expires=15",
+        "expires_in_minutes": 15,
+    }
+
 
 def test_official_cannot_upload_documents(tmp_path) -> None:
     client = _client_with_test_dependencies(tmp_path, FakeBlobStorage())
@@ -130,6 +143,35 @@ def test_contractor_cannot_download_other_contractors_document(tmp_path) -> None
 
     response = client.get(
         "/api/documents/other-doc/download",
+        headers={"Authorization": f"Bearer {contractor_token}"},
+    )
+
+    assert response.status_code == 404
+
+
+def test_contractor_cannot_create_sas_url_for_other_contractors_document(tmp_path) -> None:
+    fake_storage = FakeBlobStorage()
+    client = _client_with_test_dependencies(tmp_path, fake_storage)
+    contractor_token = _token(client, "contractor")
+
+    with next(_test_db_session(tmp_path)) as db:
+        document = DocumentUpload(
+            id="other-doc",
+            title="Other upload",
+            document_type="Report",
+            notes=None,
+            original_filename="other.pdf",
+            content_type="application/pdf",
+            size_bytes=5,
+            blob_path="documents/other/other-doc/other.pdf",
+            uploader_id="other-contractor",
+            uploader_role="contractor",
+        )
+        db.add(document)
+        db.commit()
+
+    response = client.get(
+        "/api/documents/other-doc/sas-url",
         headers={"Authorization": f"Bearer {contractor_token}"},
     )
 

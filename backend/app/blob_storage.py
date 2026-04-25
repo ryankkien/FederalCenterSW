@@ -1,8 +1,8 @@
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Protocol
 
-from azure.storage.blob import ContentSettings
-from azure.storage.blob import BlobServiceClient
+from azure.storage.blob import BlobSasPermissions, BlobServiceClient, ContentSettings, generate_blob_sas
 
 from app.config import (
     get_azure_storage_connection_string,
@@ -18,6 +18,9 @@ class BlobStorage(Protocol):
     def download_bytes(self, path: str) -> bytes:
         ...
 
+    def create_read_url(self, path: str, expires_in_minutes: int = 15) -> str:
+        ...
+
 
 class AzureBlobStorage:
     def __init__(self) -> None:
@@ -26,6 +29,8 @@ class AzureBlobStorage:
             raise RuntimeError("AZURE_STORAGE_CONNECTION_STRING is not configured")
         self._container = get_azure_storage_container()
         self._client = BlobServiceClient.from_connection_string(connection_string)
+        self._account_name = self._client.account_name
+        self._account_key = self._client.credential.account_key
 
     def upload_bytes(self, path: str, data: bytes, content_type: str) -> None:
         blob = self._client.get_blob_client(container=self._container, blob=path)
@@ -39,6 +44,19 @@ class AzureBlobStorage:
         blob = self._client.get_blob_client(container=self._container, blob=path)
         return blob.download_blob().readall()
 
+    def create_read_url(self, path: str, expires_in_minutes: int = 15) -> str:
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=expires_in_minutes)
+        sas = generate_blob_sas(
+            account_name=self._account_name,
+            container_name=self._container,
+            blob_name=path,
+            account_key=self._account_key,
+            permission=BlobSasPermissions(read=True),
+            expiry=expires_at,
+        )
+        blob = self._client.get_blob_client(container=self._container, blob=path)
+        return f"{blob.url}?{sas}"
+
 
 class LocalBlobStorage:
     def __init__(self, root: Path = None) -> None:
@@ -51,6 +69,9 @@ class LocalBlobStorage:
 
     def download_bytes(self, path: str) -> bytes:
         return self._safe_path(path).read_bytes()
+
+    def create_read_url(self, path: str, expires_in_minutes: int = 15) -> str:
+        raise RuntimeError("SAS URLs require Azure Blob Storage configuration")
 
     def _safe_path(self, path: str) -> Path:
         target = (self._root / path).resolve()
