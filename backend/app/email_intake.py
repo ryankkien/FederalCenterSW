@@ -8,6 +8,7 @@ import imaplib
 import json
 import os
 import smtplib
+import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from email import policy
@@ -19,6 +20,10 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 
 DEFAULT_OUTPUT_PATH = Path(__file__).resolve().parents[1] / "data" / "email_intake.jsonl"
+ENV_PATHS = (
+    Path(__file__).resolve().parents[2] / ".env",
+    Path(__file__).resolve().parents[1] / ".env",
+)
 
 
 @dataclass
@@ -272,6 +277,8 @@ def _record_header(record: EmailIntakeRecord, name: str) -> str:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
+    load_env_files()
+
     parser = argparse.ArgumentParser(description="Fetch intake emails over IMAP.")
     parser.add_argument("--limit", type=int, help="Maximum number of messages to process.")
     parser.add_argument(
@@ -295,10 +302,43 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.output:
         config.output_path = args.output
 
-    count = run_once(config, limit=args.limit)
+    try:
+        count = run_once(config, limit=args.limit)
+    except imaplib.IMAP4.error as error:
+        print(
+            "IMAP login or mailbox operation failed. For Gmail, enable IMAP and use a "
+            "Google app password instead of the normal account password.",
+            file=sys.stderr,
+        )
+        print(f"IMAP error: {error}", file=sys.stderr)
+        return 1
+
     mode = "dry run" if config.dry_run else "commit"
     print(f"Processed {count} email(s) in {mode} mode. Output: {config.output_path}")
     return 0
+
+
+def load_env_files(paths: Sequence[Path] = ENV_PATHS) -> None:
+    for path in paths:
+        if not path.exists():
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            key, value = _parse_env_line(line)
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+
+def _parse_env_line(line: str) -> Tuple[Optional[str], str]:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#") or "=" not in stripped:
+        return None, ""
+
+    key, value = stripped.split("=", 1)
+    key = key.strip()
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        value = value[1:-1]
+    return key, value
 
 
 def _require_env(name: str) -> str:

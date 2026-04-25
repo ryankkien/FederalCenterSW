@@ -4,7 +4,7 @@ The email intake worker fetches unread messages from an IMAP mailbox, parses the
 
 ## Local Run
 
-Create a local env file outside git or export these values in your shell:
+Create `backend/.env` locally or export these values in your shell. The worker loads `.env` and `backend/.env` automatically without overriding already-exported environment variables.
 
 ```env
 EMAIL_INTAKE_HOST=imap.example.com
