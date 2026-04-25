@@ -2,6 +2,13 @@
 
 This project uses Azure Bicep for the shared development infrastructure.
 
+Local development dependencies are mirrored separately with Docker Compose. See
+[local-dev.md](local-dev.md). Keep Bicep as the cloud source of truth and Compose as the
+local test mirror.
+
+The local mirror is validated by `.github/workflows/local-mirror.yml`; Azure resource
+drift is validated separately by `.github/workflows/infra-whatif.yml`.
+
 The desired dev environment is defined in:
 
 - `infra/main.bicep`
@@ -56,6 +63,10 @@ Both workflows use Azure OIDC login. Configure these GitHub repository variables
 The Azure identity needs permission to run resource group deployments in
 `federal-center-sw-dev`. Use least privilege when possible; Contributor at the resource
 group is the simple starting point.
+
+The Azure app registration or managed identity also needs federated credentials that match
+the GitHub workflow subjects. The deploy workflow uses the `azure-dev` GitHub environment,
+so include that environment in the deploy federated credential.
 
 ## Drift Policy
 

@@ -6,6 +6,10 @@ Infrastructure is now defined in Bicep under `infra/`. Use `bun run infra:whatif
 before changing Azure resources and `bun run infra:deploy` to apply intended changes.
 See [infra.md](infra.md) for the Bicep/GitHub Actions workflow and drift policy.
 
+Local PostgreSQL and Blob Storage dependencies are mirrored with Docker Compose for fast
+development only. See [local-dev.md](local-dev.md). Keep Azure resource inventory,
+access, and manual cloud commands in this file.
+
 ## Azure Account
 
 - Tenant display name: `Default Directory`

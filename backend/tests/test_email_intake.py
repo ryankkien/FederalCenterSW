@@ -1,9 +1,11 @@
 import json
+import os
 from email.message import EmailMessage
 
 from app.email_intake import (
     AutoReplyConfig,
     build_auto_reply_message,
+    load_env_files,
     parse_email,
     save_email_intake,
     should_send_auto_reply,
@@ -75,6 +77,39 @@ def test_save_email_intake_writes_jsonl_stub(tmp_path):
     assert saved["message_id"] == "<abc123@example.com>"
     assert saved["subject"] == "Persist me"
     assert saved["body_text"] == "Body"
+
+
+def test_load_env_files_supports_local_overrides_without_replacing_exported_values(
+    tmp_path,
+    monkeypatch,
+):
+    base_env = tmp_path / ".env"
+    local_env = tmp_path / ".env.local"
+    base_env.write_text(
+        "DATABASE_URL=postgresql://cloud.example/federal_center_sw\n"
+        "AZURE_STORAGE_CONTAINER=app-assets\n",
+        encoding="utf-8",
+    )
+    local_env.write_text(
+        "DATABASE_URL=postgresql://localhost/federal_center_sw\n"
+        "AZURE_STORAGE_ACCOUNT=devstoreaccount1\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("AZURE_STORAGE_CONTAINER", raising=False)
+    monkeypatch.delenv("AZURE_STORAGE_ACCOUNT", raising=False)
+
+    load_env_files((base_env, local_env))
+
+    assert os.environ["DATABASE_URL"] == "postgresql://localhost/federal_center_sw"
+    assert os.environ["AZURE_STORAGE_CONTAINER"] == "app-assets"
+    assert os.environ["AZURE_STORAGE_ACCOUNT"] == "devstoreaccount1"
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql://exported/federal_center_sw")
+
+    load_env_files((base_env, local_env))
+
+    assert os.environ["DATABASE_URL"] == "postgresql://exported/federal_center_sw"
 
 
 def test_auto_reply_message_targets_reply_to_and_threads_to_original_message():

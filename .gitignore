@@ -17,6 +17,7 @@ backend/.env
 backend/.env.*
 !.env.example
 !backend/.env.example
+!backend/.env.local.example
 .azure-local/
 backend/data/
 

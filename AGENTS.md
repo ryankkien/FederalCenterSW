@@ -7,6 +7,7 @@ Federal Center SW is a small full-stack workspace with:
 - A React + TypeScript + Vite frontend in `frontend/`.
 - A Python FastAPI backend in `backend/`.
 - Azure infrastructure defined with Bicep in `infra/`.
+- Local development services defined with Docker Compose in `compose.yaml`.
 - Shared developer commands in the root `package.json`.
 - Operational notes in `docs/`.
 
@@ -61,12 +62,34 @@ logic in separate modules under `backend/app/` and cover it with pytest tests.
 - Function App app settings currently contain secrets and are not fully managed by Bicep.
   Move secrets to Key Vault before making app settings fully declarative.
 
+### Local Development Mirror
+
+- Local service dependencies live in `compose.yaml`.
+- `bun run local:up` starts local PostgreSQL and Azurite and creates the local
+  `app-assets` Blob container.
+- `backend/.env.local.example` is the local-only env template.
+- `backend/.env.local` is ignored and should contain local-only values.
+- Keep local and cloud mirrored by env variable names, database name, database user,
+  and Blob container name. Hosts, passwords, storage accounts, and credentials can differ.
+- Local Compose is not a replacement for Bicep. Use it for fast app testing; use
+  `bun run infra:whatif` for Azure drift.
+- The local mirror CI workflow is `.github/workflows/local-mirror.yml`.
+
 ### Docs And Config
 
 - Use `README.md` for project setup, common commands, and high-level orientation.
 - Use `docs/` for longer operational notes, cloud details, and workflow-specific docs.
 - Keep backend environment examples in `backend/.env.example`.
 - Do not commit local secrets or generated local data files.
+
+### Change Completion
+
+- Keep documentation current with every feature or workflow change. Update `AGENTS.md`,
+  `README.md`, and the relevant `docs/` page before considering the work done.
+- Keep `docs/cloud.md` current for Azure inventory, access, and manual cloud commands.
+  Keep `docs/infra.md` current for Bicep, GitHub Actions, and drift policy.
+- When a commit is requested, review the diff, run the relevant checks, and commit the
+  intended work after documentation is updated.
 
 ## Commands
 
@@ -87,6 +110,14 @@ Run both dev servers:
 
 ```sh
 bun run dev
+```
+
+Start or stop local dependencies:
+
+```sh
+bun run local:up
+bun run local:down
+bun run local:reset
 ```
 
 Run one side only:
@@ -151,6 +182,8 @@ bun run infra:deploy
 - New Azure resources: `infra/main.bicep` and environment parameters in
   `infra/dev.bicepparam`.
 - New cloud workflow notes: `docs/infra.md`.
+- New local dependency services: `compose.yaml`, with setup behavior in `scripts/local-*.sh`.
+- New local environment examples: `backend/.env.local.example`.
 - New backend tests: `backend/tests/test_<feature>.py`.
 - New frontend tests: `frontend/src/<feature>.test.tsx` or beside the component.
 - New operational documentation: `docs/`.
@@ -165,4 +198,5 @@ bun run infra:deploy
   because local function storage is ephemeral.
 - Cloud setup and Azure resource notes belong in `docs/cloud.md`.
 - Infrastructure workflow and drift policy belong in `docs/infra.md`.
+- Local development mirror instructions belong in `docs/local-dev.md`.
 - Email intake configuration and operating notes belong in `docs/email-intake.md`.

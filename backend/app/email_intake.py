@@ -27,7 +27,9 @@ from urllib.request import Request, urlopen
 DEFAULT_OUTPUT_PATH = Path(__file__).resolve().parents[1] / "data" / "email_intake.jsonl"
 ENV_PATHS = (
     Path(__file__).resolve().parents[2] / ".env",
+    Path(__file__).resolve().parents[2] / ".env.local",
     Path(__file__).resolve().parents[1] / ".env",
+    Path(__file__).resolve().parents[1] / ".env.local",
 )
 
 
@@ -449,12 +451,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 
 def load_env_files(paths: Sequence[Path] = ENV_PATHS) -> None:
+    exported_keys = set(os.environ)
     for path in paths:
         if not path.exists():
             continue
         for line in path.read_text(encoding="utf-8").splitlines():
             key, value = _parse_env_line(line)
-            if key and key not in os.environ:
+            if key and key not in exported_keys:
                 os.environ[key] = value
 
 

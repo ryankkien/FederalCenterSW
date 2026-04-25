@@ -18,6 +18,10 @@ Starter framework with a TypeScript frontend and Python backend.
 │   ├── pyproject.toml
 │   ├── requirements-dev.txt
 │   └── requirements.txt
+├── docs/
+├── infra/
+├── scripts/
+├── compose.yaml
 ├── frontend/
 │   ├── src/
 │   ├── package.json
@@ -42,6 +46,12 @@ python3 -m venv .venv
 
 ## Development
 
+Start local backing services:
+
+```sh
+bun run local:up
+```
+
 Run the backend API:
 
 ```sh
@@ -61,6 +71,8 @@ bun run dev
 ```
 
 The frontend runs on `http://localhost:5173` and proxies `/api/*` requests to the backend on `http://127.0.0.1:8000`.
+
+See [docs/local-dev.md](docs/local-dev.md) for the Docker-based local mirror of PostgreSQL and Blob Storage.
 
 ## Checks
 
@@ -101,3 +113,5 @@ Use `--commit` only after dry-run output looks correct; commit mode moves proces
 ## Cloud
 
 Azure resource inventory, access steps, PostgreSQL commands, and Blob Storage commands are documented in [docs/cloud.md](docs/cloud.md).
+
+Local development mirrors the cloud-facing PostgreSQL and Blob Storage contract with Docker Compose. Keep Azure inventory and access notes in `docs/cloud.md`, infrastructure workflow notes in `docs/infra.md`, and local mirror instructions in `docs/local-dev.md`.
