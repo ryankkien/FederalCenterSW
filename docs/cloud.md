@@ -187,6 +187,14 @@ az storage blob download \
   --auth-mode login
 ```
 
+The app keeps the container private. The frontend downloads documents by calling the backend SAS endpoint:
+
+```text
+GET /api/documents/{document_id}/sas-url
+```
+
+That endpoint checks the signed-in user's document access and returns a read-only Blob URL that expires in 15 minutes. If Azure Blob Storage is not configured locally, the endpoint returns `501` and the frontend falls back to the backend download route.
+
 Example local backend env shape:
 
 ```env
@@ -224,7 +232,9 @@ Current env variables used by the backend:
 | `EMAIL_INTAKE_PROCESSED_MAILBOX` | Mailbox for processed messages. |
 | `EMAIL_INTAKE_FAILED_MAILBOX` | Mailbox for failed messages. |
 | `EMAIL_INTAKE_DRY_RUN` | Keep `true` until moving messages is intended. |
-| `EMAIL_INTAKE_OUTPUT_PATH` | Local JSONL output path for the current stub persistence. |
+| `EMAIL_INTAKE_OUTPUT_PATH` | Local JSONL audit output path. |
+| `EMAIL_INTAKE_DEFAULT_UPLOADER_ID` | Contractor id assigned to emailed attachments until real contractor accounts exist. |
+| `EMAIL_INTAKE_DEFAULT_DOCUMENT_TYPE` | Document type assigned to emailed attachments. |
 
 ## Adding More People
 

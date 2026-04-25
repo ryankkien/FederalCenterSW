@@ -1,4 +1,4 @@
-"""IMAP email intake worker with a stubbed persistence layer."""
+"""IMAP email intake worker."""
 
 from __future__ import annotations
 
@@ -22,6 +22,14 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
+from uuid import NAMESPACE_URL, uuid5
+
+from sqlalchemy.orm import Session
+
+from app.blob_storage import BlobStorage, get_blob_storage
+from app.database import SessionLocal, create_db_schema
+from app.documents import ALLOWED_CONTENT_TYPES, ALLOWED_EXTENSIONS, _clean_filename
+from app.models import DocumentUpload
 
 
 DEFAULT_OUTPUT_PATH = Path(__file__).resolve().parents[1] / "data" / "email_intake.jsonl"
@@ -45,6 +53,8 @@ class EmailIntakeConfig:
     failed_mailbox: str = "Failed"
     dry_run: bool = True
     output_path: Path = DEFAULT_OUTPUT_PATH
+    default_uploader_id: str = "contractor-demo"
+    default_document_type: str = "Email Attachment"
     auto_reply: Optional["AutoReplyConfig"] = None
 
     @classmethod
@@ -68,6 +78,8 @@ class EmailIntakeConfig:
             failed_mailbox=os.getenv("EMAIL_INTAKE_FAILED_MAILBOX", "Failed"),
             dry_run=_env_bool("EMAIL_INTAKE_DRY_RUN", default=True),
             output_path=Path(os.getenv("EMAIL_INTAKE_OUTPUT_PATH", str(DEFAULT_OUTPUT_PATH))),
+            default_uploader_id=os.getenv("EMAIL_INTAKE_DEFAULT_UPLOADER_ID", "contractor-demo"),
+            default_document_type=os.getenv("EMAIL_INTAKE_DEFAULT_DOCUMENT_TYPE", "Email Attachment"),
             auto_reply=AutoReplyConfig.from_env(),
         )
 
@@ -127,6 +139,13 @@ class AttachmentInfo:
 
 
 @dataclass
+class AttachmentPayload:
+    filename: str
+    content_type: str
+    data: bytes
+
+
+@dataclass
 class EmailIntakeRecord:
     message_id: str
     source_uid: Optional[str]
@@ -167,12 +186,7 @@ def parse_email(raw_message: bytes, source_uid: Optional[str] = None) -> EmailIn
 
 
 def save_email_intake(record: EmailIntakeRecord, output_path: Path) -> None:
-    """Stub persistence layer.
-
-    Replace this function with a database insert once the intake schema is settled.
-    For now it writes JSON to Azure Blob Storage when configured, otherwise
-    newline-delimited JSON locally so the worker can be tested end to end.
-    """
+    """Write a JSON audit record to Blob Storage when configured, otherwise local JSONL."""
 
     if _env_bool("EMAIL_INTAKE_STUB_BLOB_ENABLED", default=False):
         save_email_intake_blob(record)
@@ -303,6 +317,60 @@ def _storage_authorization_header(
     return f"SharedKey {account_name}:{signature}"
 
 
+def save_email_documents(
+    record: EmailIntakeRecord,
+    raw_message: bytes,
+    config: EmailIntakeConfig,
+    db: Optional[Session] = None,
+    storage: Optional[BlobStorage] = None,
+) -> int:
+    """Store supported email attachments in the same document table used by the portal."""
+    owns_db = db is None
+    if db is None:
+        create_db_schema()
+        db = SessionLocal()
+    if storage is None:
+        storage = get_blob_storage()
+
+    saved_count = 0
+    try:
+        for index, attachment in enumerate(_extract_attachment_payloads(raw_message), start=1):
+            if not _is_supported_attachment(attachment):
+                continue
+
+            document_id = _email_document_id(record, index, attachment)
+            if db.get(DocumentUpload, document_id) is not None:
+                continue
+
+            blob_path = f"documents/{config.default_uploader_id}/{document_id}/{attachment.filename}"
+            storage.upload_bytes(blob_path, attachment.data, attachment.content_type)
+            db.add(
+                DocumentUpload(
+                    id=document_id,
+                    title=_document_title(record, attachment),
+                    document_type=config.default_document_type,
+                    notes=_document_notes(record),
+                    original_filename=attachment.filename,
+                    content_type=attachment.content_type,
+                    size_bytes=len(attachment.data),
+                    blob_path=blob_path,
+                    uploader_id=config.default_uploader_id,
+                    uploader_role="contractor",
+                    created_at=_record_datetime(record) or datetime.now(timezone.utc),
+                )
+            )
+            saved_count += 1
+
+        db.commit()
+        return saved_count
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        if owns_db:
+            db.close()
+
+
 def run_once(config: EmailIntakeConfig, limit: Optional[int] = None) -> int:
     processed_count = 0
 
@@ -317,6 +385,8 @@ def run_once(config: EmailIntakeConfig, limit: Optional[int] = None) -> int:
                 raw_message = _fetch_message(client, uid)
                 record = parse_email(raw_message, source_uid=uid_text)
                 save_email_intake(record, config.output_path)
+                if not config.dry_run:
+                    save_email_documents(record, raw_message, config)
                 if not config.dry_run and config.auto_reply:
                     send_auto_reply(record, config.auto_reply)
 
@@ -606,9 +676,67 @@ def _extract_attachments(message: Message) -> List[AttachmentInfo]:
     return attachments
 
 
+def _extract_attachment_payloads(raw_message: bytes) -> List[AttachmentPayload]:
+    message = BytesParser(policy=policy.default).parsebytes(raw_message)
+    attachments: List[AttachmentPayload] = []
+
+    for index, part in enumerate(message.walk() if message.is_multipart() else [message], start=1):
+        if not _is_attachment(part):
+            continue
+        payload = part.get_payload(decode=True) or b""
+        filename = _clean_filename(part.get_filename() or f"attachment-{index}")
+        attachments.append(
+            AttachmentPayload(
+                filename=filename,
+                content_type=part.get_content_type(),
+                data=payload,
+            )
+        )
+
+    return attachments
+
+
 def _is_attachment(part: Message) -> bool:
     disposition = part.get_content_disposition()
     return disposition == "attachment" or bool(part.get_filename())
+
+
+def _is_supported_attachment(attachment: AttachmentPayload) -> bool:
+    extension = "." + attachment.filename.rsplit(".", 1)[-1].lower() if "." in attachment.filename else ""
+    return extension in ALLOWED_EXTENSIONS and attachment.content_type in ALLOWED_CONTENT_TYPES
+
+
+def _email_document_id(record: EmailIntakeRecord, index: int, attachment: AttachmentPayload) -> str:
+    digest = hashlib.sha256(attachment.data).hexdigest()
+    return str(uuid5(NAMESPACE_URL, f"{record.message_id}:{index}:{attachment.filename}:{digest}"))
+
+
+def _document_title(record: EmailIntakeRecord, attachment: AttachmentPayload) -> str:
+    subject = record.subject.strip() or "Email attachment"
+    title = f"{subject} - {attachment.filename}"
+    return title[:200]
+
+
+def _document_notes(record: EmailIntakeRecord) -> str:
+    senders = ", ".join(address.address for address in record.from_addresses) or "unknown sender"
+    parts = [
+        f"Submitted by email from {senders}.",
+        f"Message ID: {record.message_id}.",
+    ]
+    if record.source_uid:
+        parts.append(f"Source UID: {record.source_uid}.")
+    if record.received_at:
+        parts.append(f"Received: {record.received_at}.")
+    return " ".join(parts)
+
+
+def _record_datetime(record: EmailIntakeRecord) -> Optional[datetime]:
+    if not record.received_at:
+        return None
+    try:
+        return datetime.fromisoformat(record.received_at)
+    except ValueError:
+        return None
 
 
 def _record_to_json(record: EmailIntakeRecord) -> Dict[str, object]:

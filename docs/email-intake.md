@@ -1,6 +1,6 @@
 # Email Intake
 
-The email intake worker fetches unread messages from an IMAP mailbox and parses them into a normalized record. The database insert is intentionally stubbed in `backend/app/email_intake.py` until the final intake schema is chosen. Locally, the stub can write newline-delimited JSON; in Azure Functions, it writes durable JSON records to Blob Storage.
+The email intake worker fetches unread messages from an IMAP mailbox and parses them into a normalized audit record. Locally, the audit record can be written as newline-delimited JSON; in Azure Functions, it can write durable JSON records to Blob Storage. In commit mode, supported attachments are also uploaded through the backend blob storage adapter and inserted into the same document table used by the contractor and official portals.
 
 ## Local Run
 
@@ -15,6 +15,8 @@ EMAIL_INTAKE_MAILBOX=INBOX
 EMAIL_INTAKE_SEARCH=UNSEEN
 EMAIL_INTAKE_OUTPUT_PATH=backend/data/email_intake.jsonl
 EMAIL_INTAKE_DRY_RUN=true
+EMAIL_INTAKE_DEFAULT_UPLOADER_ID=contractor-demo
+EMAIL_INTAKE_DEFAULT_DOCUMENT_TYPE=Email Attachment
 EMAIL_INTAKE_AUTO_REPLY_ENABLED=false
 ```
 
@@ -30,7 +32,9 @@ Dry-run mode writes parsed JSON but does not move email out of the inbox. Once t
 bun run email:intake -- --limit 5 --commit
 ```
 
-Commit mode writes the JSON record and then moves the email to the `Processed` mailbox. If a processing error occurs, it moves the email to `Failed`.
+Commit mode writes the JSON audit record, stores supported attachments as portal documents, and then moves the email to the `Processed` mailbox. If a processing error occurs, it moves the email to `Failed`.
+
+Until real contractor accounts are added, emailed attachments are assigned to `EMAIL_INTAKE_DEFAULT_UPLOADER_ID`, which defaults to the mock contractor `contractor-demo`. That means they appear on the mock contractor page and on the official review page. Unsupported attachment types are skipped; the accepted types match the web upload form: PDF, DOC, DOCX, TXT, CSV, XLSX, PNG, JPG, and JPEG.
 
 ## Auto Reply
 
@@ -52,16 +56,14 @@ If `EMAIL_INTAKE_SMTP_USERNAME` or `EMAIL_INTAKE_SMTP_PASSWORD` are omitted, the
 
 The worker sends auto-replies only in commit mode. It skips obvious automated, list, bulk, postmaster, mailer-daemon, and no-reply messages to reduce mail loops.
 
-## Stubbed Persistence
+## JSONL Audit Record
 
-The replacement point for the database is:
+The JSONL audit writer is:
 
 ```python
 def save_email_intake(record: EmailIntakeRecord, output_path: Path) -> None:
     ...
 ```
-
-For now, each record includes:
 
 - `message_id`
 - `source_uid`
@@ -78,7 +80,7 @@ For now, each record includes:
 - `headers`
 - `raw_sha256`
 
-Use `message_id` as the primary deduplication key when the database write is added. If a message has no `Message-ID` header, the worker uses a SHA-256 hash of the raw message.
+If a message has no `Message-ID` header, the worker uses a SHA-256 hash of the raw message. Attachment document rows use a deterministic id derived from message id, attachment index, filename, and attachment bytes. Rerunning the same email does not create duplicate portal documents.
 
 ## Azure Function Timer
 

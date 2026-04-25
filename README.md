@@ -106,9 +106,15 @@ bun run infra:deploy
 
 See [docs/infra.md](docs/infra.md) for the Bicep/GitHub Actions workflow and drift policy.
 
+## Mock Auth And Document Ingest
+
+The app starts with a mock role login. Choose `Contractor` to upload documents, or `Government official` to review contractor uploads. Uploaded files are stored through the backend blob storage adapter and document metadata is stored in the backend database.
+
+For local development without Azure env values, the backend falls back to ignored local storage under `backend/data/`. For Azure-backed runs, fill in `DATABASE_URL`, `AUTH_SECRET_KEY`, and the `AZURE_STORAGE_*` variables in `backend/.env`.
+
 ## Email Intake
 
-The backend includes a stubbed IMAP intake worker that parses unread mailbox messages into JSONL records. It can also send an optional receipt auto-reply in commit mode. Configure it with `EMAIL_INTAKE_*` environment variables, then run:
+The backend includes an IMAP intake worker that parses unread mailbox messages into JSONL audit records. In commit mode, supported attachments are uploaded to the same document storage used by the portal and become visible to the mock contractor and official review pages. It can also send an optional receipt auto-reply. Configure it with `EMAIL_INTAKE_*` environment variables, then run:
 
 ```sh
 bun run email:intake -- --limit 5
