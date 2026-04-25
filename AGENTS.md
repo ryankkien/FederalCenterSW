@@ -16,6 +16,25 @@ Vite proxies those requests to `http://127.0.0.1:8000`.
 
 Product/domain direction lives in `docs/product.md`. Read it before designing data
 models, intake workflows, contract UI, dashboards, or LLM/OCR processing behavior.
+Treat `docs/product.md` as future-build planning guidance, not as a description of
+features that already exist.
+
+## Future Product Build Direction
+
+The intended product is a contract performance visibility system for CO, COR, and PM
+users. Future work should build toward:
+
+1. Contract record foundation with one structured JSON-style record per contract,
+   role-aware Entra ID/RBAC access, security-level visibility, contract metadata,
+   OCR-ed contract text, report references, and official government category codes.
+2. Report intake through email, automated contract matching, manual portal upload, and
+   scanned report upload by authorized contractor or federal users.
+3. Document processing through OCR, named entity recognition, and LLM-assisted review.
+4. Contract-level UI showing contract records, ingested reports, processing outputs,
+   and extracted performance signals.
+5. Cross-contract aggregation with dashboards and reports for lessons learned,
+   category-level comparisons, risks, delays, staffing issues, deliverables, costs,
+   timeliness, inconsistencies, successes, and benchmarking.
 
 ## Architecture
 
