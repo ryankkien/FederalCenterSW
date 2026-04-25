@@ -1,0 +1,218 @@
+# Cloud Setup
+
+This document records the shared Azure setup for the project. It intentionally excludes secrets, passwords, access keys, and connection strings.
+
+## Azure Account
+
+- Tenant display name: `Default Directory`
+- Tenant domain: `rkien29gmail.onmicrosoft.com`
+- Subscription name: `Azure subscription 1`
+- Subscription ID: `99596387-8247-4e94-9917-cf8bc695f106`
+- Resource group: `federal-center-sw-dev`
+- Resource group region: `eastus`
+
+Everything for this project should live in the single resource group `federal-center-sw-dev`.
+
+## Resources
+
+| Purpose | Azure resource | Region | Notes |
+| --- | --- | --- | --- |
+| PostgreSQL database | `federal-center-sw-dev-pg-jal50w` | `centralus` | Azure Database for PostgreSQL Flexible Server. East US was restricted for this subscription, so the DB is in Central US while staying in the same resource group. |
+| App database | `federal_center_sw` | `centralus` | Database inside the PostgreSQL server. |
+| Blob storage account | `fcswdevcwm2xrlu` | `eastus` | Standard LRS StorageV2 account. |
+| Blob container | `app-assets` | `eastus` | Private container for app files/assets. |
+
+## Portal Links
+
+- Azure Portal: <https://portal.azure.com>
+- Resource groups: <https://portal.azure.com/#browse/resourcegroups>
+- Project resource group: <https://portal.azure.com/#@/resource/subscriptions/99596387-8247-4e94-9917-cf8bc695f106/resourceGroups/federal-center-sw-dev/overview>
+- PostgreSQL server: <https://portal.azure.com/#@/resource/subscriptions/99596387-8247-4e94-9917-cf8bc695f106/resourceGroups/federal-center-sw-dev/providers/Microsoft.DBforPostgreSQL/flexibleServers/federal-center-sw-dev-pg-jal50w/overview>
+- Storage account: <https://portal.azure.com/#@/resource/subscriptions/99596387-8247-4e94-9917-cf8bc695f106/resourceGroups/federal-center-sw-dev/providers/Microsoft.Storage/storageAccounts/fcswdevcwm2xrlu/overview>
+
+## User Access
+
+The following users were invited into the tenant as guests and assigned `Owner` on the `federal-center-sw-dev` resource group:
+
+- `nringdahl27@gmail.com`
+- `molly.CU@gmail.com`
+- `edhadly@gmail.com`
+- `jonathanmhtran@gmail.com`
+- `rkien29@gmail.com`
+
+To access the resources:
+
+1. Accept the Microsoft/Azure guest invitation email.
+2. Open <https://portal.azure.com>.
+3. Switch directory to `Default Directory` / `rkien29gmail.onmicrosoft.com` from the account menu if the resources are not visible.
+4. Search for `Resource groups`.
+5. Open `federal-center-sw-dev`.
+
+If access does not appear immediately, sign out and back in, then verify the directory selector in the Azure Portal.
+
+## Azure CLI
+
+Install Azure CLI on macOS:
+
+```sh
+brew install azure-cli
+```
+
+Login:
+
+```sh
+az login
+az account set --subscription "99596387-8247-4e94-9917-cf8bc695f106"
+```
+
+Confirm account and resource group:
+
+```sh
+az account show --output table
+az group show --name federal-center-sw-dev --output table
+az resource list --resource-group federal-center-sw-dev --output table
+```
+
+## PostgreSQL
+
+Show the PostgreSQL server:
+
+```sh
+az postgres flexible-server show \
+  --resource-group federal-center-sw-dev \
+  --name federal-center-sw-dev-pg-jal50w \
+  --output table
+```
+
+List databases:
+
+```sh
+az postgres flexible-server db list \
+  --resource-group federal-center-sw-dev \
+  --server-name federal-center-sw-dev-pg-jal50w \
+  --output table
+```
+
+Create another database:
+
+```sh
+az postgres flexible-server db create \
+  --resource-group federal-center-sw-dev \
+  --server-name federal-center-sw-dev-pg-jal50w \
+  --database-name <database-name>
+```
+
+Add your current public IP to the PostgreSQL firewall:
+
+```sh
+MY_IP=$(curl -sS https://api.ipify.org)
+
+az postgres flexible-server firewall-rule create \
+  --resource-group federal-center-sw-dev \
+  --name federal-center-sw-dev-pg-jal50w \
+  --rule-name "dev-$USER" \
+  --start-ip-address "$MY_IP" \
+  --end-ip-address "$MY_IP"
+```
+
+Connection strings and passwords should live in local `.env` files or Azure app settings, not in git.
+
+Example local backend env shape:
+
+```env
+DATABASE_URL=postgresql+psycopg://<user>:<password>@federal-center-sw-dev-pg-jal50w.postgres.database.azure.com:5432/federal_center_sw?sslmode=require
+```
+
+## Blob Storage
+
+Show the storage account:
+
+```sh
+az storage account show \
+  --resource-group federal-center-sw-dev \
+  --name fcswdevcwm2xrlu \
+  --output table
+```
+
+List containers:
+
+```sh
+az storage container list \
+  --account-name fcswdevcwm2xrlu \
+  --auth-mode login \
+  --output table
+```
+
+Upload a file to the private `app-assets` container:
+
+```sh
+az storage blob upload \
+  --account-name fcswdevcwm2xrlu \
+  --container-name app-assets \
+  --name path/in/blob/example.txt \
+  --file ./example.txt \
+  --auth-mode login
+```
+
+List blobs:
+
+```sh
+az storage blob list \
+  --account-name fcswdevcwm2xrlu \
+  --container-name app-assets \
+  --auth-mode login \
+  --output table
+```
+
+Download a blob:
+
+```sh
+az storage blob download \
+  --account-name fcswdevcwm2xrlu \
+  --container-name app-assets \
+  --name path/in/blob/example.txt \
+  --file ./example.txt \
+  --auth-mode login
+```
+
+Example local backend env shape:
+
+```env
+AZURE_STORAGE_ACCOUNT=fcswdevcwm2xrlu
+AZURE_STORAGE_CONTAINER=app-assets
+AZURE_STORAGE_CONNECTION_STRING=<connection-string>
+```
+
+Prefer managed identity or Azure app settings for deployed apps. Avoid committing storage keys or connection strings.
+
+## Adding More People
+
+Invite a guest user in Microsoft Entra ID, then assign access at the resource-group scope:
+
+```sh
+SCOPE="/subscriptions/99596387-8247-4e94-9917-cf8bc695f106/resourceGroups/federal-center-sw-dev"
+
+az role assignment create \
+  --assignee "person@example.com" \
+  --role "Contributor" \
+  --scope "$SCOPE"
+```
+
+Use `Reader` for view-only access, `Contributor` for normal development access, and `Owner` only for people who should manage permissions too.
+
+## Cost And Cleanup
+
+Current resources are low-cost/free-account-oriented, but still monitor spend in Azure Cost Management.
+
+Useful links:
+
+- Cost Management: <https://portal.azure.com/#view/Microsoft_Azure_CostManagement/Menu/~/overview>
+- Azure free services: <https://azure.microsoft.com/free>
+
+Delete the full project cloud environment only when the team no longer needs it:
+
+```sh
+az group delete --name federal-center-sw-dev
+```
+
+That command deletes the PostgreSQL server, database, storage account, blobs, permissions at that scope, and every other resource in the project resource group.

@@ -69,3 +69,7 @@ bun run build
 bun run lint
 bun run test
 ```
+
+## Cloud
+
+Azure resource inventory, access steps, PostgreSQL commands, and Blob Storage commands are documented in [docs/cloud.md](docs/cloud.md).
