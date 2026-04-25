@@ -3,6 +3,9 @@
 Federal Center SW is being built as a contract performance visibility system for
 government acquisition users.
 
+This document is a future-build product brief. It records capabilities to design and
+build over time; it should not be read as a statement that these features already exist.
+
 ## Users And Access
 
 Primary users:
@@ -72,6 +75,21 @@ The review pipeline should extract and classify:
 - Comparisons and benchmarking.
 
 Extracted information must be sorted into the relevant contract category.
+
+## Future Build Targets
+
+Build these capabilities in this general order unless a later implementation plan says
+otherwise:
+
+1. Contract record foundation: store one structured JSON-style record per contract with
+   role-aware visibility.
+2. Report intake: support email intake, automated contract matching, manual portal upload,
+   and scanned report uploads.
+3. Document processing: run OCR, named entity recognition, and LLM-assisted review.
+4. Contract UI: display the contract record, ingested reports, processing outputs, and
+   extracted performance signals by contract.
+5. Cross-contract insights: aggregate signals across contracts and categories into
+   dashboards and reports.
 
 ## Deliverables
 
