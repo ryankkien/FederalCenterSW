@@ -74,6 +74,12 @@ The frontend runs on `http://localhost:5173` and proxies `/api/*` requests to th
 
 See [docs/local-dev.md](docs/local-dev.md) for the Docker-based local mirror of PostgreSQL and Blob Storage.
 
+## Product Direction
+
+The product direction is documented in [docs/product.md](docs/product.md). It covers the
+target CO/COR/PM users, Entra ID/RBAC access model, contract records, report intake
+sources, document processing pipeline, and first dashboard deliverables.
+
 ## Checks
 
 ```sh

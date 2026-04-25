@@ -14,6 +14,9 @@ Federal Center SW is a small full-stack workspace with:
 The frontend talks to the backend through `/api/*` routes. During local development,
 Vite proxies those requests to `http://127.0.0.1:8000`.
 
+Product/domain direction lives in `docs/product.md`. Read it before designing data
+models, intake workflows, contract UI, dashboards, or LLM/OCR processing behavior.
+
 ## Architecture
 
 ### Frontend
@@ -79,6 +82,7 @@ logic in separate modules under `backend/app/` and cover it with pytest tests.
 
 - Use `README.md` for project setup, common commands, and high-level orientation.
 - Use `docs/` for longer operational notes, cloud details, and workflow-specific docs.
+- Keep product and domain requirements in `docs/product.md`.
 - Keep backend environment examples in `backend/.env.example`.
 - Do not commit local secrets or generated local data files.
 
@@ -184,6 +188,7 @@ bun run infra:deploy
 - New cloud workflow notes: `docs/infra.md`.
 - New local dependency services: `compose.yaml`, with setup behavior in `scripts/local-*.sh`.
 - New local environment examples: `backend/.env.local.example`.
+- New product/domain notes: `docs/product.md`.
 - New backend tests: `backend/tests/test_<feature>.py`.
 - New frontend tests: `frontend/src/<feature>.test.tsx` or beside the component.
 - New operational documentation: `docs/`.
@@ -200,3 +205,5 @@ bun run infra:deploy
 - Infrastructure workflow and drift policy belong in `docs/infra.md`.
 - Local development mirror instructions belong in `docs/local-dev.md`.
 - Email intake configuration and operating notes belong in `docs/email-intake.md`.
+- Product direction, users, contract records, intake sources, processing signals, and
+  deliverables belong in `docs/product.md`.
