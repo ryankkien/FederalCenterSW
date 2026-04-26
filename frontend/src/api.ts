@@ -155,12 +155,15 @@ export async function postGenerateInsights(): Promise<{ queued: number }> {
 export async function getContractAnalysisLog(contractId: string): Promise<Array<{
   id: string;
   status: string;
+  run_type?: string;
   created_at: string;
   completed_at?: string;
   analyzed_doc_count: number;
   summary?: string;
   prior_run_id?: string;
   changes?: Array<{ axis: string; change_type: string; description: string }>;
+  investigated_contract_ids?: string[];
+  insight_hypothesis_id?: string;
 }>> {
   return request(`/api/contracts/${encodeURIComponent(contractId)}/analysis-log`);
 }

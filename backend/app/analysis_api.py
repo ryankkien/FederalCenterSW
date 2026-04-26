@@ -2711,12 +2711,15 @@ def _document_semantic_link_response(
 class AnalysisLogEntryResponse(BaseModel):
     id: str
     status: str
+    run_type: Optional[str] = None
     created_at: Optional[datetime]
     completed_at: Optional[datetime]
     analyzed_doc_count: int
     summary: Optional[str] = None
     prior_run_id: Optional[str] = None
     changes: Optional[List[Dict[str, Any]]] = None
+    investigated_contract_ids: Optional[List[str]] = None
+    insight_hypothesis_id: Optional[str] = None
 
 
 @router.get(
@@ -2739,16 +2742,26 @@ def get_contract_analysis_log(
                 result = _json.loads(result)
             except Exception:
                 result = {}
+        result_dict = result if isinstance(result, dict) else {}
+        summary = result_dict.get("summary")
+        if not summary and isinstance(result_dict.get("submitted"), dict):
+            submitted = result_dict["submitted"]
+            title = submitted.get("title") or ""
+            narrative = submitted.get("narrative") or ""
+            summary = (f"{title}\n\n{narrative}" if title and narrative else (title or narrative)).strip() or None
         entries.append(
             AnalysisLogEntryResponse(
                 id=run["id"],
                 status=run.get("status", "unknown"),
+                run_type=run.get("run_type"),
                 created_at=run.get("created_at"),
                 completed_at=run.get("completed_at"),
                 analyzed_doc_count=len(run.get("analyzed_doc_ids") or []),
-                summary=result.get("summary") if isinstance(result, dict) else None,
-                prior_run_id=result.get("prior_run_id") if isinstance(result, dict) else None,
-                changes=result.get("changes") if isinstance(result, dict) else None,
+                summary=summary,
+                prior_run_id=result_dict.get("prior_run_id"),
+                changes=result_dict.get("changes"),
+                investigated_contract_ids=result_dict.get("investigated_contract_ids"),
+                insight_hypothesis_id=result_dict.get("insight_hypothesis_id"),
             )
         )
     return entries

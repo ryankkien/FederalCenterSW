@@ -904,6 +904,29 @@ def _openai_json_response(system: str, user: str) -> dict:
     return _parse_json(content)
 
 
+def _openai_tool_call(messages: list[dict], *, tools: list[dict]) -> Any:
+    """Single tool-calling round. Returns the raw OpenAI ChatCompletion response."""
+    api_key = get_openai_api_key()
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY is required for the cross-contract agent")
+    try:
+        from openai import OpenAI
+    except ImportError as error:
+        raise RuntimeError("openai package is required for the cross-contract agent") from error
+
+    client = OpenAI(
+        api_key=api_key,
+        timeout=get_ai_request_timeout_seconds(),
+        max_retries=get_ai_max_retries(),
+    )
+    return client.chat.completions.create(
+        model=get_openai_llm_model(),
+        messages=messages,
+        tools=tools,
+        tool_choice="auto",
+    )
+
+
 def _load_primitives_for_docs(
     db: Session, contract_id: str, doc_ids: list[str]
 ) -> dict[str, list[dict]]:
@@ -1017,7 +1040,7 @@ def get_analysis_log(db: Session, contract_id: str, limit: int = 20) -> list[dic
                 """
                 SELECT * FROM analysis_runs
                 WHERE target_contract_id = :cid
-                  AND run_type = 'per_contract'
+                  AND run_type IN ('per_contract', 'cross_contract')
                 ORDER BY created_at DESC
                 LIMIT :limit
                 """

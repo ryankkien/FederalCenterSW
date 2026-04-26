@@ -89,7 +89,7 @@ These tables store structured records extracted from documents by the `feature_e
 - `contract_primitives_issues`: issues and risks — category, severity, responsible party, open/resolved dates.
 - `contract_primitives_personnel`: key persons, labor categories, FTE planned vs. actual, staffing gaps.
 - `cpars_ratings`: per-factor adjectival CPARS ratings ingested from CPARS documents.
-- `analysis_runs`: append-only log of per-contract and cohort analyses. Key columns: `run_type` (per_contract|cohort), `target_contract_id`, `status`, `result` (JSON), `analyzed_doc_ids` (JSON array of `document_upload.id` values included in each run — enables incremental analysis and analysis history log).
+- `analysis_runs`: append-only log of per-contract, cohort, and cross-contract analyses. Key columns: `run_type` (`per_contract` | `cohort` | `cross_contract`), `target_contract_id`, `status`, `result` (JSON), `analyzed_doc_ids` (JSON array of `document_upload.id` values for `per_contract` runs), `cohort_contract_ids` (JSON list of contracts the cross-contract agent investigated). `cross_contract` rows are produced by the cross-contract agent (`backend/app/cross_contract_agent.py`); the agent persists its actual insight as a `ContractHypothesis` row keyed off `(contract_id, hypothesis_key)` so the portfolio themes endpoint surfaces it.
 
 ### Feature Extractor Service (`feature_extractor/`)
 

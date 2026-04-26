@@ -2452,7 +2452,7 @@ function ContractInsightsTab({ contract: c, findings, analysisLog = [], lifecycl
       {/* Analysis history log */}
       <SectionHeader
         title="Analysis history"
-        subtitle={`${analysisLog.length} analysis run${analysisLog.length !== 1 ? 's' : ''} · incremental updates appended each time new documents are analyzed`}
+        subtitle={`${analysisLog.length} analysis run${analysisLog.length !== 1 ? 's' : ''} · per-contract incremental + cross-contract pattern runs`}
       />
       <div style={{ display:'grid', gap:10 }}>
         {analysisLog.length === 0 && (
@@ -2466,16 +2466,30 @@ function ContractInsightsTab({ contract: c, findings, analysisLog = [], lifecycl
             : run.status === 'failed' ? 'var(--flag)'
             : 'var(--warn)';
           const changes = run.changes || [];
+          const isCrossContract = run.run_type === 'cross_contract';
+          const investigatedCount = (run.investigated_contract_ids || []).length;
           return (
             <div key={run.id} style={{
-              background:'var(--surface)', border:'1px solid var(--border)',
+              background:'var(--surface)',
+              border:'1px solid var(--border)',
+              borderLeft: isCrossContract ? '3px solid var(--accent)' : '1px solid var(--border)',
               borderRadius:3, padding:'16px 20px',
             }}>
-              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
-                <div style={{ fontSize:11, fontFamily:'var(--mono)', color:'var(--ink-mute)' }}>
-                  {run.completed_at
-                    ? new Date(run.completed_at).toLocaleString('en-US', { dateStyle:'medium', timeStyle:'short' })
-                    : 'In progress…'}
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6, gap:10 }}>
+                <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                  <div style={{ fontSize:11, fontFamily:'var(--mono)', color:'var(--ink-mute)' }}>
+                    {run.completed_at
+                      ? new Date(run.completed_at).toLocaleString('en-US', { dateStyle:'medium', timeStyle:'short' })
+                      : 'In progress…'}
+                  </div>
+                  {isCrossContract && (
+                    <span style={{
+                      fontSize:9.5, fontWeight:700, letterSpacing:'0.10em', textTransform:'uppercase',
+                      color:'var(--accent)', background:'var(--surface-alt)',
+                      border:'1px solid var(--border)',
+                      padding:'2px 7px', borderRadius:2, fontFamily:'var(--mono)',
+                    }}>Cross-contract</span>
+                  )}
                 </div>
                 <span style={{
                   fontSize:9.5, fontWeight:700, letterSpacing:'0.10em', textTransform:'uppercase',
@@ -2483,8 +2497,9 @@ function ContractInsightsTab({ contract: c, findings, analysisLog = [], lifecycl
                 }}>{run.status}</span>
               </div>
               <div style={{ fontSize:12, color:'var(--ink-mute)', marginBottom: run.summary ? 8 : 0 }}>
-                {run.analyzed_doc_count} document{run.analyzed_doc_count !== 1 ? 's' : ''} analyzed
-                {run.prior_run_id ? ' · incremental update' : ' · baseline analysis'}
+                {isCrossContract
+                  ? `${investigatedCount} related contract${investigatedCount !== 1 ? 's' : ''} investigated`
+                  : `${run.analyzed_doc_count} document${run.analyzed_doc_count !== 1 ? 's' : ''} analyzed${run.prior_run_id ? ' · incremental update' : ' · baseline analysis'}`}
               </div>
               {run.summary && (
                 <div style={{ fontSize:13, color:'var(--ink)', lineHeight:1.55 }}>{run.summary}</div>

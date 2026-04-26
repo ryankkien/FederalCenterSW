@@ -13,6 +13,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.analysis_orchestrator import run_incremental_contract_analysis
+from app.cross_contract_agent import run_cross_contract_agent
 from app.auth import CurrentUser, get_current_user
 from app.authz import visible_contract_ids
 from app.database import SessionLocal, get_db
@@ -569,16 +570,33 @@ def post_generate_insights(
 ) -> GenerateInsightsResponse:
     visible_ids = visible_contract_ids(user, db)
     contracts_new_docs = _contracts_with_new_docs(db, visible_ids)
+    visible_list = list(visible_ids)
     for cid, doc_ids in contracts_new_docs.items():
-        background_tasks.add_task(_portfolio_analysis_task, cid, doc_ids)
+        background_tasks.add_task(_portfolio_analysis_task, cid, doc_ids, visible_list)
     return GenerateInsightsResponse(queued=len(contracts_new_docs))
 
 
-def _portfolio_analysis_task(contract_id: str, new_doc_ids: List[str]) -> None:
+def _portfolio_analysis_task(
+    contract_id: str,
+    new_doc_ids: List[str],
+    visible_contract_ids_list: List[str],
+) -> None:
     db = SessionLocal()
     try:
-        run_incremental_contract_analysis(db, contract_id, new_doc_ids)
-    except Exception:
-        pass
+        incremental_run = None
+        try:
+            incremental_run = run_incremental_contract_analysis(db, contract_id, new_doc_ids)
+        except Exception:
+            return
+        try:
+            run_cross_contract_agent(
+                db,
+                contract_id,
+                visible_contract_ids=visible_contract_ids_list,
+                triggering_run_id=incremental_run.get("id") if incremental_run else None,
+            )
+        except Exception:
+            # Agent failures must not roll back the per-contract analysis row.
+            pass
     finally:
         db.close()
