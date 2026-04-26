@@ -8,6 +8,14 @@ import {
   IcoArrow, IcoChevron, IcoClose, IcoSearch, IcoUpload, IcoStar,
   fmtBytes, fmtDate, fmtDateMil,
 } from './portal-shell';
+import {
+  getContractAnalysis,
+  listContractDocuments,
+  listDeliverables,
+  listRegressions,
+  normalizeDocument,
+  normalizeFinding,
+} from './api';
 
 // ─── MOCK DATA ────────────────────────────────────────────────────────────────
 const MOCK_CONTRACTS = [
@@ -896,9 +904,33 @@ const DETAIL_TABS = ['Overview', 'Insights', 'Benchmarks', 'Documents'];
 function ContractDetailPage({ contract, onBack, onSelectContract }) {
   const [tab, setTab] = useState('Overview');
   const [docs, setDocs] = useState(() => buildDocs(contract));
+  const [findings, setFindings] = useState(() => FINDINGS[contract.id] || FINDINGS.c1);
+  const [analysis, setAnalysis] = useState(null);
   const [showUpload, setShowUpload] = useState(false);
 
   const c = contract;
+
+  useEffect(() => {
+    setDocs(buildDocs(c));
+    setFindings(FINDINGS[c.id] || FINDINGS.c1);
+    let cancelled = false;
+    listContractDocuments(c.id)
+      .then(rows => {
+        if (!cancelled && rows.length > 0) setDocs(rows.map(row => normalizeDocument(row, c)));
+      })
+      .catch(() => {});
+    listRegressions(c.id)
+      .then(rows => {
+        if (!cancelled && rows.length > 0) setFindings(rows.map(normalizeFinding));
+      })
+      .catch(() => {});
+    getContractAnalysis(c.id)
+      .then(row => {
+        if (!cancelled) setAnalysis(row);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [c.id]);
 
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
@@ -944,8 +976,8 @@ function ContractDetailPage({ contract, onBack, onSelectContract }) {
       {/* Body */}
       <div style={{ flex:1, overflowY:'auto' }}>
         {tab === 'Overview'   && <OverviewTab contract={c} docs={docs} />}
-        {tab === 'Insights'   && <ContractInsightsTab contract={c} onSelectContract={onSelectContract} />}
-        {tab === 'Benchmarks' && <BenchmarksTab contract={c} />}
+        {tab === 'Insights'   && <ContractInsightsTab contract={c} findings={findings} onSelectContract={onSelectContract} />}
+        {tab === 'Benchmarks' && <BenchmarksTab contract={c} analysis={analysis} />}
         {tab === 'Documents'  && <DocumentsTab docs={docs} contract={c} onUpload={() => setShowUpload(true)} />}
       </div>
 
@@ -1345,8 +1377,8 @@ function DocumentsTab({ docs, contract, onUpload }) {
 }
 
 // ─── CONTRACT INSIGHTS TAB — findings → patterns → similar contracts ────────
-function ContractInsightsTab({ contract: c, onSelectContract }) {
-  const findings = FINDINGS[c.id] || FINDINGS.c1; // fall back to demo set
+function ContractInsightsTab({ contract: c, findings: propFindings, onSelectContract }) {
+  const findings = propFindings || FINDINGS[c.id] || FINDINGS.c1;
   const [pinnedSet, setPinnedSet] = useState(() => new Set(loadCustomInsights().map(i => i.id)));
 
   function togglePin(finding) {
@@ -1650,16 +1682,82 @@ function InsightsPage({ onSelectContract }) {
 }
 
 // ─── BENCHMARKS TAB (within contract) ───────────────────────────────────────
-function BenchmarksTab({ contract: c }) {
-  const rows = [
-    { metric:'Cost Performance Index (CPI)', value:'0.96', peer:'0.94', delta:'+0.02', tone:'good' },
-    { metric:'Schedule Performance Index (SPI)', value:'0.91', peer:'0.93', delta:'-0.02', tone:'warn' },
-    { metric:'Weekly Report On-Time Rate', value:'78%', peer:'85%', delta:'-7pp', tone:'flag' },
-    { metric:'Modification Cycle Time (days)', value:'38', peer:'31', delta:'+7', tone:'warn' },
-    { metric:'Invoice → Payment (days)', value:'19', peer:'24', delta:'-5', tone:'good' },
-    { metric:'CPARS Score (most recent)', value:'4.1 / 5', peer:'3.8 / 5', delta:'+0.3', tone:'good' },
-    { metric:'Sub-tier Reporting Compliance', value:'92%', peer:'88%', delta:'+4pp', tone:'good' },
-  ];
+const BENCHMARK_AXIS_META = {
+  cost_performance:    { label: 'Cost Issue Signals',           primaryKey: 'cost_signal_count',            lowerBetter: true },
+  schedule_performance:{ label: 'Schedule Issue Signals',       primaryKey: 'schedule_signal_count',        lowerBetter: true },
+  scope_stability:     { label: 'Scope / Mod Signals',          primaryKey: 'scope_or_mod_signal_count',    lowerBetter: true },
+  execution_and_risk:  { label: 'Execution Risk Signals',       primaryKey: 'issue_signal_count',           lowerBetter: true },
+  quality:             { label: 'Quality Issue Signals',         primaryKey: 'defect_or_rework_signal_count',lowerBetter: true },
+  regulatory_compliance:{ label: 'Compliance Signals',          primaryKey: 'compliance_signal_count',      lowerBetter: true },
+  forecasting_accuracy:{ label: 'EAC Drift (× BAC)',            primaryKey: 'eac_drift',                    lowerBetter: true },
+};
+
+const BENCHMARK_MOCK_ROWS = [
+  { metric:'Cost Performance Index (CPI)',    value:'0.96', peer:'0.94', delta:'+0.02', tone:'good' },
+  { metric:'Schedule Performance Index (SPI)',value:'0.91', peer:'0.93', delta:'-0.02', tone:'warn' },
+  { metric:'Weekly Report On-Time Rate',      value:'78%',  peer:'85%',  delta:'-7pp',  tone:'flag' },
+  { metric:'Modification Cycle Time (days)',  value:'38',   peer:'31',   delta:'+7',    tone:'warn' },
+  { metric:'Invoice → Payment (days)',        value:'19',   peer:'24',   delta:'-5',    tone:'good' },
+  { metric:'CPARS Score (most recent)',       value:'4.1 / 5', peer:'3.8 / 5', delta:'+0.3', tone:'good' },
+  { metric:'Sub-tier Reporting Compliance',  value:'92%',  peer:'88%',  delta:'+4pp',  tone:'good' },
+];
+
+function _benchmarkRows(analysis) {
+  if (!analysis) return null;
+  const rows = [];
+
+  for (const axis of (analysis.axes || [])) {
+    if (axis.status !== 'measured') continue;
+    const meta = BENCHMARK_AXIS_META[axis.axis];
+    if (!meta) continue;
+    const rawValue = axis.target_value?.[meta.primaryKey];
+    if (rawValue === null || rawValue === undefined) continue;
+    const numValue = Number(rawValue);
+    const peerP50 = axis.cohort_distribution?.p50;
+    const percentile = axis.target_percentile;
+
+    let tone;
+    if (percentile !== null && percentile !== undefined) {
+      tone = meta.lowerBetter
+        ? (percentile < 35 ? 'good' : percentile < 75 ? 'warn' : 'flag')
+        : (percentile > 65 ? 'good' : percentile > 25 ? 'warn' : 'flag');
+    } else {
+      tone = 'warn';
+    }
+
+    const peerDisplay = peerP50 !== null && peerP50 !== undefined ? _fmt1(peerP50) : '—';
+    const delta = peerP50 !== null && peerP50 !== undefined ? numValue - peerP50 : null;
+    const deltaDisplay = delta !== null ? (delta >= 0 ? '+' : '') + _fmt1(delta) : '—';
+    const label = meta.label + (axis.low_confidence ? ' †' : '');
+
+    rows.push({ metric: label, value: _fmt1(numValue), peer: peerDisplay, delta: deltaDisplay, tone });
+  }
+
+  for (const cr of (analysis.cpars_ratings || []).slice(0, 2)) {
+    const label = `CPARS ${cr.label}${cr.period_label ? ' · ' + cr.period_label : ''}`;
+    rows.push({ metric: label, value: cr.rating, peer: '—', delta: '—', tone: _cparsRatingTone(cr.rating) });
+  }
+
+  return rows.length > 0 ? rows : null;
+}
+
+function _fmt1(n) {
+  if (!Number.isFinite(n)) return String(n);
+  const rounded = Math.round(n * 10) / 10;
+  return rounded === Math.round(rounded) ? String(Math.round(rounded)) : rounded.toFixed(1);
+}
+
+function _cparsRatingTone(rating) {
+  const r = (rating || '').toLowerCase();
+  if (['exceptional', 'very good'].includes(r)) return 'good';
+  if (r === 'satisfactory') return 'warn';
+  return 'flag';
+}
+
+function BenchmarksTab({ contract: c, analysis }) {
+  const realRows = _benchmarkRows(analysis);
+  const rows = realRows || BENCHMARK_MOCK_ROWS;
+  const isMock = !realRows;
   const toneClr = { good:'var(--good)', warn:'var(--warn)', flag:'var(--flag)' };
 
   return (
@@ -1707,9 +1805,19 @@ function BenchmarksTab({ contract: c }) {
           </tbody>
         </table>
       </div>
+      {isMock && (
+        <div style={{ marginTop:8, fontSize:11, color:'var(--ink-faint)', fontFamily:'var(--mono)' }}>
+          Illustrative benchmarks shown — process documents to generate real comparisons.
+        </div>
+      )}
+      {!isMock && rows.some(r => r.metric.endsWith('†')) && (
+        <div style={{ marginTop:8, fontSize:11, color:'var(--ink-faint)', fontFamily:'var(--mono)' }}>
+          † Low confidence — fewer than 20 peer contracts in cohort.
+        </div>
+      )}
       <div style={{ marginTop:14, fontSize:11, color:'var(--ink-faint)', fontFamily:'var(--mono)', letterSpacing:'0.04em', display:'flex', gap:18 }}>
         <span><span style={{display:'inline-block', width:10, height:6, background:'var(--ink)', verticalAlign:'middle', marginRight:4}}/>Peer median</span>
-        <span>Cohort: 22 contracts · same PSC + component · last 36 months</span>
+        <span>Cohort: same PSC + component · last 36 months</span>
       </div>
     </div>
   );
@@ -2374,6 +2482,34 @@ function KpiMini({ label, value, flag }) {
 }
 
 // ─── CONTRACTOR CONTRACT DETAIL ─────────────────────────────────────────────
+function _normalizeDeliverableGroups(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    const key = `${row.cdrl_item || ''}__${row.deliverable_name || ''}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        id: key,
+        cdrl: row.cdrl_item || '—',
+        title: row.deliverable_name || 'Deliverable',
+        kind: 'recurring',
+        cadence: '—',
+        recipient: '—',
+        items: [],
+      });
+    }
+    const g = groups.get(key);
+    const filed = !!(row.actual_delivery_date || row.status === 'on_time' || row.status === 'late');
+    g.items.push({
+      id: row.id,
+      due: row.planned_due_date ? new Date(row.planned_due_date) : null,
+      filed,
+      late: filed && row.days_late > 0,
+      title: row.period_label || row.planned_due_date || 'Period',
+    });
+  }
+  return [...groups.values()];
+}
+
 // Two columns: contract particulars (left) + deliverables-as-upload-targets (right)
 function ContractorContractPage({ contract, user, onBack }) {
   const c = contract;
@@ -2381,6 +2517,23 @@ function ContractorContractPage({ contract, user, onBack }) {
   const [deliverables, setDeliverables] = useState(() => buildDeliverables(c));
   const [uploadTarget, setUploadTarget] = useState(null);
   const [freeUpload, setFreeUpload] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setDocs(buildDocs(c));
+    setDeliverables(buildDeliverables(c));
+    listContractDocuments(c.id)
+      .then(rows => {
+        if (!cancelled && rows.length > 0) setDocs(rows.map(row => normalizeDocument(row, c)));
+      })
+      .catch(() => {});
+    listDeliverables(c.id)
+      .then(rows => {
+        if (!cancelled && rows.length > 0) setDeliverables(_normalizeDeliverableGroups(rows));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [c.id]);
 
   function handleFiled(groupId, itemId, doc) {
     setDeliverables(ds => ds.map(g => g.id === groupId

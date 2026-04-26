@@ -93,6 +93,7 @@ class RegressionFindingResponse(BaseModel):
     id: str
     contract_id: str
     document_id: Optional[str] = None
+    document_title: Optional[str] = None
     chunk_id: Optional[str] = None
     baseline_obligation_id: Optional[str] = None
     finding_type: str
@@ -479,7 +480,14 @@ def list_contract_regressions(
             .order_by(RegressionFinding.created_at.desc())
         ).all()
     )
-    return [_finding_response(row) for row in rows]
+    doc_ids = {r.document_upload_id for r in rows if r.document_upload_id}
+    doc_titles: Dict[str, str] = {}
+    if doc_ids:
+        doc_titles = {
+            d.id: d.title
+            for d in db.scalars(select(DocumentUpload).where(DocumentUpload.id.in_(doc_ids))).all()
+        }
+    return [_finding_response(row, doc_titles.get(row.document_upload_id)) for row in rows]
 
 
 @router.get("/contracts/{contract_id}/hypotheses", response_model=List[HypothesisResponse])
@@ -2549,11 +2557,12 @@ def _revision_response(item: BaselineRevision) -> BaselineRevisionResponse:
     )
 
 
-def _finding_response(item: RegressionFinding) -> RegressionFindingResponse:
+def _finding_response(item: RegressionFinding, document_title: Optional[str] = None) -> RegressionFindingResponse:
     return RegressionFindingResponse(
         id=item.id,
         contract_id=item.contract_id,
         document_id=item.document_upload_id,
+        document_title=document_title,
         chunk_id=item.chunk_id,
         baseline_obligation_id=item.baseline_obligation_id,
         finding_type=item.finding_type,
