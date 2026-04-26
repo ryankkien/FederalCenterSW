@@ -28,7 +28,8 @@ from sqlalchemy.orm import Session
 
 from app.blob_storage import BlobStorage, get_blob_storage
 from app.database import SessionLocal, create_db_schema
-from app.documents import ALLOWED_CONTENT_TYPES, ALLOWED_EXTENSIONS, _clean_filename
+from app.document_files import ALLOWED_CONTENT_TYPES, ALLOWED_EXTENSIONS, clean_filename, file_extension
+from app.document_text import TEXT_JSON_FILENAME, text_json_payload
 from app.models import DocumentUpload
 
 
@@ -329,6 +330,17 @@ def save_email_documents(
 
             blob_path = f"documents/{config.default_uploader_id}/{document_id}/{attachment.filename}"
             storage.upload_bytes(blob_path, attachment.data, attachment.content_type)
+            storage.upload_bytes(
+                f"documents/{config.default_uploader_id}/{document_id}/{TEXT_JSON_FILENAME}",
+                text_json_payload(
+                    document_id=document_id,
+                    original_filename=attachment.filename,
+                    content_type=attachment.content_type,
+                    data=attachment.data,
+                    source="email",
+                ),
+                "application/json",
+            )
             db.add(
                 DocumentUpload(
                     id=document_id,
@@ -667,7 +679,7 @@ def _extract_attachment_payloads(raw_message: bytes) -> List[AttachmentPayload]:
         if not _is_attachment(part):
             continue
         payload = part.get_payload(decode=True) or b""
-        filename = _clean_filename(part.get_filename() or f"attachment-{index}")
+        filename = clean_filename(part.get_filename() or f"attachment-{index}")
         attachments.append(
             AttachmentPayload(
                 filename=filename,
@@ -685,7 +697,7 @@ def _is_attachment(part: Message) -> bool:
 
 
 def _is_supported_attachment(attachment: AttachmentPayload) -> bool:
-    extension = "." + attachment.filename.rsplit(".", 1)[-1].lower() if "." in attachment.filename else ""
+    extension = file_extension(attachment.filename)
     return extension in ALLOWED_EXTENSIONS and attachment.content_type in ALLOWED_CONTENT_TYPES
 
 

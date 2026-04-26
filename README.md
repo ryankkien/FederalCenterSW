@@ -116,6 +116,16 @@ channel and add its URL to the GitHub repository secret
 ## Mock Auth And Document Ingest
 
 The app starts with a mock role login. Choose `Contractor` to upload documents, or `Government official` to review contractor uploads. Uploaded files are stored through the backend blob storage adapter and document metadata is stored in the backend database.
+Each uploaded or emailed document also gets a sibling extraction artifact:
+
+```text
+documents/{uploader_id}/{document_id}/{original_filename}
+documents/{uploader_id}/{document_id}/text.json
+```
+
+`text.json` stores extracted text and extraction metadata for later contract processing.
+PDFs use embedded text when it is usable. Scanned PDFs, PDFs with low-quality embedded
+OCR, and uploaded images fall back to Tesseract OCR when it is installed.
 
 For local development without Azure env values, the backend falls back to ignored local storage under `backend/data/`. For Azure-backed runs, fill in `DATABASE_URL`, `AUTH_SECRET_KEY`, and the `AZURE_STORAGE_*` variables in `backend/.env`.
 
