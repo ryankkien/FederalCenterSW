@@ -37,6 +37,8 @@ Everything for this project should live in the single resource group `federal-ce
 | Container Apps environment | `fcsw-dev-aca-env` | `eastus` | Managed environment for optional pipeline services. |
 | Feature extractor Container App | `fcsw-feature-extractor-dev` | `eastus` | Optional service image built from `feature_extractor/`. This rename from the prior dev app name requires a delete/create cutover. |
 | GitHub Actions OIDC app registration | `fcsw-github-actions` | Entra ID | Client ID `4650ab5a-7546-45cd-8694-83fc65ae586c`; assigned Contributor on `federal-center-sw-dev` and federated to the GitHub `azure-dev` environment. |
+| Log Analytics workspace | `fcsw-dev-aca-env-logs` | `eastus` | Shared log workspace for Container Apps and Application Insights. |
+| Application Insights | `fcsw-dev-aca-env-appi` | `eastus` | Azure Monitor-backed traces, requests, exceptions, and structured app logs. |
 
 ## Portal Links
 
@@ -137,6 +139,51 @@ Example local backend env shape:
 
 ```env
 DATABASE_URL=postgresql+psycopg://<user>:<password>@federal-center-sw-dev-pg-jal50w.postgres.database.azure.com:5432/federal_center_sw?sslmode=require
+```
+
+## Observability
+
+The backend API, optional feature extractor, and email intake Function use structured
+JSON logs locally. When `APPINSIGHTS_CONNECTION_STRING` is set, the Python services also
+configure the Azure Monitor OpenTelemetry exporter. The Function deploy workflow reads
+the connection string from Application Insights and writes both
+`APPINSIGHTS_CONNECTION_STRING` and `APPLICATIONINSIGHTS_CONNECTION_STRING` to the Function
+App settings.
+
+Show the Application Insights component:
+
+```sh
+az monitor app-insights component show \
+  --resource-group federal-center-sw-dev \
+  --app fcsw-dev-aca-env-appi \
+  --output table
+```
+
+Useful App Insights log queries:
+
+```kusto
+traces
+| where timestamp > ago(24h)
+| extend request_id = tostring(customDimensions.request_id)
+| extend contract_id = tostring(customDimensions.contract_id)
+| extend document_upload_id = tostring(customDimensions.document_upload_id)
+| project timestamp, severityLevel, message, request_id, contract_id, document_upload_id
+| order by timestamp desc
+```
+
+```kusto
+exceptions
+| where timestamp > ago(24h)
+| extend request_id = tostring(customDimensions.request_id)
+| project timestamp, type, outerMessage, request_id, operation_Id
+| order by timestamp desc
+```
+
+```kusto
+requests
+| where timestamp > ago(24h)
+| project timestamp, name, resultCode, duration, operation_Id
+| order by timestamp desc
 ```
 
 ## Blob Storage
@@ -242,6 +289,8 @@ Current env variables used by the backend:
 | `AZURE_STORAGE_CONTAINER` | Blob container name. |
 | `AZURE_STORAGE_CONNECTION_STRING` | Blob Storage connection string for backend code or local scripts. |
 | `INTERNAL_SERVICE_TOKEN` | Shared service token accepted by backend internal routes, including the feature-extractor analysis trigger. |
+| `APPINSIGHTS_CONNECTION_STRING` | Optional Application Insights connection string for Azure Monitor OpenTelemetry export. |
+| `LOG_LEVEL` | Python log level for structured JSON logs; defaults to `INFO`. |
 | `EMAIL_INTAKE_HOST` | IMAP host for email intake. |
 | `EMAIL_INTAKE_PORT` | IMAP port, usually `993`. |
 | `EMAIL_INTAKE_USERNAME` | IMAP username. |

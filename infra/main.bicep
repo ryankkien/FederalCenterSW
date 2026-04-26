@@ -262,6 +262,16 @@ resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   }
 }
 
+resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
+  name: '${acaEnvironmentName}-appi'
+  location: appLocation
+  kind: 'web'
+  properties: {
+    Application_Type: 'web'
+    WorkspaceResourceId: logAnalytics.id
+  }
+}
+
 resource acaEnvironment 'Microsoft.App/managedEnvironments@2024-03-01' = {
   name: acaEnvironmentName
   location: appLocation
@@ -350,6 +360,14 @@ resource featureExtractorApp 'Microsoft.App/containerApps@2024-03-01' = {
               name: 'EMBEDDING_MODEL'
               value: 'text-embedding-3-small'
             }
+            {
+              name: 'APPINSIGHTS_CONNECTION_STRING'
+              value: appInsights.properties.ConnectionString
+            }
+            {
+              name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
+              value: appInsights.properties.ConnectionString
+            }
           ]
         }
       ]
@@ -366,3 +384,5 @@ output postgresFullyQualifiedDomainName string = postgresServer.properties.fully
 output appStorageBlobEndpoint string = appStorage.properties.primaryEndpoints.blob
 output acrLoginServer string = acr.properties.loginServer
 output featureExtractorUrl string = 'https://${featureExtractorApp.properties.configuration.ingress.fqdn}'
+output appInsightsName string = appInsights.name
+output appInsightsConnectionString string = appInsights.properties.ConnectionString

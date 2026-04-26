@@ -52,9 +52,11 @@ from app.official_research import (
     official_source_candidates,
     summarize_official_source,
 )
+from app.observability import get_logger
 from app.processing import process_processing_job
 
 router = APIRouter(prefix="/api", tags=["analysis"])
+logger = get_logger(__name__)
 
 
 class BaselineObligationResponse(BaseModel):
@@ -533,7 +535,16 @@ def investigate_contract_hypothesis(
             fetched_text = ""
             try:
                 fetched_text = fetch_official_source_text(candidate.url)
-            except Exception:
+            except Exception as exc:
+                logger.warning(
+                    "Official source fetch failed",
+                    extra={
+                        "contract_id": contract_id,
+                        "hypothesis_id": hypothesis_id,
+                        "official_source_url": candidate.url,
+                        "error": str(exc),
+                    },
+                )
                 fetched_text = ""
             sources.append(
                 {
@@ -784,6 +795,10 @@ def create_per_contract_analysis(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except Exception as exc:
+        logger.exception(
+            "Per-contract analysis failed",
+            extra={"contract_id": contract_id, "error": str(exc)},
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Analysis failed: {exc}",
@@ -901,6 +916,10 @@ def create_cohort_analysis_run(
     try:
         run = run_cohort_analysis(db, payload.contract_ids, payload.cohort_definition)
     except Exception as exc:
+        logger.exception(
+            "Cohort analysis failed",
+            extra={"contract_ids": payload.contract_ids, "error": str(exc)},
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Cohort analysis failed: {exc}",

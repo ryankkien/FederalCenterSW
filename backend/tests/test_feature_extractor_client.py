@@ -4,8 +4,8 @@ from app.feature_extractor_client import trigger_feature_extractor
 def test_trigger_feature_extractor_calls_summary_then_primitives(monkeypatch) -> None:
     calls = []
 
-    def fake_post_json(base_url, path, payload):
-        calls.append((base_url, path, payload))
+    def fake_post_json(base_url, path, payload, headers=None):
+        calls.append((base_url, path, payload, headers))
         if path == "/summarize":
             return {
                 "doc_id": "doc-1",
@@ -25,7 +25,15 @@ def test_trigger_feature_extractor_calls_summary_then_primitives(monkeypatch) ->
     steps = trigger_feature_extractor("doc-1", "contract-1", "monthly_report")
 
     assert calls == [
-        ("http://extractor.local", "/summarize", {"doc_id": "doc-1"}),
+        (
+            "http://extractor.local",
+            "/summarize",
+            {"doc_id": "doc-1"},
+            {
+                "X-Document-Upload-ID": "doc-1",
+                "X-Contract-ID": "contract-1",
+            },
+        ),
         (
             "http://extractor.local",
             "/extract-primitives",
@@ -33,6 +41,10 @@ def test_trigger_feature_extractor_calls_summary_then_primitives(monkeypatch) ->
                 "doc_id": "doc-1",
                 "contract_id": "contract-1",
                 "doc_classification": "monthly_report",
+            },
+            {
+                "X-Document-Upload-ID": "doc-1",
+                "X-Contract-ID": "contract-1",
             },
         ),
     ]
@@ -45,7 +57,7 @@ def test_trigger_feature_extractor_calls_summary_then_primitives(monkeypatch) ->
 
 
 def test_trigger_feature_extractor_returns_failed_step_when_summary_fails(monkeypatch) -> None:
-    def fake_post_json(base_url, path, payload):
+    def fake_post_json(base_url, path, payload, headers=None):
         raise RuntimeError("connection refused")
 
     monkeypatch.setenv("FEATURE_EXTRACTOR_URL", "http://extractor.local")

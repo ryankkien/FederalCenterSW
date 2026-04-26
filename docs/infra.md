@@ -36,6 +36,8 @@ The Bicep template currently adopts the resources that already exist in Azure:
 - Email intake Function App `fcsw-email-intake-e7e9f2`
 - PostgreSQL Flexible Server `federal-center-sw-dev-pg-jal50w`
 - PostgreSQL database `federal_center_sw`
+- Log Analytics workspace `fcsw-dev-aca-env-logs`
+- Application Insights component `fcsw-dev-aca-env-appi`
 
 Function App app settings are not fully managed by Bicep yet because the current settings
 include mailbox passwords and storage connection strings. Do not add those secrets directly
@@ -51,7 +53,8 @@ The repo includes four Azure-facing workflows:
 - `.github/workflows/infra-deploy.yml` runs Bicep build and deploy manually against the
   `azure-dev` GitHub environment.
 - `.github/workflows/function-deploy.yml` deploys the backend worker Function App from
-  `backend/` on pushes to `main` that touch backend files, and can also be run manually.
+  `backend/` on pushes to `main` that touch backend files, configures the non-secret
+  Application Insights connection string, and can also be run manually.
   The Function App currently hosts the email intake timer and the queued document
   processing timer. The workflow always runs backend lint and tests. It skips the Azure
   login, app setting writes, and Function App deployment when required deployment
@@ -81,6 +84,7 @@ environment variables:
 | `ACR_NAME` | `fcswdevacr` |
 | `ACR_LOGIN_SERVER` | `fcswdevacr.azurecr.io` |
 | `FEATURE_EXTRACTOR_APP_NAME` | `fcsw-feature-extractor-dev` |
+| `APPINSIGHTS_COMPONENT_NAME` | Optional override; defaults to `fcsw-dev-aca-env-appi`. |
 | `EMAIL_INTAKE_DEFAULT_UPLOADER_ID` | Optional override; defaults to `contractor-demo`. |
 | `EMAIL_INTAKE_DEFAULT_DOCUMENT_TYPE` | Optional override; defaults to `Email Attachment`. |
 | `DOCUMENT_PROCESSING_TIMER_SCHEDULE` | Optional Azure Functions NCRONTAB schedule; defaults to every five minutes. |
