@@ -78,11 +78,11 @@ def get_ai_provider_name() -> str:
 
 
 def get_ai_processing_enabled() -> bool:
-    return _env_bool("AI_PROCESSING_ENABLED", default=False)
+    return _env_bool("AI_PROCESSING_ENABLED", default=_has_openai_api_key())
 
 
 def get_ai_inline_processing_enabled() -> bool:
-    return _env_bool("AI_INLINE_PROCESSING_ENABLED", default=False)
+    return _env_bool("AI_INLINE_PROCESSING_ENABLED", default=_has_openai_api_key())
 
 
 def get_openai_api_key() -> Optional[str]:
@@ -90,7 +90,7 @@ def get_openai_api_key() -> Optional[str]:
 
 
 def get_openai_llm_model() -> str:
-    return os.getenv("OPENAI_LLM_MODEL", "gpt-4o-mini")
+    return os.getenv("OPENAI_LLM_MODEL", "gpt-5.5")
 
 
 def get_openai_embedding_model() -> str:
@@ -142,6 +142,10 @@ def _env_bool(name: str, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _has_openai_api_key() -> bool:
+    return bool((os.getenv("OPENAI_API_KEY") or "").strip())
 
 
 def _csv_env(name: str) -> Set[str]:

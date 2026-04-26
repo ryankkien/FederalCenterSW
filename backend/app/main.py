@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import logging
 from typing import AsyncIterator, Dict
 
 from fastapi import Depends, FastAPI, HTTPException, status
@@ -15,6 +16,11 @@ from app.auth import (
     get_current_user,
     user_response,
 )
+from app.ai.providers import get_ai_provider
+from app.config import (
+    get_ai_inline_processing_enabled,
+    get_openai_llm_model,
+)
 from app.admin import router as admin_router
 from app.agent import router as agent_router
 from app.contracts import router as contracts_router
@@ -23,10 +29,13 @@ from app.documents import router as documents_router
 from app.knowledge_api import router as knowledge_router
 from app.processing_api import router as processing_router
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     create_db_schema()
+    _log_ai_runtime()
     yield
 
 
@@ -47,6 +56,20 @@ app.include_router(processing_router)
 app.include_router(admin_router)
 app.include_router(analysis_router)
 app.include_router(knowledge_router)
+
+
+def _log_ai_runtime() -> None:
+    provider = get_ai_provider()
+    status = provider.status
+    model = get_openai_llm_model() if status.name == "openai" and status.available else "none"
+    logger.info(
+        "AI runtime: provider=%s model=%s inline_processing=%s available=%s reason=%s",
+        status.name,
+        model,
+        get_ai_inline_processing_enabled(),
+        status.available,
+        status.reason or "",
+    )
 
 
 @app.get("/api/health")

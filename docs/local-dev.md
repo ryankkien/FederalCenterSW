@@ -133,20 +133,21 @@ integration tests.
 
 ## AI Processing Notes
 
-AI processing is disabled by default in `backend/.env.local.example`:
+AI processing stays disabled when `OPENAI_API_KEY` is unset. When the key is present
+and the AI flags are omitted, both processing and inline processing default on:
 
 ```env
 AI_PROVIDER=openai
-AI_PROCESSING_ENABLED=false
-AI_INLINE_PROCESSING_ENABLED=false
 OPENAI_API_KEY=
 OPENAI_LLM_MODEL=gpt-5.5
 OPENAI_EMBEDDING_MODEL=text-embedding-3-large
 ```
 
 Set `OPENAI_API_KEY` only in ignored local env files or deployed app settings. When AI is
-disabled or misconfigured, uploads and email intake still store documents and create
-processing jobs; extraction and indexing remain blocked until configuration is enabled.
+disabled, unset, or misconfigured, uploads and email intake still store documents and
+create processing jobs; extraction and indexing remain blocked until configuration is
+enabled. To force-disable either path even with a key present, set
+`AI_PROCESSING_ENABLED=false` or `AI_INLINE_PROCESSING_ENABLED=false`.
 
 ## Synthetic Corpus Notes
 
