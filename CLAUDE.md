@@ -114,7 +114,7 @@ The optional `feature_extractor/` service replaces the old `summarizer/`. It rea
 {
   "doc_id": "document_upload_id",
   "generated_at": "2026-04-26T12:00:00+00:00",
-  "model": "claude-sonnet-4-6",
+  "model": "gpt-5.4-mini",
   "source_path": "contracts/{id}/text.json",
   "classification": {
     "psc_code": "D302",
@@ -137,7 +137,7 @@ The optional `feature_extractor/` service replaces the old `summarizer/`. It rea
 
 **`backend/app/cohort_builder.py`**: Given a `contract_id`, finds comparable contracts using NAICS 4-digit prefix, `contract_type`, agency, `competition_type`, POP length (±25%), and obligated value band (±50%). Flags `low_confidence: true` when N < 20.
 
-**`backend/app/analysis_orchestrator.py`**: Loads primitives + CPARS for target + cohort, assembles the analysis prompt, calls Claude, stores result in `analysis_runs`.
+**`backend/app/analysis_orchestrator.py`**: Loads primitives + CPARS for target + cohort, assembles the analysis prompt, calls OpenAI, stores result in `analysis_runs`.
 
 **New API endpoints:**
 - `GET /api/contracts/{id}/cohort` → cohort definition + contract IDs

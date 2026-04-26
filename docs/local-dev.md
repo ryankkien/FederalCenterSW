@@ -139,7 +139,7 @@ and the AI flags are omitted, both processing and inline processing default on:
 ```env
 AI_PROVIDER=openai
 OPENAI_API_KEY=
-OPENAI_LLM_MODEL=gpt-5.5
+OPENAI_LLM_MODEL=gpt-5.4-mini
 OPENAI_EMBEDDING_MODEL=text-embedding-3-large
 ```
 
@@ -230,8 +230,9 @@ the run when an `analysis_runs` row for that contract is newer than the latest
 successful or partial primitive extraction. Low-N cohorts still run and are tagged
 `low_confidence`.
 
-Configure `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `MODEL_PREFERENCE` only in ignored
-local env files or shell exports.
+Configure `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENAI_LLM_MODEL`, and
+`MODEL_PREFERENCE` only in ignored local env files or shell exports. The backend
+default LLM model is `gpt-5.5`.
 
 ## Boundaries
 

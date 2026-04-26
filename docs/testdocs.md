@@ -138,6 +138,11 @@ Current use with the app:
 Next product step:
 
 - Continue improving source-contract baselines for WWR and Natalie.
+- Prefer complete demo/eval packets when available: real source contract, CDRLs that
+  require monthly performance reporting, the monthly reports, end-of-base-year CPARS,
+  and PNRs. Those packets should become the best validation source for similar-contract
+  failure-point analysis and future contract-writing guidance because they connect
+  contract language, required reports, actual performance, and outcome evaluation.
 - Add the AGOR source contract before treating AGOR as a complete baseline-bearing
   contract record.
 - Expand deterministic and AI-backed extractors for report periods, labor metrics,

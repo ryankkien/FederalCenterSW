@@ -1,5 +1,6 @@
 from collections import Counter, defaultdict
 from datetime import date, datetime
+import math
 import re
 import secrets
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -14,6 +15,7 @@ from app.analysis_orchestrator import (
     enqueue_per_contract_analysis_after_extraction,
     execute_enqueued_per_contract_analysis,
     get_analysis_run,
+    get_latest_analysis_run,
     run_cohort_analysis,
     run_per_contract_analysis,
 )
@@ -31,6 +33,7 @@ from app.models import (
     ContractBaseline,
     ContractHypothesis,
     ContractSimilarityLink,
+    ChunkEmbedding,
     DocumentChunk,
     DocumentProcessingJob,
     DocumentReportFact,
@@ -281,6 +284,18 @@ class PredictedCparsFactorResponse(BaseModel):
     citations: List[PrimitiveCitationResponse] = []
 
 
+class AnalysisRunResponse(BaseModel):
+    id: str
+    run_type: str
+    status: str
+    target_contract_id: Optional[str] = None
+    cohort_N: Optional[int] = None
+    result: Optional[Dict[str, object]] = None
+    created_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    model: Optional[str] = None
+
+
 class ContractAnalystBriefResponse(BaseModel):
     problem_statement: str
     summary: str
@@ -304,6 +319,7 @@ class ContractTimelineAnalysisResponse(BaseModel):
     execution_patterns: List[TimelineSignalResponse]
     cpars_ratings: List[CparsRatingResponse]
     analyst_brief: Optional[ContractAnalystBriefResponse] = None
+    ai_analysis: Optional[AnalysisRunResponse] = None
     axes: List[PerformanceAxisResponse] = []
     cpars_predicted: Dict[str, PredictedCparsFactorResponse] = {}
     limitations: List[str] = []
@@ -328,6 +344,26 @@ class CohortAnalysisResponse(BaseModel):
     delta_lessons: List[str]
     qualitative_quantitative_correlations: List[str]
     execution_correlations: List[str]
+    limitations: List[str] = []
+
+
+class SimilarContractInsightResponse(BaseModel):
+    contract_id: str
+    contract_title: str
+    similarity_score: Optional[float] = None
+    match_basis: List[str] = []
+    failure_points: List[ContractPatternResponse] = []
+    early_warnings: List[TimelineSignalResponse] = []
+    recommendations: List[str] = []
+
+
+class ContractSimilarityInsightsResponse(BaseModel):
+    contract_id: str
+    target_contract_title: str
+    similar_contracts: List[SimilarContractInsightResponse]
+    shared_failure_points: List[ContractPatternResponse]
+    recommendations: List[str]
+    methodology: List[str]
     limitations: List[str] = []
 
 
@@ -640,6 +676,17 @@ def list_similar_contracts(
     ]
 
 
+@router.get("/contracts/{contract_id}/similarity-insights", response_model=ContractSimilarityInsightsResponse)
+def get_contract_similarity_insights(
+    contract_id: str,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ContractSimilarityInsightsResponse:
+    _require_official_analysis(user)
+    require_contract_view(user, db, contract_id)
+    return _contract_similarity_insights(db, contract_id, user)
+
+
 @router.get("/documents/{document_id}/relationships", response_model=DocumentRelationshipsResponse)
 def get_document_relationships(
     document_id: str,
@@ -684,17 +731,6 @@ class CohortDefinitionResponse(BaseModel):
     contract_ids: List[str]
     N: int
     low_confidence: bool
-
-
-class AnalysisRunResponse(BaseModel):
-    id: str
-    run_type: str
-    status: str
-    target_contract_id: Optional[str] = None
-    cohort_N: Optional[int] = None
-    result: Optional[Dict[str, object]] = None
-    created_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
 
 
 class AutoAnalysisTriggerRequest(BaseModel):
@@ -758,6 +794,7 @@ def create_per_contract_analysis(
         status=run["status"],
         target_contract_id=contract_id,
         result=run.get("result"),
+        model=run.get("model"),
     )
 
 
@@ -783,6 +820,7 @@ def get_per_contract_analysis(
         result=run.get("result"),
         created_at=run.get("created_at"),
         completed_at=run.get("completed_at"),
+        model=run.get("model"),
     )
 
 
@@ -873,6 +911,7 @@ def create_cohort_analysis_run(
         status=run["status"],
         cohort_N=len(payload.contract_ids),
         result=run.get("result"),
+        model=run.get("model"),
     )
 
 
@@ -896,6 +935,7 @@ def get_cohort_analysis_run(
         result=run.get("result"),
         created_at=run.get("created_at"),
         completed_at=run.get("completed_at"),
+        model=run.get("model"),
     )
 
 
@@ -929,6 +969,7 @@ def _contract_timeline_analysis(
         cohort_scope.insert(0, contract_id)
     axes = _contract_axes(db, contract_id, timeline, cohort_scope)
     cpars_predicted = _predicted_cpars_from_axes(axes)
+    latest_ai_run = get_latest_analysis_run(db, contract_id)
     limitations = []
     if not timeline:
         limitations.append("No child reports are linked to this contract yet.")
@@ -947,6 +988,7 @@ def _contract_timeline_analysis(
         positive_signals=[signal for signal in all_signals if signal.polarity == "positive"][:20],
         execution_patterns=[signal for signal in all_signals if signal.category == "execution_pattern"][:20],
         cpars_ratings=cpars_ratings,
+        ai_analysis=_analysis_run_response(latest_ai_run) if latest_ai_run else None,
         analyst_brief=_contract_analyst_brief(
             contract,
             timeline,
@@ -959,6 +1001,20 @@ def _contract_timeline_analysis(
         axes=axes,
         cpars_predicted=cpars_predicted,
         limitations=limitations,
+    )
+
+
+def _analysis_run_response(run: Dict[str, object]) -> AnalysisRunResponse:
+    return AnalysisRunResponse(
+        id=str(run["id"]),
+        run_type=str(run["run_type"]),
+        status=str(run["status"]),
+        target_contract_id=run.get("target_contract_id"),  # type: ignore[arg-type]
+        cohort_N=len(run.get("cohort_contract_ids") or []) if run.get("cohort_contract_ids") else None,
+        result=run.get("result"),  # type: ignore[arg-type]
+        created_at=run.get("created_at"),  # type: ignore[arg-type]
+        completed_at=run.get("completed_at"),  # type: ignore[arg-type]
+        model=run.get("model"),  # type: ignore[arg-type]
     )
 
 
@@ -1467,6 +1523,273 @@ def _cohort_analysis(analyses: Sequence[ContractTimelineAnalysisResponse]) -> Co
         execution_correlations=_execution_correlations(analyses),
         limitations=limitations,
     )
+
+
+def _contract_similarity_insights(
+    db: Session,
+    contract_id: str,
+    user: CurrentUser,
+) -> ContractSimilarityInsightsResponse:
+    target = db.get(Contract, contract_id)
+    if target is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contract not found")
+
+    target_analysis = _contract_timeline_analysis(db, contract_id)
+    candidate_basis: Dict[str, List[str]] = defaultdict(list)
+    candidate_scores: Dict[str, float] = {}
+    limitations: List[str] = []
+
+    for row in _similarity_link_rows(db, contract_id):
+        related_id = _related_contract_id(row, contract_id)
+        if not _can_view_related_contract(row, contract_id, user, db):
+            continue
+        shared_tags = []
+        if row.metadata_json:
+            shared_tags = [str(item) for item in row.metadata_json.get("shared_tags", [])]
+        if shared_tags:
+            candidate_basis[related_id].append(f"Shared extracted tags: {', '.join(shared_tags[:5])}.")
+        else:
+            candidate_basis[related_id].append(row.summary)
+        if row.score is not None:
+            candidate_scores[related_id] = max(candidate_scores.get(related_id, 0.0), row.score)
+
+    embedding_scores = _embedding_contract_scores(db, contract_id)
+    if embedding_scores:
+        for related_id, score in embedding_scores.items():
+            if related_id == contract_id:
+                continue
+            try:
+                require_contract_view(user, db, related_id)
+            except HTTPException:
+                continue
+            candidate_basis[related_id].append("Embedding similarity from indexed document chunks.")
+            candidate_scores[related_id] = max(candidate_scores.get(related_id, 0.0), score)
+    else:
+        limitations.append("No chunk embeddings are available yet, so similarity falls back to semantic links and cohort metadata.")
+
+    if not candidate_basis:
+        try:
+            cohort = build_cohort(db, contract_id)
+        except ValueError:
+            cohort = None
+        if cohort is not None:
+            for related_id in cohort.contract_ids:
+                try:
+                    require_contract_view(user, db, related_id)
+                except HTTPException:
+                    continue
+                candidate_basis[related_id].append(_cohort_match_basis(cohort.match_criteria))
+                candidate_scores.setdefault(related_id, 0.0)
+            if not cohort.contract_ids:
+                limitations.append("The cohort builder did not find comparable visible contracts.")
+
+    ordered_candidate_ids = sorted(
+        candidate_basis,
+        key=lambda item: (-candidate_scores.get(item, 0.0), item),
+    )[:8]
+    candidate_analyses = [_contract_timeline_analysis(db, item) for item in ordered_candidate_ids]
+    similar_contracts = [
+        _similar_contract_insight_response(
+            analysis,
+            candidate_scores.get(analysis.contract_id),
+            candidate_basis[analysis.contract_id],
+        )
+        for analysis in candidate_analyses
+    ]
+    shared_failure_points = _cohort_common_patterns([target_analysis, *candidate_analyses], include_positive=False)
+    recommendations = _dedupe(
+        [
+            item
+            for insight in similar_contracts
+            for item in insight.recommendations
+        ]
+        + _recommendations_for_patterns(shared_failure_points)
+    )[:10]
+    if not similar_contracts:
+        limitations.append("No visible similar contract has enough evidence for failure-point comparison yet.")
+    if not recommendations:
+        limitations.append("No recurring or comparable failure points are available for drafting guidance yet.")
+
+    return ContractSimilarityInsightsResponse(
+        contract_id=contract_id,
+        target_contract_title=target.title,
+        similar_contracts=similar_contracts,
+        shared_failure_points=shared_failure_points,
+        recommendations=recommendations,
+        methodology=[
+            "Use chunk-embedding similarity when indexed embeddings exist.",
+            "Use stored semantic similarity links from extracted regression/report signals.",
+            "Use cohort metadata matching as a fallback when semantic similarity is sparse.",
+            "Translate observed failure patterns into contract-writing controls with cited source signals.",
+        ],
+        limitations=_dedupe(limitations),
+    )
+
+
+def _similar_contract_insight_response(
+    analysis: ContractTimelineAnalysisResponse,
+    score: Optional[float],
+    match_basis: Sequence[str],
+) -> SimilarContractInsightResponse:
+    failure_points = analysis.recurring_issues or analysis.one_off_issues[:4]
+    early_warnings = analysis.early_warning_signals[:4]
+    return SimilarContractInsightResponse(
+        contract_id=analysis.contract_id,
+        contract_title=analysis.contract_title,
+        similarity_score=score,
+        match_basis=_dedupe(match_basis)[:4],
+        failure_points=failure_points[:4],
+        early_warnings=early_warnings,
+        recommendations=_recommendations_for_patterns(failure_points, early_warnings)[:5],
+    )
+
+
+def _similarity_link_rows(db: Session, contract_id: str) -> List[ContractSimilarityLink]:
+    return list(
+        db.scalars(
+            select(ContractSimilarityLink)
+            .where(
+                or_(
+                    ContractSimilarityLink.source_contract_id == contract_id,
+                    ContractSimilarityLink.target_contract_id == contract_id,
+                )
+            )
+            .order_by(ContractSimilarityLink.score.desc())
+        ).all()
+    )
+
+
+def _related_contract_id(row: ContractSimilarityLink, current_contract_id: str) -> str:
+    return row.target_contract_id if row.source_contract_id == current_contract_id else row.source_contract_id
+
+
+def _embedding_contract_scores(db: Session, contract_id: str) -> Dict[str, float]:
+    rows = list(
+        db.execute(
+            select(DocumentChunk.contract_id, ChunkEmbedding.embedding)
+            .join(ChunkEmbedding, ChunkEmbedding.chunk_id == DocumentChunk.id)
+            .where(DocumentChunk.contract_id.isnot(None))
+        ).all()
+    )
+    target_vectors = [_vector_list(vector) for row_contract_id, vector in rows if row_contract_id == contract_id]
+    target_average = _average_vector([vector for vector in target_vectors if vector])
+    if not target_average:
+        return {}
+
+    vectors_by_contract: Dict[str, List[List[float]]] = defaultdict(list)
+    for row_contract_id, vector in rows:
+        if not row_contract_id or row_contract_id == contract_id:
+            continue
+        candidate_vector = _vector_list(vector)
+        if candidate_vector:
+            vectors_by_contract[str(row_contract_id)].append(candidate_vector)
+
+    scores = {}
+    for related_id, vectors in vectors_by_contract.items():
+        candidate_average = _average_vector(vectors)
+        score = _cosine_similarity(target_average, candidate_average)
+        if score >= 0.68:
+            scores[related_id] = score
+    return dict(sorted(scores.items(), key=lambda item: item[1], reverse=True)[:12])
+
+
+def _vector_list(vector: object) -> List[float]:
+    if vector is None:
+        return []
+    try:
+        return [float(item) for item in vector]  # type: ignore[operator]
+    except (TypeError, ValueError):
+        return []
+
+
+def _average_vector(vectors: Sequence[Sequence[float]]) -> List[float]:
+    if not vectors:
+        return []
+    dimension = min(len(vector) for vector in vectors if vector)
+    if dimension == 0:
+        return []
+    totals = [0.0] * dimension
+    count = 0
+    for vector in vectors:
+        if len(vector) < dimension:
+            continue
+        count += 1
+        for index in range(dimension):
+            totals[index] += float(vector[index])
+    if count == 0:
+        return []
+    return [value / count for value in totals]
+
+
+def _cosine_similarity(left: Sequence[float], right: Sequence[float]) -> float:
+    dimension = min(len(left), len(right))
+    if dimension == 0:
+        return 0.0
+    dot = sum(left[index] * right[index] for index in range(dimension))
+    left_norm = math.sqrt(sum(left[index] * left[index] for index in range(dimension)))
+    right_norm = math.sqrt(sum(right[index] * right[index] for index in range(dimension)))
+    if left_norm == 0 or right_norm == 0:
+        return 0.0
+    return dot / (left_norm * right_norm)
+
+
+def _cohort_match_basis(criteria: Dict[str, object]) -> str:
+    if not criteria:
+        return "Comparable contract from cohort builder."
+    labels = []
+    for key in ("naics_prefix", "contract_type", "agency_name", "competition_type"):
+        if criteria.get(key):
+            labels.append(f"{key.replace('_', ' ')} {criteria[key]}")
+    if criteria.get("pop_band_pct"):
+        labels.append("similar period of performance")
+    if criteria.get("value_band_pct"):
+        labels.append("similar obligated value")
+    return f"Cohort metadata match: {', '.join(labels[:5])}." if labels else "Comparable contract from cohort builder."
+
+
+def _recommendations_for_patterns(
+    patterns: Sequence[ContractPatternResponse],
+    early_warnings: Sequence[TimelineSignalResponse] = (),
+) -> List[str]:
+    recommendations = [_recommendation_for_text(pattern.title, pattern.examples) for pattern in patterns]
+    recommendations.extend(
+        _recommendation_for_text(signal.label, [signal.summary])
+        for signal in early_warnings
+        if signal.polarity in {"negative", "mixed"}
+    )
+    return _dedupe([item for item in recommendations if item])
+
+
+def _recommendation_for_text(title: str, examples: Sequence[str]) -> str:
+    text = " ".join([title, *examples]).lower()
+    display_title = title.rstrip(".")
+    if any(token in text for token in ("rfi", "approval", "submittal", "government response")):
+        return "Add explicit government review turnaround times, escalation paths, and deemed-response rules for RFIs/submittals."
+    if any(token in text for token in ("gfe", "gfi", "credential", "access", "cac", "account")):
+        return "Include a GFE/GFI/access responsibility matrix with owner, due date, acceptance criteria, and schedule relief rules."
+    if any(token in text for token in ("staff", "vacancy", "key personnel", "fte", "turnover")):
+        return "Require a staffing ramp plan, named key-personnel backup coverage, and recurring vacancy reporting tied to remedies."
+    if any(token in text for token in ("quality", "defect", "rework", "rejection", "qc")):
+        return "Tie quality-control checkpoints to acceptance criteria, rework reporting, and corrective-action deadlines."
+    if any(token in text for token in ("cost", "burn", "eac", "overrun", "invoice", "financial")):
+        return "Require cost-performance reporting with variance thresholds, EAC updates, and corrective-action triggers."
+    if any(token in text for token in ("schedule", "slip", "delay", "late", "critical path")):
+        return "Add schedule-risk triggers for late deliverables, critical-path movement, mitigation dates, and recovery-plan approval."
+    if any(token in text for token in ("scope", "modification", "change", "out of scope")):
+        return "Clarify scope-control language, change-order authority, and required impact analysis before directed work proceeds."
+    return f"Add a solicitation evaluation factor and post-award reporting requirement for recurring {display_title} risk."
+
+
+def _dedupe(items: Sequence[str]) -> List[str]:
+    result = []
+    seen = set()
+    for item in items:
+        normalized = " ".join(str(item).split())
+        if not normalized or normalized.lower() in seen:
+            continue
+        seen.add(normalized.lower())
+        result.append(normalized)
+    return result
 
 
 def _timeline_documents(db: Session, contract_id: str) -> List[DocumentUpload]:

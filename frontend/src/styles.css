@@ -142,7 +142,8 @@ h3 {
   color: #24364a;
 }
 
-.primary-button:disabled {
+.primary-button:disabled,
+.secondary-button:disabled {
   cursor: wait;
   opacity: 0.7;
 }
@@ -240,6 +241,14 @@ h3 {
   gap: 18px;
 }
 
+.analysis-actions {
+  display: flex;
+  align-items: end;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: min(100%, 560px);
+}
+
 .compact-field {
   display: grid;
   gap: 6px;
@@ -309,6 +318,7 @@ h3 {
   font-weight: 750;
 }
 
+.openai-analysis,
 .analyst-brief {
   display: grid;
   gap: 12px;
@@ -318,11 +328,31 @@ h3 {
   padding: 14px;
 }
 
+.openai-analysis {
+  border-color: #a7c2b4;
+  background: #f7fcf9;
+}
+
 .analyst-summary {
   margin: 0;
   color: #182230;
   font-weight: 700;
   line-height: 1.5;
+}
+
+.run-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.run-metadata span {
+  border-radius: 999px;
+  background: #e8f3ee;
+  color: #255c46;
+  padding: 5px 9px;
+  font-size: 0.78rem;
+  font-weight: 750;
 }
 
 .analyst-claim-grid {
@@ -474,6 +504,7 @@ h3 {
 
 .timeline-row span,
 .pattern-row span,
+.pattern-row p,
 .signal-row p,
 .text-list p {
   margin: 0;
@@ -860,8 +891,10 @@ td strong,
   }
 
   .analysis-header,
+  .analysis-actions,
   .timeline-row {
     align-items: stretch;
+    flex-direction: column;
     grid-template-columns: 1fr;
   }
 

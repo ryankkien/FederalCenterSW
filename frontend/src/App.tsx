@@ -145,6 +145,18 @@ type PredictedCparsFactor = {
   citations: PrimitiveCitation[];
 };
 
+type AnalysisRun = {
+  id: string;
+  run_type: string;
+  status: string;
+  target_contract_id?: string | null;
+  cohort_N?: number | null;
+  result?: Record<string, unknown> | null;
+  created_at?: string | null;
+  completed_at?: string | null;
+  model?: string | null;
+};
+
 type ContractAnalystBrief = {
   problem_statement: string;
   summary: string;
@@ -168,6 +180,7 @@ type ContractTimelineAnalysis = {
   execution_patterns: TimelineSignal[];
   cpars_ratings: CparsRating[];
   analyst_brief?: ContractAnalystBrief | null;
+  ai_analysis?: AnalysisRun | null;
   axes: PerformanceAxis[];
   cpars_predicted: Record<string, PredictedCparsFactor>;
   limitations: string[];
@@ -192,6 +205,26 @@ type CohortAnalysis = {
   delta_lessons: string[];
   qualitative_quantitative_correlations: string[];
   execution_correlations: string[];
+  limitations: string[];
+};
+
+type SimilarContractInsight = {
+  contract_id: string;
+  contract_title: string;
+  similarity_score?: number | null;
+  match_basis: string[];
+  failure_points: ContractPattern[];
+  early_warnings: TimelineSignal[];
+  recommendations: string[];
+};
+
+type ContractSimilarityInsights = {
+  contract_id: string;
+  target_contract_title: string;
+  similar_contracts: SimilarContractInsight[];
+  shared_failure_points: ContractPattern[];
+  recommendations: string[];
+  methodology: string[];
   limitations: string[];
 };
 
@@ -383,7 +416,9 @@ function OfficialAnalysisWorkspace({ token, setError }: { token: string; setErro
   const [selectedContractId, setSelectedContractId] = useState('');
   const [analysis, setAnalysis] = useState<ContractTimelineAnalysis | null>(null);
   const [cohort, setCohort] = useState<CohortAnalysis | null>(null);
+  const [similarityInsights, setSimilarityInsights] = useState<ContractSimilarityInsights | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isRunningAi, setIsRunningAi] = useState(false);
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -392,12 +427,14 @@ function OfficialAnalysisWorkspace({ token, setError }: { token: string; setErro
       setContracts(nextContracts);
       const nextSelectedId = selectedContractId || nextContracts[0]?.id || '';
       setSelectedContractId(nextSelectedId);
-      const [nextAnalysis, nextCohort] = await Promise.all([
+      const [nextAnalysis, nextCohort, nextSimilarityInsights] = await Promise.all([
         nextSelectedId ? api<ContractTimelineAnalysis>(`/api/analysis/contracts/${nextSelectedId}`, token) : Promise.resolve(null),
         api<CohortAnalysis>('/api/analysis/cohort', token),
+        nextSelectedId ? api<ContractSimilarityInsights>(`/api/contracts/${nextSelectedId}/similarity-insights`, token) : Promise.resolve(null),
       ]);
       setAnalysis(nextAnalysis);
       setCohort(nextCohort);
+      setSimilarityInsights(nextSimilarityInsights);
     } catch (currentError) {
       setError(currentError instanceof Error ? currentError.message : 'Could not load contract analysis');
     } finally {
@@ -413,12 +450,35 @@ function OfficialAnalysisWorkspace({ token, setError }: { token: string; setErro
     setSelectedContractId(contractId);
     setIsLoading(true);
     try {
-      const nextAnalysis = await api<ContractTimelineAnalysis>(`/api/analysis/contracts/${contractId}`, token);
+      const [nextAnalysis, nextSimilarityInsights] = await Promise.all([
+        api<ContractTimelineAnalysis>(`/api/analysis/contracts/${contractId}`, token),
+        api<ContractSimilarityInsights>(`/api/contracts/${contractId}/similarity-insights`, token),
+      ]);
       setAnalysis(nextAnalysis);
+      setSimilarityInsights(nextSimilarityInsights);
     } catch (currentError) {
       setError(currentError instanceof Error ? currentError.message : 'Could not load contract analysis');
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function runAiAnalysis() {
+    if (!selectedContractId) {
+      return;
+    }
+    setIsRunningAi(true);
+    setError('');
+    try {
+      await api<AnalysisRun>(`/api/contracts/${selectedContractId}/performance-analysis`, token, {
+        method: 'POST',
+      });
+      const nextAnalysis = await api<ContractTimelineAnalysis>(`/api/analysis/contracts/${selectedContractId}`, token);
+      setAnalysis(nextAnalysis);
+    } catch (currentError) {
+      setError(currentError instanceof Error ? currentError.message : 'Could not run OpenAI analysis');
+    } finally {
+      setIsRunningAi(false);
     }
   }
 
@@ -434,16 +494,22 @@ function OfficialAnalysisWorkspace({ token, setError }: { token: string; setErro
           <p className="eyebrow">Government Analysis</p>
           <h2 id="analysis-title">Contract Timeline And Cohort Patterns</h2>
         </div>
-        <label className="compact-field">
-          <span>Contract</span>
-          <select value={selectedContractId} onChange={(event) => void selectContract(event.target.value)}>
-            {contracts.map((contract) => (
-              <option key={contract.id} value={contract.id}>
-                {contract.id}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="analysis-actions">
+          <button className="secondary-button" type="button" onClick={() => void runAiAnalysis()} disabled={isRunningAi || isLoading || !selectedContractId}>
+            <RefreshCw size={16} />
+            {isRunningAi ? 'Running OpenAI' : 'Run OpenAI analysis'}
+          </button>
+          <label className="compact-field">
+            <span>Contract</span>
+            <select value={selectedContractId} onChange={(event) => void selectContract(event.target.value)}>
+              {contracts.map((contract) => (
+                <option key={contract.id} value={contract.id}>
+                  {contract.id}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       </div>
       <section className="contract-brief">
         <div className="article-header">
@@ -477,6 +543,7 @@ function OfficialAnalysisWorkspace({ token, setError }: { token: string; setErro
           </article>
         </div>
       </section>
+      <OpenAiAnalysis run={analysis?.ai_analysis ?? null} isRunning={isRunningAi} />
       {analysis?.analyst_brief ? <AnalystBrief brief={analysis.analyst_brief} /> : null}
       <div className="metric-grid">
         <MetricCard label="Reports" value={analysis?.timeline.length ?? 0} icon={<FileText size={17} />} />
@@ -485,6 +552,14 @@ function OfficialAnalysisWorkspace({ token, setError }: { token: string; setErro
         <MetricCard label="Cohort Contracts" value={cohort?.contract_count ?? 0} icon={<Layers3 size={17} />} />
       </div>
       <div className="analysis-grid">
+        <AnalysisPanel title="Similar Contracts" icon={<Link2 size={16} />}>
+          <SimilarContractsList insights={similarityInsights} />
+        </AnalysisPanel>
+        <AnalysisPanel title="Future Contract Writing" icon={<BookOpen size={16} />}>
+          <TextList items={similarityInsights?.recommendations ?? []} empty="No similar-contract drafting guidance is available yet." />
+          <div className="rail-divider" />
+          <PatternList patterns={similarityInsights?.shared_failure_points ?? []} empty="No shared failure points have crossed the current threshold." compact />
+        </AnalysisPanel>
         <AnalysisPanel title="Chronological Report Signals" icon={<BarChart3 size={16} />}>
           {analysis?.timeline.length ? (
             <div className="timeline-list">
@@ -536,9 +611,9 @@ function OfficialAnalysisWorkspace({ token, setError }: { token: string; setErro
           <PatternList patterns={cohort?.well_performing_common_patterns ?? []} empty="No well-performing or recovered cohort pattern set yet." compact />
         </AnalysisPanel>
       </div>
-      {analysis?.limitations.length || cohort?.limitations.length ? (
+      {analysis?.limitations.length || cohort?.limitations.length || similarityInsights?.limitations.length ? (
         <div className="limitations-row">
-          {[...(analysis?.limitations ?? []), ...(cohort?.limitations ?? [])].map((item) => (
+          {[...(analysis?.limitations ?? []), ...(cohort?.limitations ?? []), ...(similarityInsights?.limitations ?? [])].map((item) => (
             <span key={item}>{item}</span>
           ))}
         </div>
@@ -569,13 +644,82 @@ function AnalysisPanel({ title, icon, children }: { title: string; icon: ReactNo
   );
 }
 
+function OpenAiAnalysis({ run, isRunning }: { run: AnalysisRun | null; isRunning: boolean }) {
+  const result = run?.result ?? null;
+  const axes = Array.isArray(result?.axes) ? result.axes : [];
+  const cpars = result?.cpars_predicted && typeof result.cpars_predicted === 'object'
+    ? Object.entries(result.cpars_predicted as Record<string, unknown>)
+    : [];
+  const summary = textFromUnknown(result?.summary);
+
+  return (
+    <section className="openai-analysis">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">OpenAI Analyst Run</p>
+          <h3>Contract Performance Explanation</h3>
+        </div>
+        <span className={`status ${run?.status ?? (isRunning ? 'pending' : 'neutral')}`}>
+          {isRunning ? 'running' : run?.status ?? 'not run'}
+        </span>
+      </div>
+      {run ? (
+        <>
+          <p className="analyst-summary">{summary || 'OpenAI returned structured analysis without a top-level summary.'}</p>
+          <div className="run-metadata">
+            <span>Model: {run.model ?? 'gpt-5.4-mini'}</span>
+            {run.completed_at ? <span>Completed: {new Date(run.completed_at).toLocaleString()}</span> : null}
+            <span>Run: {run.id.slice(0, 8)}</span>
+          </div>
+          <div className="analyst-claim-grid">
+            <article className="claim-group">
+              <strong>Measured Axes</strong>
+              {axes.length ? (
+                axes.slice(0, 3).map((axis, index) => (
+                  <div className="claim-row" key={`ai-axis-${index}`}>
+                    <span>{toTitle(textFromUnknown((axis as Record<string, unknown>).axis) || `axis ${index + 1}`)}</span>
+                    <p>{aiAxisSummary(axis)}</p>
+                  </div>
+                ))
+              ) : (
+                <p className="empty">No extractable measured axes came back from OpenAI.</p>
+              )}
+            </article>
+            <article className="claim-group">
+              <strong>Predicted CPARS</strong>
+              {cpars.length ? (
+                cpars.slice(0, 3).map(([factor, value]) => (
+                  <div className="claim-row" key={factor}>
+                    <span>{factor}</span>
+                    <p>{aiCparsSummary(value)}</p>
+                  </div>
+                ))
+              ) : (
+                <p className="empty">No predicted CPARS factors came back from OpenAI.</p>
+              )}
+            </article>
+            <article className="claim-group">
+              <strong>Citations</strong>
+              <p className="empty">Claims in this run are constrained to primitive IDs from extracted contract records.</p>
+            </article>
+          </div>
+        </>
+      ) : (
+        <p className="empty">
+          {isRunning ? 'OpenAI is building a cited contract analysis.' : 'No OpenAI analyst run has been created for this contract yet.'}
+        </p>
+      )}
+    </section>
+  );
+}
+
 function AnalystBrief({ brief }: { brief: ContractAnalystBrief }) {
   return (
     <section className="analyst-brief">
       <div className="section-heading">
         <div>
-          <p className="eyebrow">Analyst Layer</p>
-          <h3>Cited Performance Explanation</h3>
+          <p className="eyebrow">Extracted Evidence Rollup</p>
+          <h3>Source Signal Context</h3>
         </div>
         <ShieldCheck size={16} />
       </div>
@@ -597,6 +741,30 @@ function AnalystBrief({ brief }: { brief: ContractAnalystBrief }) {
       ) : null}
     </section>
   );
+}
+
+function aiAxisSummary(axis: unknown) {
+  if (!axis || typeof axis !== 'object') {
+    return textFromUnknown(axis);
+  }
+  const value = axis as Record<string, unknown>;
+  return textFromUnknown(value.rationale)
+    || textFromUnknown(value.status)
+    || textFromUnknown(value.target_value)
+    || 'Axis returned without a readable rationale.';
+}
+
+function aiCparsSummary(value: unknown) {
+  if (!value || typeof value !== 'object') {
+    return textFromUnknown(value);
+  }
+  const record = value as Record<string, unknown>;
+  const rating = textFromUnknown(record.rating);
+  const rationale = textFromUnknown(record.rationale);
+  if (rating && rationale) {
+    return `${rating}: ${rationale}`;
+  }
+  return rating || rationale || 'No readable CPARS rationale returned.';
 }
 
 function ClaimGroup({ title, claims, empty }: { title: string; claims: AnalystClaim[]; empty: string }) {
@@ -628,6 +796,30 @@ function CitationChips({ citations }: { citations: PrimitiveCitation[] }) {
         <span title={citation.excerpt ?? citation.label ?? citation.primitive_id} key={`${citation.primitive_type}-${citation.primitive_id}`}>
           {citation.primitive_type}: {citation.primitive_id.slice(0, 8)}
         </span>
+      ))}
+    </div>
+  );
+}
+
+function SimilarContractsList({ insights }: { insights: ContractSimilarityInsights | null }) {
+  const contracts = insights?.similar_contracts ?? [];
+  if (!contracts.length) {
+    return <p className="empty">No similar visible contracts have enough extracted evidence yet.</p>;
+  }
+  return (
+    <div className="pattern-list">
+      {contracts.slice(0, 4).map((contract) => (
+        <article className="pattern-row" key={contract.contract_id}>
+          <strong>{contract.contract_title}</strong>
+          <small>
+            {contract.similarity_score !== null && contract.similarity_score !== undefined
+              ? `${Math.round(contract.similarity_score * 100)}% similarity`
+              : 'Comparable contract'}
+          </small>
+          {contract.match_basis[0] ? <span>{contract.match_basis[0]}</span> : null}
+          {contract.failure_points[0] ? <p>{contract.failure_points[0].title}: {contract.failure_points[0].examples[0]}</p> : null}
+          {contract.recommendations[0] ? <p>{contract.recommendations[0]}</p> : null}
+        </article>
       ))}
     </div>
   );
@@ -761,6 +953,26 @@ function formatPrimitiveValue(value: unknown): string {
     return JSON.stringify(value);
   }
   return String(value);
+}
+
+function textFromUnknown(value: unknown): string {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map(textFromUnknown).filter(Boolean).join(' ');
+  }
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return textFromUnknown(record.text ?? record.summary ?? record.rationale ?? JSON.stringify(record));
+  }
+  return '';
 }
 
 function CohortBriefList({ contracts }: { contracts: CohortContractBrief[] }) {

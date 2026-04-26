@@ -69,6 +69,19 @@ def build_cohort(db: Session, target_contract_id: str) -> CohortDefinition:
         criteria["obligated_value"] = target_value
         criteria["value_band_pct"] = _VALUE_BAND_PCT
 
+    if not candidate_ids:
+        candidate_ids = [
+            row[0]
+            for row in db.query(Contract.id)
+            .filter(Contract.id != target_contract_id)
+            .all()
+        ]
+        if candidate_ids:
+            criteria["fallback"] = (
+                "No strict metadata matches were available; using all other contracts "
+                "as a low-confidence comparison cohort."
+            )
+
     N = len(candidate_ids)
     return CohortDefinition(
         target_contract_id=target_contract_id,

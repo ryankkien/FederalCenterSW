@@ -71,9 +71,8 @@ services:
       # Points at the local Azurite emulator
       AZURE_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFeqCnf2mqk3aE7GcxY8wEkxSQ9fL3aPo/l72tK4G8Y7YX8WfPjY4I3K0W2d8t0oL8+/hQ==;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
       AZURE_STORAGE_CONTAINER: app-assets
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      MODEL_PREFERENCE: ${MODEL_PREFERENCE:-claude}
+      OPENAI_LLM_MODEL: ${OPENAI_LLM_MODEL:-gpt-5.4-mini}
       DATABASE_URL: postgresql://fcadmin:local_dev_password@postgres:5432/federal_center_sw
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
       BACKEND_API_URL: http://backend:8000

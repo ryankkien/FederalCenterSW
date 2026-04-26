@@ -12,6 +12,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import select, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.cohort_builder import CohortDefinition, build_cohort
@@ -21,7 +23,16 @@ from app.config import (
     get_openai_api_key,
     get_openai_llm_model,
 )
-from app.models import AuditEvent, Contract
+from app.models import (
+    AuditEvent,
+    BaselineObligation,
+    Contract,
+    DocumentReportFact,
+    DocumentUpload,
+    KnowledgeSourceRecord,
+    PerformanceSignal,
+    RegressionFinding,
+)
 
 _PER_CONTRACT_SYSTEM = """ROLE You are a contract performance analyst. You evaluate a target federal \
 contract against a cohort of comparable contracts using structured primitive records. You never \
@@ -99,8 +110,11 @@ def run_per_contract_analysis(
         raise ValueError(f"Contract {contract_id} not found")
 
     cohort = build_cohort(db, contract_id)
-    target_primitives = _load_primitives(db, contract_id)
-    cohort_primitives = {cid: _load_primitives(db, cid) for cid in cohort.contract_ids}
+    target_primitives = _compact_primitives(_load_primitives(db, contract_id), limit_per_bucket=45)
+    cohort_primitives = {
+        cid: _compact_primitives(_load_primitives(db, cid), limit_per_bucket=12)
+        for cid in cohort.contract_ids
+    }
     cpars = _load_cpars(db, contract_id)
 
     prompt_user = _build_per_contract_prompt(
@@ -113,10 +127,14 @@ def run_per_contract_analysis(
     else:
         _mark_analysis_run_running(db, run_id)
 
-    result_json = _openai_json_response(
-        _PER_CONTRACT_SYSTEM + "\n\n" + _AXES_DESCRIPTION,
-        prompt_user,
-    )
+    try:
+        result_json = _openai_json_response(
+            _PER_CONTRACT_SYSTEM + "\n\n" + _AXES_DESCRIPTION,
+            prompt_user,
+        )
+    except Exception as exc:
+        _fail_analysis_run(db, run_id, exc)
+        raise
     result_json = _tag_low_confidence(result_json, cohort)
 
     _complete_analysis_run(db, run_id, result_json)
@@ -255,7 +273,7 @@ def run_cohort_analysis(
     """Run cross-contract cohort analysis. Returns the analysis_run record dict."""
     per_contract_results = []
     for cid in contract_ids:
-        primitives = _load_primitives(db, cid)
+        primitives = _compact_primitives(_load_primitives(db, cid), limit_per_bucket=20)
         cpars = _load_cpars(db, cid)
         per_contract_results.append({
             "contract_id": cid,
@@ -273,15 +291,17 @@ def run_cohort_analysis(
         cohort_contract_ids=contract_ids,
     )
 
-    result_json = _openai_json_response(_COHORT_SYSTEM, prompt_user)
+    try:
+        result_json = _openai_json_response(_COHORT_SYSTEM, prompt_user)
+    except Exception as exc:
+        _fail_analysis_run(db, run_id, exc)
+        raise
 
     _complete_analysis_run(db, run_id, result_json)
     return {"id": run_id, "status": "complete", "result": result_json}
 
 
 def _load_primitives(db: Session, contract_id: str) -> dict[str, list[dict]]:
-    from sqlalchemy import text
-
     tables = {
         "deliverable": "contract_primitives_deliverable",
         "financial": "contract_primitives_financial",
@@ -291,24 +311,251 @@ def _load_primitives(db: Session, contract_id: str) -> dict[str, list[dict]]:
     }
     result = {}
     for key, table in tables.items():
-        rows = db.execute(
-            text(f"SELECT * FROM {table} WHERE contract_id = :cid ORDER BY period_label"),
-            {"cid": contract_id},
-        ).mappings().all()
+        try:
+            rows = db.execute(
+                text(f"SELECT * FROM {table} WHERE contract_id = :cid ORDER BY period_label"),
+                {"cid": contract_id},
+            ).mappings().all()
+        except SQLAlchemyError:
+            db.rollback()
+            rows = []
         result[key] = [dict(r) for r in rows]
-    return result
+    if any(result.values()):
+        return result
+    return _load_legacy_extracted_primitives(db, contract_id)
 
 
 def _load_cpars(db: Session, contract_id: str) -> list[dict]:
-    from sqlalchemy import text
+    try:
+        rows = db.execute(
+            text(
+                "SELECT * FROM cpars_ratings WHERE contract_id = :cid ORDER BY evaluation_date"
+            ),
+            {"cid": contract_id},
+        ).mappings().all()
+        ratings = [dict(r) for r in rows]
+    except SQLAlchemyError:
+        db.rollback()
+        ratings = []
+    ratings.extend(_load_legacy_cpars_exports(db, contract_id))
+    return ratings
 
-    rows = db.execute(
-        text(
-            "SELECT * FROM cpars_ratings WHERE contract_id = :cid ORDER BY evaluation_date"
-        ),
-        {"cid": contract_id},
-    ).mappings().all()
-    return [dict(r) for r in rows]
+
+def _load_legacy_extracted_primitives(db: Session, contract_id: str) -> dict[str, list[dict]]:
+    """Use already-extracted evidence as primitive input until typed primitive tables are populated."""
+    documents = {
+        document.id: document
+        for document in db.scalars(
+            select(DocumentUpload)
+            .where(DocumentUpload.contract_id == contract_id)
+            .order_by(DocumentUpload.report_period_start, DocumentUpload.created_at)
+        ).all()
+    }
+    primitives: dict[str, list[dict]] = {
+        "deliverable": [],
+        "financial": [],
+        "decisions": [],
+        "issues": [],
+        "personnel": [],
+    }
+
+    facts = db.scalars(
+        select(DocumentReportFact)
+        .where(DocumentReportFact.contract_id == contract_id)
+        .order_by(DocumentReportFact.created_at)
+    ).all()
+    for fact in facts:
+        record = _legacy_record(
+            primitive_source="document_report_fact",
+            primitive_id=fact.id,
+            contract_id=contract_id,
+            document=documents.get(fact.document_upload_id),
+            label=fact.label,
+            category=fact.fact_type,
+            text_value=fact.value_text,
+            quote=fact.quote,
+            confidence=fact.confidence,
+            metadata=fact.value_json or fact.metadata_json or {},
+        )
+        _append_legacy_primitive(primitives, record)
+
+    findings = db.scalars(
+        select(RegressionFinding)
+        .where(RegressionFinding.contract_id == contract_id)
+        .order_by(RegressionFinding.created_at)
+    ).all()
+    for finding in findings:
+        record = _legacy_record(
+            primitive_source="regression_finding",
+            primitive_id=finding.id,
+            contract_id=contract_id,
+            document=documents.get(finding.document_upload_id),
+            label=finding.title,
+            category=finding.finding_type,
+            text_value=finding.summary,
+            quote=finding.quote,
+            confidence=finding.confidence,
+            metadata={"severity": finding.severity, "status": finding.status},
+        )
+        _append_legacy_primitive(primitives, record)
+
+    signals = db.scalars(
+        select(PerformanceSignal)
+        .where(PerformanceSignal.contract_id == contract_id)
+        .order_by(PerformanceSignal.created_at)
+    ).all()
+    for signal in signals:
+        record = _legacy_record(
+            primitive_source="performance_signal",
+            primitive_id=signal.id,
+            contract_id=contract_id,
+            document=documents.get(signal.document_upload_id),
+            label=signal.label or signal.signal_type,
+            category=signal.signal_type,
+            text_value=signal.summary,
+            quote=None,
+            confidence=signal.confidence,
+            metadata={"severity": signal.severity, **(signal.metadata_json or {})},
+        )
+        _append_legacy_primitive(primitives, record)
+
+    obligations = db.scalars(
+        select(BaselineObligation)
+        .where(BaselineObligation.contract_id == contract_id)
+        .order_by(BaselineObligation.created_at)
+    ).all()
+    for obligation in obligations:
+        record = _legacy_record(
+            primitive_source="baseline_obligation",
+            primitive_id=obligation.id,
+            contract_id=contract_id,
+            document=documents.get(obligation.source_document_upload_id),
+            label=obligation.title,
+            category=obligation.obligation_type,
+            text_value=obligation.description,
+            quote=obligation.reference_text,
+            confidence=obligation.confidence,
+            metadata={},
+        )
+        _append_legacy_primitive(primitives, record)
+
+    return primitives
+
+
+def _legacy_record(
+    *,
+    primitive_source: str,
+    primitive_id: str,
+    contract_id: str,
+    document: DocumentUpload | None,
+    label: str,
+    category: str,
+    text_value: str,
+    quote: str | None,
+    confidence: float | None,
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "id": primitive_id,
+        "primitive_source": primitive_source,
+        "contract_id": contract_id,
+        "doc_upload_id": document.id if document else None,
+        "document_title": document.title if document else None,
+        "document_kind": document.document_kind if document else None,
+        "period_label": _document_period_label(document),
+        "category": category,
+        "label": label,
+        "text_value": _truncate_text(text_value, 800),
+        "quote": _truncate_text(quote, 500) if quote else None,
+        "confidence": confidence,
+        "metadata": _compact_metadata(metadata),
+    }
+
+
+def _append_legacy_primitive(primitives: dict[str, list[dict]], record: dict[str, Any]) -> None:
+    text_blob = " ".join(
+        str(record.get(key) or "").lower()
+        for key in ("category", "label", "text_value", "quote")
+    )
+    if _has_any(text_blob, ("cost", "fund", "eac", "burn", "variance", "rea", "budget")):
+        primitives["financial"].append(record)
+    if _has_any(text_blob, ("deliver", "cdrl", "acceptance", "quality", "defect", "rework", "reject")):
+        primitives["deliverable"].append(record)
+    if _has_any(text_blob, ("decision", "mod", "scope", "approval", "authority", "cor", "ko", "clause")):
+        primitives["decisions"].append(record)
+    if _has_any(text_blob, ("staff", "labor", "subcontract", "personnel", "program manager", "fte")):
+        primitives["personnel"].append(record)
+    if _has_any(text_blob, ("issue", "risk", "delay", "rfi", "aging", "regression", "slip", "late", "open")):
+        primitives["issues"].append(record)
+    if not any(record in rows for rows in primitives.values()):
+        primitives["issues"].append(record)
+
+
+def _has_any(text_blob: str, needles: tuple[str, ...]) -> bool:
+    return any(needle in text_blob for needle in needles)
+
+
+def _truncate_text(value: str, limit: int) -> str:
+    if len(value) <= limit:
+        return value
+    return value[: limit - 3].rstrip() + "..."
+
+
+def _compact_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    compact: dict[str, Any] = {}
+    for key in ("severity", "status", "responsible_party", "days_open", "amount", "rating"):
+        if key in metadata:
+            compact[key] = metadata[key]
+    return compact
+
+
+def _document_period_label(document: DocumentUpload | None) -> str | None:
+    if document is None:
+        return None
+    if document.report_period_start and document.report_period_end:
+        return f"{document.report_period_start} to {document.report_period_end}"
+    if document.report_period_start:
+        return str(document.report_period_start)
+    return document.created_at.date().isoformat()
+
+
+def _load_legacy_cpars_exports(db: Session, contract_id: str) -> list[dict]:
+    rows = db.scalars(
+        select(KnowledgeSourceRecord)
+        .where(KnowledgeSourceRecord.contract_id == contract_id)
+        .order_by(KnowledgeSourceRecord.created_at)
+    ).all()
+    ratings = []
+    rating_keys = {
+        "quality": "quality_rating",
+        "schedule": "schedule_rating",
+        "cost_control": "cost_control_rating",
+        "management": "management_rating",
+        "small_business": "small_business_rating",
+        "regulatory_compliance": "regulatory_compliance_rating",
+        "overall": "overall_rating",
+    }
+    for row in rows:
+        source_name = (row.source_name or "").lower()
+        if "cpars" not in source_name and "cpars" not in (row.source_key or "").lower():
+            continue
+        raw = row.raw_json or {}
+        for source_key, output_key in rating_keys.items():
+            rating = raw.get(source_key) or raw.get(output_key)
+            if rating:
+                ratings.append(
+                    {
+                        "id": f"{row.id}:{source_key}",
+                        "contract_id": contract_id,
+                        "doc_upload_id": None,
+                        "evaluation_period": raw.get("period") or raw.get("evaluation_period"),
+                        "evaluation_date": raw.get("evaluation_date"),
+                        output_key: rating,
+                        "narrative": raw.get("narrative") or row.text,
+                        "source_primitive_id": row.id,
+                    }
+                )
+    return ratings
 
 
 def _build_per_contract_prompt(
@@ -336,6 +583,14 @@ def _build_per_contract_prompt(
         json.dumps(cohort_primitives, default=str),
     ]
     return "\n".join(parts)
+
+
+def _compact_primitives(
+    primitives: dict[str, list[dict]],
+    *,
+    limit_per_bucket: int,
+) -> dict[str, list[dict]]:
+    return {key: rows[:limit_per_bucket] for key, rows in primitives.items()}
 
 
 def _build_cohort_prompt(
@@ -453,13 +708,47 @@ def _fail_analysis_run(db: Session, run_id: str, error: Exception) -> None:
 
 
 def get_analysis_run(db: Session, run_id: str) -> dict | None:
-    from sqlalchemy import text
+    try:
+        row = db.execute(
+            text("SELECT * FROM analysis_runs WHERE id = :id"),
+            {"id": run_id},
+        ).mappings().first()
+    except SQLAlchemyError:
+        db.rollback()
+        return None
+    return _analysis_run_dict(row) if row else None
 
-    row = db.execute(
-        text("SELECT * FROM analysis_runs WHERE id = :id"),
-        {"id": run_id},
-    ).mappings().first()
-    return dict(row) if row else None
+
+def get_latest_analysis_run(db: Session, contract_id: str) -> dict | None:
+    try:
+        row = db.execute(
+            text(
+                """
+                SELECT * FROM analysis_runs
+                WHERE target_contract_id = :contract_id AND run_type = 'per_contract'
+                  AND status = 'complete'
+                ORDER BY completed_at DESC, created_at DESC
+                LIMIT 1
+                """
+            ),
+            {"contract_id": contract_id},
+        ).mappings().first()
+    except SQLAlchemyError:
+        db.rollback()
+        return None
+    return _analysis_run_dict(row) if row else None
+
+
+def _analysis_run_dict(row: Any) -> dict:
+    data = dict(row)
+    for key in ("cohort_definition", "cohort_contract_ids", "result"):
+        value = data.get(key)
+        if isinstance(value, str):
+            try:
+                data[key] = json.loads(value)
+            except json.JSONDecodeError:
+                pass
+    return data
 
 
 def _latest_primitive_update(db: Session, contract_id: str) -> datetime | None:
