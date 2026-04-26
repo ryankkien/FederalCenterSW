@@ -140,6 +140,11 @@ def _contract_table_ids(db: Session) -> List[str]:
 
 
 def _matches_grant(grant: Any, user: CurrentUser) -> bool:
+    principal_type = _attr(grant, "principal_type")
+    principal_id = _attr(grant, "principal_id")
+    if principal_type == "role" and principal_id == user.role:
+        return True
+
     user_values = _attrs(
         grant,
         (

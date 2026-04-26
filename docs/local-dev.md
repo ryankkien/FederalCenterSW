@@ -129,6 +129,12 @@ The `document_id` folder is the immutable document artifact folder. Contract har
 parentage lives in Postgres on `document_uploads.contract_id`; semantic links never
 rewrite that parent contract.
 
+During processing, unmatched uploads can auto-create a parent contract only when the
+document is classified as `source_contract` or `task_order` with high confidence and a
+single contract number is extracted by the regex matcher. The new contract is stored
+with `status="pending_review"`, linked back to the upload, and accompanied by a
+`contract.auto_created` audit event so officials can review it.
+
 ## pgvector Notes
 
 Local Compose uses a pgvector-enabled Postgres 16 image. If an existing local volume was

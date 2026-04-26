@@ -6,7 +6,7 @@ import json
 import re
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Sequence, Tuple
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -18,12 +18,15 @@ from app.ai.providers import AIProcessingResult, AIProvider, NullAIProvider, Pro
 from app.blob_storage import BlobStorage
 from app.chunking import PageText, TextChunk, chunk_text
 from app.contract_matching import ContractMatchContext, ContractMatchResult, match_contract
-from app.contract_analysis import apply_contract_analysis_pipeline
+from app.contract_analysis import apply_contract_analysis_pipeline, classify_document
 from app.document_assets import TEXT_JSON_FILENAME
 from app.feature_extractor_client import FeatureExtractorStepResult, trigger_feature_extractor
 from app.observability import get_logger, log_context
 
 logger = get_logger(__name__)
+
+AUTO_SCAFFOLD_DOCUMENT_KINDS = {"source_contract", "task_order"}
+AUTO_SCAFFOLD_CONFIDENCE = 0.85
 
 
 class TextJsonPayload(BaseModel):
@@ -438,6 +441,9 @@ def _persist_processing_outputs(
     provider: AIProvider,
     job: Optional[object] = None,
 ) -> Optional[object]:
+    if result.text_gate.text:
+        document_kind, _modification_kind = classify_document(document, result.text_gate.text)
+        _auto_scaffold_contract_for_unmatched_upload(session, models, document, result, document_kind)
     run = _create_processing_run(session, models, document, result, provider, job=job)
     _add_run_step(session, models, run, document, "extraction", result.text_gate.status)
     _update_document_status(document, result)
@@ -810,6 +816,193 @@ def _extract_report_facts(text: str) -> List[Dict[str, object]]:
             }
         )
     return facts[:80]
+
+
+def _auto_scaffold_contract_for_unmatched_upload(
+    session: Session,
+    models: object,
+    document: object,
+    result: ProcessingResult,
+    document_kind: str,
+) -> None:
+    match = result.contract_match
+    if (
+        match is None
+        or match.matched_contract_id
+        or document_kind not in AUTO_SCAFFOLD_DOCUMENT_KINDS
+        or _classification_confidence(document) < AUTO_SCAFFOLD_CONFIDENCE
+    ):
+        return
+
+    contract_number = _single_contract_hint(match.hints)
+    if contract_number is None:
+        return
+
+    contract_model = _first_model(models, "Contract", "ContractRecord")
+    if contract_model is None or not _model_table_exists(session, contract_model):
+        return
+
+    existing = session.scalars(
+        select(contract_model).where(contract_model.contract_number == contract_number)
+    ).first()
+    created = False
+    if existing is None:
+        metadata = _extract_contract_metadata(result.text_gate.text)
+        existing = contract_model(
+            id=_auto_contract_id(contract_number),
+            contract_number=contract_number,
+            title=metadata.get("title") or f"Contract {contract_number}",
+            agency_name=metadata.get("agency_name"),
+            vendor_name=metadata.get("vendor_name"),
+            status="pending_review",
+            security_level=_string_attr(document, "security_level") or "standard",
+            metadata_json={
+                "auto_created": True,
+                "auto_created_from_document_id": _string_attr(document, "id", "document_id"),
+                "auto_create_reason": "unmatched_source_contract_or_task_order",
+                "classification": _classification_metadata(document),
+                "review_status": "pending",
+            },
+        )
+        session.add(existing)
+        session.flush()
+        created = True
+
+    contract_id = _string_attr(existing, "id")
+    _set_first_existing(document, ("contract_id",), contract_id)
+    result.contract_match = ContractMatchResult(
+        status="matched",
+        source="auto_scaffold" if created else "auto_scaffold_existing",
+        matched_contract_id=contract_id,
+        matched_contract_number=contract_number,
+        confidence=_classification_confidence(document),
+        hints=match.hints,
+        ai_hints=match.ai_hints,
+    )
+    if created:
+        _grant_auto_scaffold_review_access(session, models, existing, document)
+        _add_auto_created_audit_event(session, models, existing, document, contract_number)
+
+
+def _single_contract_hint(hints: Sequence[str]) -> Optional[str]:
+    normalized_to_hint: Dict[str, str] = {}
+    for hint in hints:
+        normalized = re.sub(r"[^A-Z0-9]", "", (hint or "").upper())
+        if normalized:
+            normalized_to_hint[normalized] = hint.strip().upper()
+    if len(normalized_to_hint) != 1:
+        return None
+    return next(iter(normalized_to_hint.values()))
+
+
+def _classification_metadata(document: object) -> Dict[str, object]:
+    metadata = getattr(document, "metadata_json", None) or {}
+    if not isinstance(metadata, dict):
+        return {}
+    classification = metadata.get("classification")
+    return classification if isinstance(classification, dict) else {}
+
+
+def _classification_confidence(document: object) -> float:
+    value = _classification_metadata(document).get("confidence")
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _extract_contract_metadata(text: str) -> Dict[str, Optional[str]]:
+    return {
+        "title": _first_labeled_value(text, ("Contract Title", "Title", "Description")),
+        "agency_name": _first_labeled_value(
+            text,
+            ("Agency", "Department", "Ordering Agency", "Contracting Agency", "Contracting Office"),
+        ),
+        "vendor_name": _first_labeled_value(text, ("Contractor", "Vendor", "Awardee", "Recipient")),
+    }
+
+
+def _first_labeled_value(text: str, labels: Sequence[str]) -> Optional[str]:
+    for label in labels:
+        pattern = rf"(?im)^\s*(?:\*\*)?{re.escape(label)}(?:\*\*)?\s*:\s*(.+?)\s*$"
+        match = re.search(pattern, text[:8000])
+        if match:
+            value = re.sub(r"\s+", " ", match.group(1)).strip(" -*")
+            if value:
+                return value[:300]
+    return None
+
+
+def _auto_contract_id(contract_number: str) -> str:
+    return str(uuid5(NAMESPACE_URL, f"federal-center-sw:auto-contract:{contract_number}"))
+
+
+def _grant_auto_scaffold_review_access(
+    session: Session,
+    models: object,
+    contract: object,
+    document: object,
+) -> None:
+    grant_model = _first_model(models, "ContractAccessGrant")
+    if grant_model is None or not _model_table_exists(session, grant_model):
+        return
+    contract_id = _string_attr(contract, "id")
+    if not contract_id:
+        return
+    uploader_id = _string_attr(document, "uploader_id")
+    security_level = _string_attr(document, "security_level") or "standard"
+    grants = [("official", "role", "reviewer")]
+    if uploader_id:
+        grants.append((uploader_id, "user", "uploader"))
+    for principal_id, principal_type, role in grants:
+        grant_id = str(uuid5(NAMESPACE_URL, f"auto-grant:{contract_id}:{principal_id}:{role}"))
+        if session.get(grant_model, grant_id) is not None:
+            continue
+        session.add(
+            grant_model(
+                id=grant_id,
+                contract_id=contract_id,
+                principal_id=principal_id,
+                principal_type=principal_type,
+                role=role,
+                security_level=security_level,
+                granted_by_id="system:auto_scaffold",
+            )
+        )
+
+
+def _add_auto_created_audit_event(
+    session: Session,
+    models: object,
+    contract: object,
+    document: object,
+    contract_number: str,
+) -> None:
+    audit_model = _first_model(models, "AuditEvent")
+    if audit_model is None or not _model_table_exists(session, audit_model):
+        return
+    contract_id = _string_attr(contract, "id")
+    document_id = _string_attr(document, "id", "document_id")
+    if not contract_id or not document_id:
+        return
+    session.add(
+        audit_model(
+            id=str(uuid4()),
+            actor_id="system:auto_scaffold",
+            actor_role="system",
+            event_type="contract.auto_created",
+            entity_type="contract",
+            entity_id=contract_id,
+            contract_id=contract_id,
+            document_upload_id=document_id,
+            metadata_json={
+                "contract_number": contract_number,
+                "document_kind": _string_attr(document, "document_kind"),
+                "classification": _classification_metadata(document),
+                "review_status": "pending",
+            },
+        )
+    )
 
 
 def _update_document_status(document: object, result: ProcessingResult) -> None:
