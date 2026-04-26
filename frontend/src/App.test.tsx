@@ -101,7 +101,10 @@ describe('App', () => {
 
     expect(await screen.findByRole('heading', { name: 'Contract Analysis Workspace' })).toBeInTheDocument();
     expect(await screen.findByRole('heading', { name: 'Contract Timeline And Cohort Patterns' })).toBeInTheDocument();
-    expect(await screen.findByRole('heading', { name: 'Cited Performance Explanation' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Contract Performance Explanation' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Run OpenAI analysis' })).toBeInTheDocument();
+    expect(screen.getByText('Model: gpt-5.4-mini')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Source Signal Context' })).toBeInTheDocument();
     expect(screen.getByText('Measurement Axes')).toBeInTheDocument();
     expect(screen.getByText('Evidence index')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Grokipedia Index' })).not.toBeInTheDocument();
@@ -161,6 +164,9 @@ function officialFetch() {
     }
     if (url === '/api/analysis/contracts/N40080-24-D-1042') {
       return Promise.resolve(jsonResponse(contractAnalysis));
+    }
+    if (url === '/api/contracts/N40080-24-D-1042/performance-analysis') {
+      return Promise.resolve(jsonResponse(contractAnalysis.ai_analysis, 202));
     }
     if (url === '/api/analysis/cohort') {
       return Promise.resolve(jsonResponse(cohortAnalysis));
@@ -285,6 +291,30 @@ const contractAnalysis = {
   positive_signals: [],
   execution_patterns: [],
   cpars_ratings: [],
+  ai_analysis: {
+    id: 'ai-run-1',
+    run_type: 'per_contract',
+    status: 'complete',
+    target_contract_id: 'N40080-24-D-1042',
+    result: {
+      summary: 'OpenAI identifies the RFI as an early execution risk. [sig-1]',
+      axes: [
+        {
+          axis: 'execution_and_risk',
+          status: 'measured',
+          rationale: 'The target has one cited aging RFI issue primitive.',
+        },
+      ],
+      cpars_predicted: {
+        Management: {
+          rating: 'Marginal',
+          rationale: 'Open RFI aging creates management risk.',
+        },
+      },
+    },
+    completed_at: '2026-04-25T19:00:00Z',
+    model: 'gpt-5.4-mini',
+  },
   analyst_brief: {
     problem_statement: 'Explain the outcome with cited primitives.',
     summary: 'Aging RFI appears across the timeline. [sig-1]',

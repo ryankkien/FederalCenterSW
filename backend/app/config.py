@@ -90,7 +90,7 @@ def get_openai_api_key() -> Optional[str]:
 
 
 def get_openai_llm_model() -> str:
-    return os.getenv("OPENAI_LLM_MODEL", "gpt-4o-mini")
+    return os.getenv("OPENAI_LLM_MODEL", "gpt-5.4-mini")
 
 
 def get_openai_embedding_model() -> str:

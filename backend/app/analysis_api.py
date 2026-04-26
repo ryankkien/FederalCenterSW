@@ -9,7 +9,12 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.ai.providers import get_ai_provider
-from app.analysis_orchestrator import get_analysis_run, run_cohort_analysis, run_per_contract_analysis
+from app.analysis_orchestrator import (
+    get_analysis_run,
+    get_latest_analysis_run,
+    run_cohort_analysis,
+    run_per_contract_analysis,
+)
 from app.auth import CurrentUser, get_current_user
 from app.authz import require_contract_view, visible_contract_ids
 from app.blob_storage import BlobStorage, get_blob_storage
@@ -273,6 +278,18 @@ class PredictedCparsFactorResponse(BaseModel):
     citations: List[PrimitiveCitationResponse] = []
 
 
+class AnalysisRunResponse(BaseModel):
+    id: str
+    run_type: str
+    status: str
+    target_contract_id: Optional[str] = None
+    cohort_N: Optional[int] = None
+    result: Optional[Dict[str, object]] = None
+    created_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    model: Optional[str] = None
+
+
 class ContractAnalystBriefResponse(BaseModel):
     problem_statement: str
     summary: str
@@ -296,6 +313,7 @@ class ContractTimelineAnalysisResponse(BaseModel):
     execution_patterns: List[TimelineSignalResponse]
     cpars_ratings: List[CparsRatingResponse]
     analyst_brief: Optional[ContractAnalystBriefResponse] = None
+    ai_analysis: Optional[AnalysisRunResponse] = None
     axes: List[PerformanceAxisResponse] = []
     cpars_predicted: Dict[str, PredictedCparsFactorResponse] = {}
     limitations: List[str] = []
@@ -678,17 +696,6 @@ class CohortDefinitionResponse(BaseModel):
     low_confidence: bool
 
 
-class AnalysisRunResponse(BaseModel):
-    id: str
-    run_type: str
-    status: str
-    target_contract_id: Optional[str] = None
-    cohort_N: Optional[int] = None
-    result: Optional[Dict[str, object]] = None
-    created_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-
-
 class CohortAnalysisRequest(BaseModel):
     contract_ids: List[str]
     cohort_definition: Optional[Dict[str, object]] = None
@@ -737,6 +744,7 @@ def create_per_contract_analysis(
         status=run["status"],
         target_contract_id=contract_id,
         result=run.get("result"),
+        model=run.get("model"),
     )
 
 
@@ -762,6 +770,7 @@ def get_per_contract_analysis(
         result=run.get("result"),
         created_at=run.get("created_at"),
         completed_at=run.get("completed_at"),
+        model=run.get("model"),
     )
 
 
@@ -792,6 +801,7 @@ def create_cohort_analysis_run(
         status=run["status"],
         cohort_N=len(payload.contract_ids),
         result=run.get("result"),
+        model=run.get("model"),
     )
 
 
@@ -815,6 +825,7 @@ def get_cohort_analysis_run(
         result=run.get("result"),
         created_at=run.get("created_at"),
         completed_at=run.get("completed_at"),
+        model=run.get("model"),
     )
 
 
@@ -848,6 +859,7 @@ def _contract_timeline_analysis(
         cohort_scope.insert(0, contract_id)
     axes = _contract_axes(db, contract_id, timeline, cohort_scope)
     cpars_predicted = _predicted_cpars_from_axes(axes)
+    latest_ai_run = get_latest_analysis_run(db, contract_id)
     limitations = []
     if not timeline:
         limitations.append("No child reports are linked to this contract yet.")
@@ -866,6 +878,7 @@ def _contract_timeline_analysis(
         positive_signals=[signal for signal in all_signals if signal.polarity == "positive"][:20],
         execution_patterns=[signal for signal in all_signals if signal.category == "execution_pattern"][:20],
         cpars_ratings=cpars_ratings,
+        ai_analysis=_analysis_run_response(latest_ai_run) if latest_ai_run else None,
         analyst_brief=_contract_analyst_brief(
             contract,
             timeline,
@@ -878,6 +891,20 @@ def _contract_timeline_analysis(
         axes=axes,
         cpars_predicted=cpars_predicted,
         limitations=limitations,
+    )
+
+
+def _analysis_run_response(run: Dict[str, object]) -> AnalysisRunResponse:
+    return AnalysisRunResponse(
+        id=str(run["id"]),
+        run_type=str(run["run_type"]),
+        status=str(run["status"]),
+        target_contract_id=run.get("target_contract_id"),  # type: ignore[arg-type]
+        cohort_N=len(run.get("cohort_contract_ids") or []) if run.get("cohort_contract_ids") else None,
+        result=run.get("result"),  # type: ignore[arg-type]
+        created_at=run.get("created_at"),  # type: ignore[arg-type]
+        completed_at=run.get("completed_at"),  # type: ignore[arg-type]
+        model=run.get("model"),  # type: ignore[arg-type]
     )
 
 

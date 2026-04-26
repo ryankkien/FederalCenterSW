@@ -45,11 +45,7 @@ param summarizerAppName string
 @description('Summarizer Docker image tag to deploy.')
 param summarizerImageTag string = 'latest'
 
-@description('Anthropic API key secret for the Summarizer.')
-@secure()
-param anthropicApiKey string = ''
-
-@description('OpenAI API key secret for the Summarizer (used if Anthropic key is empty).')
+@description('OpenAI API key secret for the Summarizer.')
 @secure()
 param openaiApiKey string = ''
 
@@ -311,10 +307,6 @@ resource summarizerApp 'Microsoft.App/containerApps@2024-03-01' = {
           value: 'DefaultEndpointsProtocol=https;AccountName=${appStorage.name};AccountKey=${appStorage.listKeys().keys[0].value};EndpointSuffix=${environment().suffixes.storage}'
         }
         {
-          name: 'anthropic-api-key'
-          value: anthropicApiKey
-        }
-        {
           name: 'openai-api-key'
           value: openaiApiKey
         }
@@ -343,16 +335,12 @@ resource summarizerApp 'Microsoft.App/containerApps@2024-03-01' = {
               value: appAssetsContainerName
             }
             {
-              name: 'ANTHROPIC_API_KEY'
-              secretRef: 'anthropic-api-key'
-            }
-            {
               name: 'OPENAI_API_KEY'
               secretRef: 'openai-api-key'
             }
             {
-              name: 'MODEL_PREFERENCE'
-              value: 'claude'
+              name: 'OPENAI_LLM_MODEL'
+              value: 'gpt-5.4-mini'
             }
             {
               name: 'DATABASE_URL'

@@ -140,7 +140,7 @@ AI_PROVIDER=openai
 AI_PROCESSING_ENABLED=false
 AI_INLINE_PROCESSING_ENABLED=false
 OPENAI_API_KEY=
-OPENAI_LLM_MODEL=gpt-5.5
+OPENAI_LLM_MODEL=gpt-5.4-mini
 OPENAI_EMBEDDING_MODEL=text-embedding-3-large
 ```
 
@@ -215,8 +215,8 @@ docker compose up -d feature_extractor
 
 The service reads `contracts/{document_id}/text.json`, falls back to legacy
 `documents/{doc_id}/ocr.json`, and writes `contracts/{document_id}/summary.json`.
-Configure `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `MODEL_PREFERENCE` only in ignored
-local env files or shell exports.
+Configure `OPENAI_API_KEY` and `OPENAI_LLM_MODEL` only in ignored local env files or
+shell exports. The default LLM model is `gpt-5.4-mini`.
 
 ## Boundaries
 
