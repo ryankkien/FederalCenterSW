@@ -99,7 +99,7 @@ The optional `feature_extractor/` service reads a text artifact from blob, runs 
 - `POST /summarize` — unchanged, runs summarization + chunking + embedding (pipeline steps 1-4)
 - `POST /extract-primitives` — extracts primitives for a document given its classification
 
-**Audit events** use `event_type` values: `feature_extractor.summary`, `feature_extractor.chunking`, `feature_extractor.index`, `feature_extractor.primitives`. Backend-triggered summary and primitive failures are also surfaced in `processing_run_steps`; they must not roll back the upstream processing run.
+**Audit events** use `event_type` values: `feature_extractor.summary`, `feature_extractor.chunking`, `feature_extractor.index`, `feature_extractor.primitives`, `feature_extractor.analysis_trigger`. Backend-triggered summary and primitive failures are also surfaced in `processing_run_steps`; they must not roll back the upstream processing run.
 
 **Blob paths** (container: `app-assets`, env: `AZURE_STORAGE_CONTAINER`):
 

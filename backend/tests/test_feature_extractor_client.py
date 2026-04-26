@@ -28,7 +28,7 @@ def test_trigger_feature_extractor_calls_summary_then_primitives(monkeypatch) ->
         (
             "http://extractor.local",
             "/summarize",
-            {"doc_id": "doc-1"},
+            {"doc_id": "doc-1", "contract_id": "contract-1"},
             {
                 "X-Document-Upload-ID": "doc-1",
                 "X-Contract-ID": "contract-1",
