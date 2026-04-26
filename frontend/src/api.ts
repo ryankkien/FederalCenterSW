@@ -122,6 +122,10 @@ export async function getContractLifecycle(contractId: string) {
   return request(`/api/contracts/${encodeURIComponent(contractId)}/lifecycle`);
 }
 
+export async function listProcessingJobs(contractId: string) {
+  return request(`/api/contracts/${encodeURIComponent(contractId)}/processing-jobs`);
+}
+
 export async function getContractDeliverables(contractId: string) {
   return request(`/api/contracts/${encodeURIComponent(contractId)}/deliverables`);
 }
