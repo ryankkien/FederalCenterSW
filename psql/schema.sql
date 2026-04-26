@@ -23,7 +23,9 @@ CREATE TABLE documents (
     title             TEXT        NOT NULL,
     date_submitted    TIMESTAMPTZ NOT NULL DEFAULT now(),
     doc_type_id       INTEGER     REFERENCES document_types(id),
-    summary_embedding VECTOR(1536)
+    summary_embedding VECTOR(1536),
+    psc_code          TEXT,
+    naics_code        TEXT
 );
 
 CREATE TABLE chunks (
