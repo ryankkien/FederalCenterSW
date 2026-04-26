@@ -78,15 +78,41 @@ See [docs/local-dev.md](docs/local-dev.md) for the Docker-based local mirror of 
 
 The product direction is documented in [docs/product.md](docs/product.md). It covers the
 target CO/COR/PM users, Entra ID/RBAC access model, contract records, report intake
-sources, document processing pipeline, and first dashboard deliverables.
+sources, CPARS/IPMDAR source planning, document processing pipeline, and first
+dashboard deliverables.
+
+Local fixture PDFs for contract and recurring-report processing are documented in
+[docs/testdocs.md](docs/testdocs.md).
 
 ## Checks
 
 ```sh
+bun run db:upgrade
 bun run build
 bun run lint
 bun run test
 ```
+
+## Local Analyst Fixtures
+
+Seed the bundled WWR, AGOR, and Natalie contract/report fixtures into the local
+database and blob backend:
+
+```sh
+bun run fixtures:seed -- --fixtures all
+bun run fixtures:seed -- --fixtures wwr,natalie --reset-analysis
+bun run processing:run -- --limit 200
+```
+
+Fixture seeding is idempotent. Document IDs are deterministic from fixture path and
+file hash, PDFs are copied to `contracts/{document_id}/main.pdf`, extracted text is
+stored at `contracts/{document_id}/text.json`, and processing jobs are queued for
+new or reset documents.
+
+An optional local summarizer service lives in `summarizer/`. It can read
+`contracts/{document_id}/text.json`, generate a layered summary, classify PSC/NAICS,
+and write `contracts/{document_id}/summary.json`. The main analyst pipeline does not
+require it; it is supplemental to the DB-backed processing store.
 
 ## Infrastructure
 
@@ -113,25 +139,133 @@ Pull request notifications can post to a Discord `#pull-requests` channel throug
 channel and add its URL to the GitHub repository secret
 `DISCORD_PULL_REQUEST_WEBHOOK_URL`.
 
-## Mock Auth And Document Ingest
+## AI Processing Foundation
 
-The app starts with a mock role login. Choose `Contractor` to upload documents, or `Government official` to review contractor uploads. Uploaded files are stored through the backend blob storage adapter and document metadata is stored in the backend database.
-Each uploaded or emailed document also gets a sibling extraction artifact:
+The backend stores uploaded source files and extracted `text.json` artifacts in Blob
+Storage, while Postgres is the canonical store for contract records, processing jobs,
+chunks, embeddings, signals, topics, evidence links, and audit history. Local Postgres
+uses a pgvector-enabled image so embeddings can live beside contract-scoped metadata.
+
+AI processing is feature-flagged off by default. Configure `AI_PROVIDER`,
+`AI_PROCESSING_ENABLED`, `AI_INLINE_PROCESSING_ENABLED`, `OPENAI_API_KEY`,
+`OPENAI_LLM_MODEL`, and `OPENAI_EMBEDDING_MODEL` in an ignored env file or Azure app
+settings before running OpenAI-backed extraction. Upload and email intake workflows
+continue to store documents when AI processing is disabled or blocked.
+
+The contract analyst pipeline extends the processing foundation with page-level
+extraction, deterministic v1 classification, hard-link matching, extracted entities
+and report facts, interpreted baselines, regression findings, hypotheses,
+investigation logs, official external-source references, semantic links, and
+step-level run logs. Hard parentage stays on `document_uploads.contract_id`;
+cross-contract and cross-document pattern relationships are stored separately as
+semantic links.
+
+The knowledge wiki index is a server-backed Grokipedia-style layer for officials. It
+mines local contract/report analysis plus official bulk exports by default. For the
+Department of Navy service-contract corpus, prefer USAspending CSV/ZIP exports and
+local govinfo/Regulations/SAM bulk mirrors before any live keyed drill-downs.
+Optional-source gaps are still recorded when authorized CPARS/IPMDAR imports are absent.
+Contractor profiles use evidence labels such as schedule variance, funding variance,
+unresolved issues, and contradiction counts; they do not make unsupported honesty or
+responsibility judgments.
+
+Local analyst endpoints include:
 
 ```text
-documents/{uploader_id}/{document_id}/{original_filename}
-documents/{uploader_id}/{document_id}/text.json
+GET  /api/contracts
+POST /api/knowledge/ingestion-runs
+GET  /api/wiki/search
+GET  /api/wiki/contracts/{contract_id}
+GET  /api/wiki/contractors/{vendor_uei}
+GET  /api/wiki/nodes/{node_id}
+GET  /api/wiki/runs/{run_id}
+GET  /api/contracts/{contract_id}/documents
+GET  /api/contracts/{contract_id}/evidence
+GET  /api/contracts/{contract_id}/analysis-runs
+POST /api/processing/jobs/{job_id}/run
+GET  /api/contracts/{contract_id}/baseline
+GET  /api/contracts/{contract_id}/regressions
+GET  /api/contracts/{contract_id}/hypotheses
+GET  /api/contracts/{contract_id}/hypotheses/{hypothesis_id}
+POST /api/contracts/{contract_id}/hypotheses/{hypothesis_id}/investigate
+POST /api/contracts/{contract_id}/hypotheses/{hypothesis_id}/status
+GET  /api/contracts/{contract_id}/similar-contracts
+GET  /api/documents/{document_id}
+GET  /api/documents/{document_id}/relationships
+POST /api/documents/{document_id}/match-decisions
+POST /api/documents/{document_id}/processing-jobs
 ```
 
-`text.json` stores extracted text and extraction metadata for later contract processing.
-PDFs use embedded text when it is usable. Scanned PDFs, PDFs with low-quality embedded
-OCR, and uploaded images fall back to Tesseract OCR when it is installed.
+External research references are v1 allowlisted to official sources such as `.gov`,
+`.mil`, Acquisition.gov, Federal Register, GAO/OIG, Congress.gov, and agency domains.
+Uploaded contract-file evidence remains authoritative for contract-specific findings.
 
-For local development without Azure env values, the backend falls back to ignored local storage under `backend/data/`. For Azure-backed runs, fill in `DATABASE_URL`, `AUTH_SECRET_KEY`, and the `AZURE_STORAGE_*` variables in `backend/.env`.
+Build the local wiki index after fixture processing:
+
+```sh
+bun run knowledge:ingest -- --scope fixtures --sources open --limit 500
+bun run knowledge:build -- --scope fixtures
+```
+
+Import bulk USAspending awards, eCFR Title 48 sections, SAM.gov public opportunity
+snapshots, Federal Register XML archives, and prepare a sanitized Claude Code CLI
+packet:
+
+```sh
+bun run knowledge:import-usaspending-bulk -- --paths backend/data/bulk/usaspending --build-index
+bun run knowledge:import-ecfr-title48-bulk -- --paths backend/data/bulk/ecfr
+bun run knowledge:import-sam-opportunities-bulk -- --paths backend/data/bulk/sam_opportunities
+bun run knowledge:import-federal-register-bulk -- --paths backend/data/bulk/federal_register
+bun run knowledge:export-claude -- --output-dir backend/data/claude_knowledge
+```
+
+Build a file-first Navy service fixture corpus from the three downloaded fixture
+families plus clearly labeled synthetic reports and knowledge artifacts:
+
+```sh
+bun run corpus:build-synthetic
+```
+
+The generated corpus lives under ignored `backend/data/corpus/navy-service-v1/` and
+keeps `real_fixture` downloaded anchors separate from `synthetic_fixture` reports,
+CPARS-style narratives, IPMDAR-style JSON, decision logs, and cross-contract lesson
+notes.
+
+## Auth Modes
+
+Set `AUTH_MODE=mock` for local development and tests. Mock mode exposes
+`POST /api/auth/mock-login` and returns deterministic contractor/official demo users.
+
+Set `AUTH_MODE=entra` for production-style auth. Entra mode disables mock login,
+validates JWT issuer, audience, expiry, and JWKS signature, and maps Entra user/group
+ids to `contract_access_grants.principal_id` for contract-scoped RBAC.
+
+## Document Ingest
+
+In mock local mode, choose `Contractor` to upload documents or `Government official`
+to inspect the contract analyst workspace and review queue. Uploaded files are stored
+through the backend blob storage adapter and document metadata is stored in Postgres.
+Each upload gets an immutable document artifact folder:
+
+```text
+contracts/{document_id}/main.{ext}
+contracts/{document_id}/text.json
+```
+
+`main.*` is the primary stored file. PDFs stay PDF, and TXT/CSV/image uploads are
+converted to PDF when the backend can do that locally. `text.json` stores extracted
+text, page text, extraction metadata, and warnings/errors for later contract
+processing.
+For PDFs with embedded text, extraction uses the PDF text layer. For scanned PDFs and
+uploaded images, extraction falls back to OCR when Tesseract is installed.
+
+For local development without Azure env values, the backend falls back to ignored
+local storage under `backend/data/`. For Azure-backed runs, fill in `DATABASE_URL`,
+`AUTH_SECRET_KEY`, and the `AZURE_STORAGE_*` variables in `backend/.env`.
 
 ## Email Intake
 
-The backend includes an IMAP intake worker that parses unread mailbox messages into JSONL audit records. In commit mode, supported attachments are uploaded to the same document storage used by the portal and become visible to the mock contractor and official review pages. It can also send an optional receipt auto-reply. Configure it with `EMAIL_INTAKE_*` environment variables, then run:
+The backend includes an IMAP intake worker that parses unread mailbox messages into JSONL audit records. In commit mode, supported attachments are uploaded to the same contract-folder storage used by the portal and become visible to the mock contractor portal and official analyst workspace. It can also send an optional receipt auto-reply. Configure it with `EMAIL_INTAKE_*` environment variables, then run:
 
 ```sh
 bun run email:intake -- --limit 5

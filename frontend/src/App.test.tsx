@@ -16,16 +16,35 @@ const officialUser = {
   role: 'official',
 };
 
+const contractRecord = {
+  id: 'N40080-24-D-1042',
+  title: 'Environmental Compliance and Permitting Support Services',
+  status: 'active',
+  source: 'contract_record',
+  category_code: 'R',
+  document_count: 2,
+  open_regression_count: 1,
+  active_hypothesis_count: 1,
+  pending_job_count: 1,
+  unmatched_document_count: 0,
+  has_knowledge_base: true,
+};
+
 const documentRecord = {
   id: 'doc-1',
   title: 'Monthly progress report',
   document_type: 'Progress Report',
+  document_kind: 'monthly_report',
   notes: 'Submitted for review',
   original_filename: 'progress.pdf',
+  stored_filename: 'main.pdf',
   content_type: 'application/pdf',
   size_bytes: 1280,
   uploader_id: 'contractor-demo',
   uploader_role: 'contractor',
+  contract_id: 'N40080-24-D-1042',
+  match_status: 'matched',
+  processing_status: 'queued',
   created_at: '2026-04-25T18:00:00Z',
 };
 
@@ -49,7 +68,7 @@ describe('App', () => {
     expect(screen.getByLabelText('Role')).toBeInTheDocument();
   });
 
-  it('routes contractors to upload and my uploads after login', async () => {
+  it('routes contractors to upload and status after login', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({ access_token: 'contractor-token', user: contractorUser }))
@@ -77,45 +96,134 @@ describe('App', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/documents/upload', expect.any(Object)));
   });
 
-  it('routes officials to the read-only review portal', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse({ access_token: 'official-token', user: officialUser }))
-      .mockResolvedValueOnce(jsonResponse([documentRecord]));
-    vi.stubGlobal('fetch', fetchMock);
+  it('routes officials to the wiki index workspace', async () => {
+    vi.stubGlobal('fetch', officialFetch());
 
     render(<App />);
     fireEvent.change(screen.getByLabelText('Role'), { target: { value: 'official' } });
     fireEvent.submit(screen.getByRole('button', { name: 'Continue' }).closest('form')!);
 
-    expect(await screen.findByRole('heading', { name: 'Official Review Portal' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Contractor Uploads' })).toBeInTheDocument();
-    expect(await screen.findByText('Monthly progress report')).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Upload Document' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Grokipedia Workspace' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Grokipedia Index' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('button', { name: /contract result Environmental Compliance/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Citations' })).toBeInTheDocument();
   });
 
-  it('opens a short-lived SAS URL when downloading a document', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse({ access_token: 'official-token', user: officialUser }))
-      .mockResolvedValueOnce(jsonResponse([documentRecord]))
-      .mockResolvedValueOnce(jsonResponse({ url: 'https://storage.example.test/file.pdf?sas=true', expires_in_minutes: 15 }));
-    const openMock = vi.fn();
+  it('filters and opens wiki search results', async () => {
+    const fetchMock = officialFetch();
     vi.stubGlobal('fetch', fetchMock);
-    vi.stubGlobal('open', openMock);
 
     render(<App />);
     fireEvent.change(screen.getByLabelText('Role'), { target: { value: 'official' } });
     fireEvent.submit(screen.getByRole('button', { name: 'Continue' }).closest('form')!);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Download' }));
+    fireEvent.change(await screen.findByLabelText('Search knowledge index'), { target: { value: 'Aging RFI' } });
+    fireEvent.click(await screen.findByRole('button', { name: /regression result Aging RFI/ }));
 
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith('/api/documents/doc-1/sas-url', expect.any(Object)),
-    );
-    expect(openMock).toHaveBeenCalledWith('https://storage.example.test/file.pdf?sas=true', '_blank', 'noopener,noreferrer');
+    expect(await screen.findByRole('heading', { name: 'Aging RFI' })).toBeInTheDocument();
+    expect(screen.getAllByText('RFI is 21 days open.').length).toBeGreaterThan(0);
+    expect(fetchMock).toHaveBeenCalledWith('/api/wiki/search?q=Aging+RFI', expect.any(Object));
   });
 });
+
+function officialFetch() {
+  return vi.fn((input: Parameters<typeof fetch>[0]) => {
+    const url = String(input);
+    if (url === '/api/auth/mock-login') {
+      return Promise.resolve(jsonResponse({ access_token: 'official-token', user: officialUser }));
+    }
+    if (url === '/api/contracts') {
+      return Promise.resolve(jsonResponse([contractRecord]));
+    }
+    if (url.startsWith('/api/wiki/search')) {
+      if (url.includes('Aging+RFI')) {
+        return Promise.resolve(jsonResponse([wikiRegressionNode]));
+      }
+      return Promise.resolve(jsonResponse([wikiContractNode, wikiRegressionNode, wikiContractorNode]));
+    }
+    if (url === '/api/wiki/contracts/N40080-24-D-1042') {
+      return Promise.resolve(jsonResponse(wikiContractArticle));
+    }
+    if (url === '/api/wiki/nodes/reg-node-1') {
+      return Promise.resolve(jsonResponse(wikiRegressionArticle));
+    }
+    if (url === '/api/wiki/contractors/UEIATLANTIC1') {
+      return Promise.resolve(jsonResponse(wikiContractorArticle));
+    }
+    if (url === '/api/knowledge/ingestion-runs') {
+      return Promise.resolve(jsonResponse({ id: 'run-1', status: 'completed', source_record_count: 2, node_count: 3, citation_count: 4 }, 202));
+    }
+    return Promise.resolve(jsonResponse({}));
+  });
+}
+
+const wikiContractNode = {
+  id: 'contract:N40080-24-D-1042',
+  node_type: 'contract',
+  title: 'Environmental Compliance and Permitting Support Services',
+  summary: 'Onboarding article for the contract.',
+  contract_id: 'N40080-24-D-1042',
+  vendor_uei: 'UEIATLANTIC1',
+  security_level: 'standard',
+  status: 'active',
+  citation_count: 2,
+};
+
+const wikiRegressionNode = {
+  id: 'reg-node-1',
+  node_type: 'regression',
+  title: 'Aging RFI',
+  summary: 'RFI is 21 days open.',
+  contract_id: 'N40080-24-D-1042',
+  vendor_uei: 'UEIATLANTIC1',
+  security_level: 'controlled',
+  status: 'open',
+  citation_count: 1,
+};
+
+const wikiContractorNode = {
+  id: 'contractor-node-1',
+  node_type: 'contractor',
+  title: 'Atlantic Environmental',
+  summary: 'Contractor evidence profile.',
+  contract_id: null,
+  vendor_uei: 'UEIATLANTIC1',
+  security_level: 'controlled',
+  status: 'active',
+  citation_count: 1,
+};
+
+const wikiContractArticle = {
+  ...wikiContractNode,
+  body: 'Contract onboarding article body.',
+  sections: [{ title: 'Onboarding Brief', body: 'All contract onboarding details are indexed.' }],
+  citations: [{ id: 'cite-1', label: 'Monthly progress report', excerpt: 'RFI is 21 days open.', source_path: 'contracts/doc-1/main.pdf' }],
+  related_nodes: [wikiRegressionNode, wikiContractorNode],
+  limitations: [],
+  metadata: {},
+};
+
+const wikiRegressionArticle = {
+  ...wikiRegressionNode,
+  body: 'RFI is 21 days open.',
+  sections: [{ title: 'Indexed Text', body: 'RFI is 21 days open.' }],
+  citations: [{ id: 'cite-2', label: 'Weekly report', excerpt: 'RFI is 21 days open.', source_path: 'contracts/doc-1/main.pdf' }],
+  related_nodes: [wikiContractNode],
+  limitations: [],
+  metadata: {},
+};
+
+const wikiContractorArticle = {
+  ...wikiContractorNode,
+  body: 'Contractor evidence profile.',
+  sections: [{ title: 'Evidence Labels', body: 'Unresolved issues: 1.' }],
+  citations: [],
+  related_nodes: [wikiContractNode],
+  limitations: ['Labels are evidence counters.'],
+  metadata: {},
+};
 
 function jsonResponse(body: unknown, status = 200) {
   return {
