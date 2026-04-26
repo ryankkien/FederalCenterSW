@@ -48,8 +48,12 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       MODEL_PREFERENCE: ${MODEL_PREFERENCE:-claude}
+      DATABASE_URL: postgresql://fcadmin:local_dev_password@postgres:5432/federal_center_sw
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
     depends_on:
       azurite:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
 
 volumes:
