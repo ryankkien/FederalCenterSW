@@ -221,8 +221,17 @@ Set `FEATURE_EXTRACTOR_URL=http://127.0.0.1:8001` for a locally run backend, or 
 after processing jobs complete. The backend calls `/summarize` first and then
 `/extract-primitives` with the document classification from the processing run.
 Extractor failures are logged to `processing_run_steps` and `audit_events` but do not
-roll back the completed processing job. Configure `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
-and `MODEL_PREFERENCE` only in ignored local env files or shell exports.
+roll back the completed processing job.
+
+After primitive extraction succeeds for a document with a known `contract_id`, the
+service calls the backend internal analysis trigger when `BACKEND_API_URL` and
+`INTERNAL_SERVICE_TOKEN` are configured. The backend debounces the request: it skips
+the run when an `analysis_runs` row for that contract is newer than the latest
+successful or partial primitive extraction. Low-N cohorts still run and are tagged
+`low_confidence`.
+
+Configure `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `MODEL_PREFERENCE` only in ignored
+local env files or shell exports.
 
 ## Boundaries
 

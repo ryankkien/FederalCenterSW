@@ -47,6 +47,7 @@ services:
       AZURE_STORAGE_CONTAINER: app-assets
       AUTH_MODE: ${AUTH_MODE:-mock}
       AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:-dev-only-auth-secret-change-me}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-local-dev-internal-token}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_LLM_MODEL: ${OPENAI_LLM_MODEL:-gpt-4o-mini}
       OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
@@ -75,6 +76,8 @@ services:
       MODEL_PREFERENCE: ${MODEL_PREFERENCE:-claude}
       DATABASE_URL: postgresql://fcadmin:local_dev_password@postgres:5432/federal_center_sw
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      BACKEND_API_URL: http://backend:8000
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-local-dev-internal-token}
     depends_on:
       azurite:
         condition: service_healthy

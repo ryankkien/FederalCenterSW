@@ -117,7 +117,12 @@ extract structured primitives (deliverable, financial, decisions, issue, personn
 the DB, and write `contracts/{document_id}/summary.json`. When `FEATURE_EXTRACTOR_URL`
 is configured for the backend, completed document processing runs automatically call
 `/summarize` and then `/extract-primitives`; extractor failures are recorded on the
-processing run and do not roll back the completed run.
+processing run and do not roll back the completed run. When `BACKEND_API_URL` and
+`INTERNAL_SERVICE_TOKEN` are configured, successful primitive extraction asks the
+backend to enqueue a debounced per-contract analysis run for the document's
+`contract_id`.
+The main analyst pipeline does not require it; it is supplemental to the DB-backed
+processing store.
 
 ## Infrastructure
 

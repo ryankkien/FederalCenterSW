@@ -272,8 +272,11 @@ bun run infra:deploy
   supplemental PSC/NAICS classification evidence. When `FEATURE_EXTRACTOR_URL` is
   configured, completed backend processing runs call `/summarize` and then
   `/extract-primitives`; extractor failures are recorded in `processing_run_steps` and
-  must not roll back the upstream processing run. It is not the canonical analyst
-  store.
+  must not roll back the upstream processing run. When configured with
+  `BACKEND_API_URL` and `INTERNAL_SERVICE_TOKEN`, successful primitive extraction
+  triggers a debounced per-contract analysis run for the document's hard-linked
+  `contract_id`; cohort-wide analysis remains on-demand. It is not the canonical
+  analyst store.
 - `bun run corpus:build-synthetic` creates an ignored file corpus under
   `backend/data/corpus/navy-service-v1/` from the WWR, AGOR, and Natalie fixture
   families. Treat `real_fixture` downloaded anchors separately from
