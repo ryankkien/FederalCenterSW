@@ -109,9 +109,10 @@ file hash, PDFs are copied to `contracts/{document_id}/main.pdf`, extracted text
 stored at `contracts/{document_id}/text.json`, and processing jobs are queued for
 new or reset documents.
 
-An optional local summarizer service lives in `summarizer/`. It can read
+An optional local feature extractor service lives in `feature_extractor/`. It can read
 `contracts/{document_id}/text.json`, generate a layered summary, classify PSC/NAICS,
-and write `contracts/{document_id}/summary.json`. The main analyst pipeline does not
+extract structured primitives (deliverable, financial, decisions, issue, personnel) into
+the DB, and write `contracts/{document_id}/summary.json`. The main analyst pipeline does not
 require it; it is supplemental to the DB-backed processing store.
 
 ## Infrastructure
