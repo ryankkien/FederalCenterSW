@@ -1,0 +1,4 @@
+Ticket 09: Replace mock auth with Entra/MSAL
+
+This branch is an empty stub. The full spec is in the PR description.
+Implementing agent: read the PR body, then delete this file as part of your work.
