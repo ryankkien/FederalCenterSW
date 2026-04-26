@@ -99,6 +99,8 @@ class Contract(Base):
     vendor_uei: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
     naics_code: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
     psc_code: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
+    contract_type: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    competition_type: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     period_start: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     period_end: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     status: Mapped[str] = mapped_column(String(40), default="active", nullable=False, index=True)

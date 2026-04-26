@@ -7,9 +7,11 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.ai.providers import get_ai_provider
+from app.analysis_orchestrator import get_analysis_run, run_cohort_analysis, run_per_contract_analysis
 from app.auth import CurrentUser, get_current_user
 from app.authz import require_contract_view
 from app.blob_storage import BlobStorage, get_blob_storage
+from app.cohort_builder import build_cohort
 from app.contract_analysis import create_investigation_run
 from app.database import get_db
 from app.models import (
@@ -504,6 +506,154 @@ def get_document_relationships(
         hard_parent_contract_id=document.contract_id,
         semantic_links=links,
         limitations=limitations,
+    )
+
+
+class CohortDefinitionResponse(BaseModel):
+    target_contract_id: str
+    match_criteria: Dict[str, object]
+    contract_ids: List[str]
+    N: int
+    low_confidence: bool
+
+
+class AnalysisRunResponse(BaseModel):
+    id: str
+    run_type: str
+    status: str
+    target_contract_id: Optional[str] = None
+    cohort_N: Optional[int] = None
+    result: Optional[Dict[str, object]] = None
+    created_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
+class CohortAnalysisRequest(BaseModel):
+    contract_ids: List[str]
+    cohort_definition: Optional[Dict[str, object]] = None
+
+
+@router.get("/contracts/{contract_id}/cohort", response_model=CohortDefinitionResponse)
+def get_contract_cohort(
+    contract_id: str,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> CohortDefinitionResponse:
+    require_contract_view(user, db, contract_id)
+    cohort = build_cohort(db, contract_id)
+    return CohortDefinitionResponse(
+        target_contract_id=cohort.target_contract_id,
+        match_criteria=cohort.match_criteria,
+        contract_ids=cohort.contract_ids,
+        N=cohort.N,
+        low_confidence=cohort.low_confidence,
+    )
+
+
+@router.post(
+    "/contracts/{contract_id}/performance-analysis",
+    response_model=AnalysisRunResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def create_per_contract_analysis(
+    contract_id: str,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> AnalysisRunResponse:
+    require_contract_view(user, db, contract_id)
+    try:
+        run = run_per_contract_analysis(db, contract_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Analysis failed: {exc}",
+        ) from exc
+    return AnalysisRunResponse(
+        id=run["id"],
+        run_type="per_contract",
+        status=run["status"],
+        target_contract_id=contract_id,
+        result=run.get("result"),
+    )
+
+
+@router.get(
+    "/contracts/{contract_id}/performance-analysis/{run_id}",
+    response_model=AnalysisRunResponse,
+)
+def get_per_contract_analysis(
+    contract_id: str,
+    run_id: str,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> AnalysisRunResponse:
+    require_contract_view(user, db, contract_id)
+    run = get_analysis_run(db, run_id)
+    if run is None or run.get("target_contract_id") != contract_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis run not found")
+    return AnalysisRunResponse(
+        id=run["id"],
+        run_type=run["run_type"],
+        status=run["status"],
+        target_contract_id=run.get("target_contract_id"),
+        result=run.get("result"),
+        created_at=run.get("created_at"),
+        completed_at=run.get("completed_at"),
+    )
+
+
+@router.post(
+    "/analysis/cohort-runs",
+    response_model=AnalysisRunResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def create_cohort_analysis(
+    payload: CohortAnalysisRequest,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> AnalysisRunResponse:
+    if not payload.contract_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="contract_ids required")
+    for cid in payload.contract_ids:
+        require_contract_view(user, db, cid)
+    try:
+        run = run_cohort_analysis(db, payload.contract_ids, payload.cohort_definition)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Cohort analysis failed: {exc}",
+        ) from exc
+    return AnalysisRunResponse(
+        id=run["id"],
+        run_type="cohort",
+        status=run["status"],
+        cohort_N=len(payload.contract_ids),
+        result=run.get("result"),
+    )
+
+
+@router.get("/analysis/cohort-runs/{run_id}", response_model=AnalysisRunResponse)
+def get_cohort_analysis(
+    run_id: str,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> AnalysisRunResponse:
+    run = get_analysis_run(db, run_id)
+    if run is None or run.get("run_type") != "cohort":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis run not found")
+    cids = run.get("cohort_contract_ids") or []
+    for cid in cids:
+        require_contract_view(user, db, cid)
+    return AnalysisRunResponse(
+        id=run["id"],
+        run_type=run["run_type"],
+        status=run["status"],
+        cohort_N=len(cids),
+        result=run.get("result"),
+        created_at=run.get("created_at"),
+        completed_at=run.get("completed_at"),
     )
 
 
