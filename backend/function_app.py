@@ -5,6 +5,7 @@ from uuid import uuid4
 import azure.functions as func
 
 from app.email_intake import EmailIntakeConfig, run_once
+from app.config import get_document_processing_max_workers
 from app.observability import configure_observability, get_logger, log_context
 from app.processing_worker import drain_queued_processing_jobs
 
@@ -53,7 +54,8 @@ def document_processing_timer(timer: func.TimerRequest) -> None:
             logger.warning("Document processing timer is past due.")
 
         limit = int(os.getenv("DOCUMENT_PROCESSING_LIMIT", "25"))
-        summary = drain_queued_processing_jobs(limit=limit)
+        max_workers = get_document_processing_max_workers()
+        summary = drain_queued_processing_jobs(limit=limit, max_workers=max_workers)
 
         logger.info(
             "Document processing worker processed job batch",
@@ -63,5 +65,6 @@ def document_processing_timer(timer: func.TimerRequest) -> None:
                 "processing_failed_count": summary.failed,
                 "processing_waiting_for_text_count": summary.waiting_for_text,
                 "processing_queued_remaining_count": summary.queued_remaining,
+                "processing_max_workers": max_workers,
             },
         )

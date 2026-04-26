@@ -328,6 +328,7 @@ bun run infra:deploy
 - Queued document processing is drained by the Azure Function timer in
   `backend/function_app.py`; the worker skips jobs whose `text.json` still reports
   `extraction_status="pending_ocr"` so they can be retried after OCR text arrives.
+  Drains use bounded concurrency controlled by `DOCUMENT_PROCESSING_MAX_WORKERS`.
 - Email intake persistence is intentionally stubbed: it writes JSONL locally by default
   and can write JSON records to Azure Blob Storage when configured.
 - In Azure Functions, email intake should use Blob Storage for durable stub output

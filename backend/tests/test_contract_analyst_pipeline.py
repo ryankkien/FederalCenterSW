@@ -47,6 +47,7 @@ from app.models import (
     HypothesisEvidence,
     ProcessingRun,
     ProcessingRunStep,
+    RegressionFinding,
 )
 from app.feature_extractor_client import FeatureExtractorStepResult
 from app.synthetic_corpus import SYNTHETIC_DOCUMENTS
@@ -368,6 +369,52 @@ def test_semantic_links_do_not_change_document_hard_parent(tmp_path) -> None:
     assert document_link_count >= 1
     assert doc1.contract_id == "cardinal"
     assert doc2.contract_id == "meridian"
+
+
+def test_semantic_link_update_deduplicates_pending_same_type_links(tmp_path) -> None:
+    with next(_test_db_session(tmp_path)) as db:
+        db.add_all(
+            [
+                _contract(id="cardinal", number="N40080-23-D-3155"),
+                _contract(id="meridian", number="N40080-22-D-4221"),
+            ]
+        )
+        doc1 = _document(id="cardinal-report", contract_id="cardinal", filename="N40080-23-D-3155_WSR-054.pdf")
+        doc2 = _document(id="meridian-report", contract_id="meridian", filename="N40080-22-D-4221_WSR-106.pdf")
+        db.add_all([doc1, doc2])
+        db.flush()
+        for index in range(2):
+            db.add_all(
+                [
+                    RegressionFinding(
+                        id=str(uuid4()),
+                        contract_id="cardinal",
+                        document_upload_id="cardinal-report",
+                        finding_type="schedule_regression",
+                        title=f"Cardinal schedule regression {index}",
+                        summary="RFI delay remains unresolved.",
+                    ),
+                    RegressionFinding(
+                        id=str(uuid4()),
+                        contract_id="meridian",
+                        document_upload_id="meridian-report",
+                        finding_type="schedule_regression",
+                        title=f"Meridian schedule regression {index}",
+                        summary="RFI delay remains unresolved.",
+                    ),
+                ]
+            )
+
+        db.flush()
+        update_semantic_links(db)
+        db.commit()
+
+        links = db.scalars(select(DocumentSemanticLink)).all()
+
+    assert len(links) == 1
+    assert links[0].source_document_upload_id == "cardinal-report"
+    assert links[0].target_document_upload_id == "meridian-report"
+    assert links[0].link_type == "schedule_regression"
 
 
 def test_external_research_accepts_only_official_sources(tmp_path) -> None:
