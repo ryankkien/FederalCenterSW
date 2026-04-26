@@ -19,6 +19,7 @@ env:
 jobs:
   what-if:
     runs-on: ubuntu-latest
+    environment: azure-dev
     steps:
       - name: Checkout
         uses: actions/checkout@v4

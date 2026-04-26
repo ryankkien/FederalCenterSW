@@ -90,8 +90,8 @@ feature extractor Container App. Use least privilege when possible; Contributor 
 resource group is the simple starting point.
 
 The Azure app registration or managed identity also needs federated credentials that match
-the GitHub workflow subjects. The deploy workflows use the `azure-dev` GitHub environment,
-so include that environment in the deploy federated credential.
+the GitHub workflow subjects. The Azure workflows use the `azure-dev` GitHub environment,
+so include that environment in the federated credential.
 
 ## Drift Policy
 
