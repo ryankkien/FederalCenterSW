@@ -331,7 +331,9 @@ The full contract lifecycle view is exposed at
 contract header data, source packet inventory, CDRLs, monthly report rows, IPMDAR
 earned-value metrics, issue register, CPARS ratings, lifecycle events, staffing
 signals, and a `not_proven` list for evidence the packet cannot support. The
-`full_sample` fixture is the regression packet for this response shape.
+`full_sample` fixture is the regression packet for this response shape. The official
+contract detail UI uses this lifecycle packet as its evidence spine for the Overview,
+Lifecycle, and contract-specific Insights tabs.
 
 Email or portal uploads that cannot match an existing contract remain unmatched unless
 processing can safely scaffold a new parent. Auto-scaffolding only runs for high
