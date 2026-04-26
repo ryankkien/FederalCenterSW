@@ -93,13 +93,13 @@ These tables store structured records extracted from documents by the `feature_e
 
 ### Feature Extractor Service (`feature_extractor/`)
 
-The optional `feature_extractor/` service replaces the old `summarizer/`. It reads a text artifact from blob, runs hierarchical summarization, classifies the document (PSC/NAICS), chunks and embeds the text, and extracts structured primitives into the DB. The `/extract-primitives` endpoint is called by the backend with `doc_id`, `contract_id`, and `doc_classification`.
+The optional `feature_extractor/` service replaces the old `summarizer/`. It reads a text artifact from blob, runs hierarchical summarization, classifies the document (PSC/NAICS), chunks and embeds the text, and extracts structured primitives into the DB. When `FEATURE_EXTRACTOR_URL` is configured, completed backend processing runs call `/summarize` and then call `/extract-primitives` with `doc_id`, `contract_id`, and `doc_classification`.
 
 **New endpoints:**
 - `POST /summarize` — unchanged, runs summarization + chunking + embedding (pipeline steps 1-4)
 - `POST /extract-primitives` — extracts primitives for a document given its classification
 
-**Audit events** use `event_type` values: `feature_extractor.summary`, `feature_extractor.chunking`, `feature_extractor.index`, `feature_extractor.primitives`
+**Audit events** use `event_type` values: `feature_extractor.summary`, `feature_extractor.chunking`, `feature_extractor.index`, `feature_extractor.primitives`. Backend-triggered summary and primitive failures are also surfaced in `processing_run_steps`; they must not roll back the upstream processing run.
 
 **Blob paths** (container: `app-assets`, env: `AZURE_STORAGE_CONTAINER`):
 

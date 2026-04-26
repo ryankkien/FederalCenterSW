@@ -215,8 +215,13 @@ docker compose up -d feature_extractor
 
 The service reads `contracts/{document_id}/text.json`, falls back to legacy
 `documents/{doc_id}/ocr.json`, and writes `contracts/{document_id}/summary.json`.
-Configure `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `MODEL_PREFERENCE` only in ignored
-local env files or shell exports.
+Set `FEATURE_EXTRACTOR_URL=http://127.0.0.1:8001` for a locally run backend, or use
+`http://feature_extractor:8000` for the backend Compose service, to auto-trigger it
+after processing jobs complete. The backend calls `/summarize` first and then
+`/extract-primitives` with the document classification from the processing run.
+Extractor failures are logged to `processing_run_steps` and `audit_events` but do not
+roll back the completed processing job. Configure `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+and `MODEL_PREFERENCE` only in ignored local env files or shell exports.
 
 ## Boundaries
 

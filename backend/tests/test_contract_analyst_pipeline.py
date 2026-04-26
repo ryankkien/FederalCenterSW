@@ -27,6 +27,7 @@ from app.models import (
     BaselineObligation,
     Contract,
     ContractAccessGrant,
+    AuditEvent,
     ContractHypothesis,
     ContractSimilarityLink,
     DocumentClassificationDecision,
@@ -40,6 +41,7 @@ from app.models import (
     ProcessingRun,
     ProcessingRunStep,
 )
+from app.feature_extractor_client import FeatureExtractorStepResult
 
 
 class FakeBlobStorage:
@@ -297,6 +299,27 @@ def test_processing_job_run_and_analysis_apis_are_contract_scoped(tmp_path, monk
     contractor_token = _token(client, "contractor")
     monkeypatch.delenv("AI_PROCESSING_ENABLED", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    feature_calls = []
+
+    def fake_trigger_feature_extractor(document_id: str, contract_id: str, doc_classification: str):
+        feature_calls.append((document_id, contract_id, doc_classification))
+        return [
+            FeatureExtractorStepResult(
+                step_name="feature_extractor.summary",
+                event_type="feature_extractor.summary",
+                status="success",
+                metadata={"blob_path": f"contracts/{document_id}/summary.json"},
+            ),
+            FeatureExtractorStepResult(
+                step_name="feature_extractor.primitives",
+                event_type="feature_extractor.primitives",
+                status="failed",
+                message="extractor unavailable",
+                metadata={"endpoint": "/extract-primitives"},
+            ),
+        ]
+
+    monkeypatch.setattr("app.processing.trigger_feature_extractor", fake_trigger_feature_extractor)
 
     text = (
         "Weekly Status Report for contract N40080-24-D-1042. "
@@ -400,6 +423,9 @@ def test_processing_job_run_and_analysis_apis_are_contract_scoped(tmp_path, monk
         persisted_steps = db.scalars(
             select(ProcessingRunStep).where(ProcessingRunStep.document_upload_id == "job-doc")
         ).all()
+        persisted_audit_events = db.scalars(
+            select(AuditEvent).where(AuditEvent.document_upload_id == "job-doc")
+        ).all()
 
     assert run.status_code == 200
     assert run.json()["matched_contract_id"] == "atlantic"
@@ -422,7 +448,15 @@ def test_processing_job_run_and_analysis_apis_are_contract_scoped(tmp_path, monk
     assert {entity.entity_type for entity in persisted_entities} >= {"contract_number", "rfi"}
     assert {fact.fact_type for fact in persisted_facts} >= {"rfi_age", "schedule_signal"}
     assert persisted_runs[0].status == "completed"
-    assert {"extraction", "matching", "analysis"}.issubset({step.step_name for step in persisted_steps})
+    assert feature_calls == [("job-doc", "atlantic", "weekly_report")]
+    step_statuses = {step.step_name: step.status for step in persisted_steps}
+    assert {"extraction", "matching", "analysis"}.issubset(step_statuses)
+    assert step_statuses["feature_extractor.summary"] == "success"
+    assert step_statuses["feature_extractor.primitives"] == "failed"
+    assert {event.event_type for event in persisted_audit_events} >= {
+        "feature_extractor.summary",
+        "feature_extractor.primitives",
+    }
 
 
 def _client_with_test_dependencies(tmp_path, fake_storage: FakeBlobStorage) -> TestClient:

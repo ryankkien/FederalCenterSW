@@ -20,6 +20,7 @@ from app.chunking import PageText, TextChunk, chunk_text
 from app.contract_matching import ContractMatchContext, ContractMatchResult, match_contract
 from app.contract_analysis import apply_contract_analysis_pipeline
 from app.document_assets import TEXT_JSON_FILENAME
+from app.feature_extractor_client import FeatureExtractorStepResult, trigger_feature_extractor
 
 
 class TextJsonPayload(BaseModel):
@@ -236,6 +237,10 @@ def _process_job_with_status(
             _set_first_existing(run, ("completed_at",), datetime.now(timezone.utc))
             _set_first_existing(run, ("result_json",), _model_dump(result))
         session.commit()
+        try:
+            _trigger_feature_extractor_after_commit(session, models, document, result, run)
+        except Exception:
+            session.rollback()
         return result
     except Exception as error:
         session.rollback()
@@ -323,6 +328,7 @@ def _add_run_step(
     step_name: str,
     status: str,
     message: Optional[str] = None,
+    metadata: Optional[Dict[str, object]] = None,
 ) -> None:
     step_model = _first_model(models, "ProcessingRunStep")
     if run is None or step_model is None or not _model_table_exists(session, step_model):
@@ -338,7 +344,7 @@ def _add_run_step(
             message=message,
             started_at=now,
             completed_at=now,
-            metadata_json={},
+            metadata_json=metadata or {},
         )
     )
 
@@ -375,6 +381,99 @@ def _persist_processing_outputs(
     _persist_entities_and_facts(session, models, document, result, page_rows, analysis_chunks, run)
     _add_run_step(session, models, run, document, "analysis", result.status)
     return run
+
+
+def _trigger_feature_extractor_after_commit(
+    session: Session,
+    models: object,
+    document: object,
+    result: ProcessingResult,
+    run: Optional[object],
+) -> None:
+    document_id = _string_attr(document, "id", "document_id")
+    if run is None or result.status != "processed" or not document_id:
+        return
+
+    contract_id = _string_attr(document, "contract_id")
+    doc_classification = _document_classification(document)
+    try:
+        step_results = trigger_feature_extractor(document_id, contract_id, doc_classification)
+    except Exception as error:
+        step_results = [
+            FeatureExtractorStepResult(
+                step_name="feature_extractor.summary",
+                event_type="feature_extractor.summary",
+                status="failed",
+                message=str(error),
+                metadata={
+                    "doc_classification": doc_classification,
+                    "unexpected_error": True,
+                },
+            )
+        ]
+    if not step_results:
+        return
+
+    try:
+        for step in step_results:
+            metadata = {
+                **step.metadata,
+                "doc_classification": doc_classification,
+                "source": "backend_processing",
+            }
+            _add_run_step(
+                session,
+                models,
+                run,
+                document,
+                step.step_name,
+                step.status,
+                message=step.message,
+                metadata=metadata,
+            )
+            _add_audit_event(
+                session,
+                models,
+                document,
+                step.event_type,
+                step.status,
+                contract_id=contract_id,
+                message=step.message,
+                metadata=metadata,
+            )
+        session.commit()
+    except Exception:
+        session.rollback()
+
+
+def _add_audit_event(
+    session: Session,
+    models: object,
+    document: object,
+    event_type: str,
+    status: str,
+    contract_id: Optional[str] = None,
+    message: Optional[str] = None,
+    metadata: Optional[Dict[str, object]] = None,
+) -> None:
+    audit_model = _first_model(models, "AuditEvent")
+    document_id = _string_attr(document, "id", "document_id")
+    if audit_model is None or not document_id or not _model_table_exists(session, audit_model):
+        return
+    event_metadata: Dict[str, object] = {"status": status, **(metadata or {})}
+    if message:
+        event_metadata["message"] = message
+    session.add(
+        audit_model(
+            id=str(uuid4()),
+            event_type=event_type,
+            entity_type="document_upload",
+            entity_id=document_id,
+            contract_id=contract_id,
+            document_upload_id=document_id,
+            metadata_json=event_metadata,
+        )
+    )
 
 
 def _persist_pages(
@@ -936,6 +1035,16 @@ def _job_status_for_result(result: ProcessingResult) -> str:
     if result.status == "processed":
         return "completed"
     return result.status
+
+
+def _document_classification(document: object) -> str:
+    metadata = getattr(document, "metadata_json", None) or {}
+    classification = metadata.get("classification", {}) if isinstance(metadata, dict) else {}
+    if isinstance(classification, dict):
+        document_kind = classification.get("document_kind")
+        if document_kind:
+            return str(document_kind)
+    return _string_attr(document, "document_kind") or "other"
 
 
 def _optional_int(value: object) -> Optional[int]:

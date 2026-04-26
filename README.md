@@ -112,8 +112,10 @@ new or reset documents.
 An optional local feature extractor service lives in `feature_extractor/`. It can read
 `contracts/{document_id}/text.json`, generate a layered summary, classify PSC/NAICS,
 extract structured primitives (deliverable, financial, decisions, issue, personnel) into
-the DB, and write `contracts/{document_id}/summary.json`. The main analyst pipeline does not
-require it; it is supplemental to the DB-backed processing store.
+the DB, and write `contracts/{document_id}/summary.json`. When `FEATURE_EXTRACTOR_URL`
+is configured for the backend, completed document processing runs automatically call
+`/summarize` and then `/extract-primitives`; extractor failures are recorded on the
+processing run and do not roll back the completed run.
 
 ## Infrastructure
 
