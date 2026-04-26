@@ -47,7 +47,7 @@ def match_contract(
 ) -> ContractMatchResult:
     candidates = candidate_contracts(contracts)
     if not candidates:
-        return ContractMatchResult(status="unmatched", source="none")
+        return ContractMatchResult(status="unmatched", source="none", hints=contract_number_hints_from_context(context))
 
     normalized_to_candidate = {
         normalize_contract_number(candidate.contract_number): candidate for candidate in candidates
@@ -178,6 +178,16 @@ def _deterministic_match(
             )
 
     return ContractMatchResult(status="unmatched", source="none", hints=all_hints)
+
+
+def contract_number_hints_from_context(context: ContractMatchContext) -> List[str]:
+    all_hints = []
+    for field_name in FIELD_ORDER:
+        value = getattr(context, field_name) or ""
+        for hint in extract_contract_number_hints(value):
+            if hint not in all_hints:
+                all_hints.append(hint)
+    return all_hints
 
 
 def _matches_for_hints(

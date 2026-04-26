@@ -65,6 +65,16 @@ def test_contract_matching_finds_agor_contract_from_text():
     assert result.matched_contract_number == "N00014-12-C-0305"
 
 
+def test_contract_matching_preserves_hints_without_known_contracts():
+    result = match_contract(
+        contracts=[],
+        context=ContractMatchContext(text="Source contract N40080-26-C-1001 for review."),
+    )
+
+    assert result.status == "unmatched"
+    assert result.hints == ["N40080-26-C-1001"]
+
+
 def test_gate_failed_empty_text_without_ai_call():
     provider = CountingProvider()
     storage = MemoryStorage()

@@ -239,6 +239,10 @@ bun run infra:deploy
 - Contract hard-link parentage lives on `document_uploads.contract_id`. Cross-contract
   and cross-document pattern relationships live in semantic link tables and must not
   rewrite the hard parent contract.
+- Unmatched source contract and task order uploads may auto-scaffold a new
+  `contracts` row only when classification confidence is high and the regex matcher
+  extracts exactly one contract number. Auto-created contracts use
+  `status="pending_review"` and must write a `contract.auto_created` audit event.
 - The contract analyst pipeline stores page text, classifier decisions, extracted
   entities, report facts, interpreted baselines, baseline obligations, baseline
   revisions, regression findings, hypotheses, hypothesis evidence, investigation

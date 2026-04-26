@@ -92,22 +92,34 @@ def classify_document(document: object, text: str = "") -> Tuple[str, Optional[s
         if value
     ).lower()
 
-    if _contains_any(haystack, ("weekly status report", "weekly report", "_wsr-", " wsr-")):
-        document_kind = "weekly_report"
-    elif _contains_any(haystack, ("monthly status report", "monthly report", "_msr", " msr")):
-        document_kind = "monthly_report"
-    elif _contains_any(haystack, ("rfp", "request for proposal", "source contract", "pws", "sow")):
+    confidence = 0.72
+    if _contains_any(haystack, ("source contract", "request for proposal")):
         document_kind = "source_contract"
+        confidence = 0.9
     elif _contains_any(haystack, ("task order", "to 000", "delivery order")):
         document_kind = "task_order"
+        confidence = 0.9
+    elif _contains_any(haystack, ("weekly status report", "weekly report", "_wsr-", " wsr-")):
+        document_kind = "weekly_report"
+        confidence = 0.88
+    elif _contains_any(haystack, ("monthly status report", "monthly report", "_msr", " msr")):
+        document_kind = "monthly_report"
+        confidence = 0.88
+    elif _contains_any(haystack, ("rfp", "pws", "sow")):
+        document_kind = "source_contract"
+        confidence = 0.9
     elif _contains_any(haystack, ("modification", " mod ", "p000", "amendment")):
         document_kind = "modification"
+        confidence = 0.86
     elif _contains_any(haystack, ("gao", "oig", "inspector general")):
         document_kind = "gao_oig_report"
+        confidence = 0.84
     elif _contains_any(haystack, ("federal register", "far ", "cfr ", "regulation", "policy")):
         document_kind = "policy_or_regulation"
+        confidence = 0.84
     elif _contains_any(haystack, ("email", "message-id", "from:", "subject:")):
         document_kind = "email_context"
+        confidence = 0.8
     elif existing_kind in {
         "source_contract",
         "task_order",
@@ -129,6 +141,7 @@ def classify_document(document: object, text: str = "") -> Tuple[str, Optional[s
     metadata["classification"] = {
         "document_kind": document_kind,
         "modification_kind": modification_kind,
+        "confidence": confidence,
         "classifier": "deterministic_v1",
     }
     _set_attr(document, "metadata_json", metadata)

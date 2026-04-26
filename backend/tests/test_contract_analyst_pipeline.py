@@ -24,6 +24,7 @@ from app.contract_matching import ContractMatchContext, match_contract
 from app.database import Base, get_db
 from app.main import app
 from app.models import (
+    AuditEvent,
     BaselineObligation,
     Contract,
     ContractAccessGrant,
@@ -31,6 +32,7 @@ from app.models import (
     ContractSimilarityLink,
     DocumentClassificationDecision,
     DocumentEntity,
+    DocumentMatchDecision,
     DocumentProcessingJob,
     DocumentPage,
     DocumentReportFact,
@@ -423,6 +425,108 @@ def test_processing_job_run_and_analysis_apis_are_contract_scoped(tmp_path, monk
     assert {fact.fact_type for fact in persisted_facts} >= {"rfi_age", "schedule_signal"}
     assert persisted_runs[0].status == "completed"
     assert {"extraction", "matching", "analysis"}.issubset({step.step_name for step in persisted_steps})
+
+
+def test_processing_auto_scaffolds_unmatched_source_contract(tmp_path, monkeypatch) -> None:
+    fake_storage = FakeBlobStorage()
+    client = _client_with_test_dependencies(tmp_path, fake_storage)
+    official_token = _token(client, "official")
+    monkeypatch.delenv("AI_PROCESSING_ENABLED", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    text = """
+Source Contract
+Contract Number: N40080-26-C-1001
+Contract Title: Harbor Facilities Maintenance Support
+Agency: Department of the Navy
+Contractor: Tidewater Facilities LLC
+
+The PWS defines inspection, maintenance, and reporting requirements.
+"""
+    with next(_test_db_session(tmp_path)) as db:
+        db.add(_contract(id="hidden", number="N40080-99-D-9999"))
+        db.add(
+            ContractAccessGrant(
+                id="grant-hidden",
+                contract_id="hidden",
+                principal_id="official-demo",
+                role="viewer",
+            )
+        )
+        db.add(
+            _document(
+                id="source-doc",
+                contract_id=None,
+                filename="N40080-26-C-1001_source_contract.pdf",
+                title="Harbor source contract",
+                kind="email_context",
+                uploader_id="contractor-demo",
+            )
+        )
+        db.add(
+            DocumentProcessingJob(
+                id="source-job",
+                document_upload_id="source-doc",
+                job_type="document_analysis",
+                status="queued",
+            )
+        )
+        db.commit()
+    fake_storage.upload_bytes(
+        "contracts/source-doc/text.json",
+        json.dumps(
+            {
+                "document_id": "source-doc",
+                "original_filename": "N40080-26-C-1001_source_contract.pdf",
+                "stored_filename": "main.pdf",
+                "content_type": "application/pdf",
+                "source": "email",
+                "text": text,
+                "extraction_status": "extracted",
+            }
+        ).encode("utf-8"),
+        "application/json",
+    )
+
+    run = client.post(
+        "/api/processing/jobs/source-job/run",
+        headers={"Authorization": f"Bearer {official_token}"},
+    )
+    contracts = client.get("/api/contracts", headers={"Authorization": f"Bearer {official_token}"})
+
+    with next(_test_db_session(tmp_path)) as db:
+        created = db.scalars(
+            select(Contract).where(Contract.contract_number == "N40080-26-C-1001")
+        ).one()
+        document = db.get(DocumentUpload, "source-doc")
+        audit = db.scalars(
+            select(AuditEvent).where(AuditEvent.event_type == "contract.auto_created")
+        ).one()
+        match_decision = db.scalars(
+            select(DocumentMatchDecision).where(DocumentMatchDecision.document_upload_id == "source-doc")
+        ).one()
+        classification = db.scalars(
+            select(DocumentClassificationDecision).where(
+                DocumentClassificationDecision.document_upload_id == "source-doc"
+            )
+        ).one()
+
+    assert run.status_code == 200
+    assert run.json()["matched_contract_id"] == created.id
+    assert contracts.status_code == 200
+    assert created.id in {item["id"] for item in contracts.json()}
+    assert created.title == "Harbor Facilities Maintenance Support"
+    assert created.agency_name == "Department of the Navy"
+    assert created.vendor_name == "Tidewater Facilities LLC"
+    assert created.status == "pending_review"
+    assert created.metadata_json["auto_created"] is True
+    assert document.contract_id == created.id
+    assert document.match_status == "matched"
+    assert audit.contract_id == created.id
+    assert audit.document_upload_id == "source-doc"
+    assert match_decision.decision_source == "auto_scaffold"
+    assert classification.document_kind == "source_contract"
+    assert classification.confidence >= 0.85
 
 
 def _client_with_test_dependencies(tmp_path, fake_storage: FakeBlobStorage) -> TestClient:

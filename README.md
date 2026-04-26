@@ -159,7 +159,10 @@ and report facts, interpreted baselines, regression findings, hypotheses,
 investigation logs, official external-source references, semantic links, and
 step-level run logs. Hard parentage stays on `document_uploads.contract_id`;
 cross-contract and cross-document pattern relationships are stored separately as
-semantic links.
+semantic links. When an unmatched upload is confidently classified as a source
+contract or task order and exactly one contract number is extracted, processing
+auto-creates a `pending_review` contract record, links the upload, and writes a
+`contract.auto_created` audit event for official review.
 
 The knowledge wiki index is a server-backed Grokipedia-style layer for officials. It
 mines seeded local fixture contracts, processed report evidence, and the generated
@@ -233,7 +236,7 @@ ids to `contract_access_grants.principal_id` for contract-scoped RBAC.
 ## Document Ingest
 
 In mock local mode, choose `Contractor` to upload documents or `Government official`
-to inspect the contract analyst workspace and review queue. Uploaded files are stored
+to inspect the contract analyst workspace. Uploaded files are stored
 through the backend blob storage adapter and document metadata is stored in Postgres.
 Each upload gets an immutable document artifact folder:
 
@@ -253,6 +256,12 @@ Contractor uploads include a visible contract selector. The selected contract is
 as `document_uploads.contract_id`, so new reports immediately become child documents of
 the contract while semantic cross-document and cross-contract relationships remain
 separate.
+
+Email or portal uploads that cannot match an existing contract remain unmatched unless
+processing can safely scaffold a new parent. Auto-scaffolding only runs for high
+confidence `source_contract` or `task_order` classifications with one regex-extracted
+contract number; the created contract is marked `pending_review` and records its source
+document in audit history.
 
 Government officials see a contract-first analysis workspace. The current v1 view uses
 existing extracted primitives and wiki records to show a cited contract brief,
