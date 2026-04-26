@@ -310,18 +310,18 @@ def _facts_for_document(db: Session, document_id: str) -> Iterable[DocumentRepor
 
 def _financial_values(text: str) -> dict[str, Optional[Decimal]]:
     return {
-        "planned_value": _money_after(text, ("planned value", "bcws", "pv")),
-        "earned_value": _money_after(text, ("earned value", "bcwp", "ev")),
-        "actual_cost": _money_after(text, ("actual cost", "acwp", "ac")),
-        "budget_at_completion": _money_after(text, ("budget at completion", "bac")),
+        "planned_value": _money_after(text, ("budgeted cost for work scheduled", "planned value", "bcws", "pv")),
+        "earned_value": _money_after(text, ("budgeted cost for work performed", "earned value", "bcwp", "ev")),
+        "actual_cost": _money_after(text, ("actual cost of work performed", "actual cost", "acwp", "ac")),
+        "budget_at_completion": _money_after(text, ("contract budget base", "budget at completion", "cbb", "bac")),
         "estimate_at_completion": _money_after(text, ("estimate at completion", "eac")),
-        "estimate_to_complete": _money_after(text, ("estimate to complete", "etc")),
+        "estimate_to_complete": _money_after(text, ("estimated cost to complete", "estimate to complete", "etc")),
         "cost_variance": _money_after(text, ("cost variance", "cv")),
         "schedule_variance": _money_after(text, ("schedule variance", "sv")),
         "cpi": _decimal_after(text, ("cpi",)),
         "spi": _decimal_after(text, ("spi",)),
         "percent_complete": _decimal_after(text, ("percent complete", "% complete")),
-        "cumulative_obligations": _money_after(text, ("cumulative obligations", "obligated")),
+        "cumulative_obligations": _money_after(text, ("total amount invoiced to date", "cumulative obligations", "obligated")),
     }
 
 

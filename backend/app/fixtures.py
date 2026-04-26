@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import mimetypes
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence, Set
@@ -23,9 +24,14 @@ from app.models import (
     ContractAccessGrant,
     ContractBaseline,
     ContractHypothesis,
+    ContractPrimitiveDeliverable,
+    ContractPrimitiveFinancial,
+    ContractPrimitiveIssue,
+    ContractPrimitivePersonnel,
     ContractSimilarityLink,
     ContractTopic,
     ContractTopicRevision,
+    CparsRating,
     DocumentChunk,
     DocumentClassificationDecision,
     DocumentEntity,
@@ -64,6 +70,8 @@ def seed_fixtures(fixture_names: Sequence[str], reset_analysis: bool = False) ->
             contracts.extend(_seed_agor(session, storage))
         if "natalie" in names:
             contracts.extend(_seed_natalie(session, storage))
+        if "full_sample" in names or "full-sample" in names:
+            contracts.extend(_seed_full_sample(session, storage))
         if reset_analysis:
             _reset_analysis(session, [contract.id for contract in contracts])
         for contract in contracts:
@@ -124,6 +132,35 @@ def _seed_natalie(session: Session, storage) -> List[Contract]:
     return contracts
 
 
+def _seed_full_sample(session: Session, storage) -> List[Contract]:
+    contract = _upsert_contract(
+        session,
+        contract_id="N00173-25-C-XXXX",
+        contract_number="N00173-25-C-XXXX",
+        title="C4ISR Systems Design and Development",
+        agency_name="Naval Research Laboratory",
+        office_name="NRL Code 8113",
+        vendor_name="Apex Systems Engineering, Inc.",
+        metadata_json={
+            "fixture": "full_sample",
+            "solicitation_number": "N0017325R24400002",
+            "contracting_officer": "Callan T. Walsh",
+            "obligated_value": "17250000",
+        },
+    )
+    root = FIXTURE_ROOT / "full sample contract + data"
+    _seed_document(session, storage, root / "Solicitation-+N0017325R24400002.pdf", contract, "source_contract", "fixture")
+    _seed_document(session, storage, root / "Exhibit+A+CDRLs.pdf", contract, "cdrl", "fixture")
+    sample_root = root / "full contract sample"
+    for path in sorted(sample_root.glob("Monthly_Status_Report_Month*.docx")):
+        _seed_document(session, storage, path, contract, "monthly_report", "fixture")
+    for path in sorted(sample_root.glob("IPMDAR_PNR_*.docx")):
+        _seed_document(session, storage, path, contract, "ipmdar_pnr", "fixture")
+    for path in sorted(sample_root.glob("CPAR_*.docx")):
+        _seed_document(session, storage, path, contract, "cpars", "fixture")
+    return [contract]
+
+
 def _seed_document(
     session: Session,
     storage,
@@ -146,7 +183,7 @@ def _seed_document(
         storage=storage,
         document_id=document_id,
         original_filename=path.name,
-        content_type="application/pdf",
+        content_type=_content_type(path),
         data=data,
         source=intake_source,
     )
@@ -294,6 +331,11 @@ def _reset_analysis(session: Session, contract_ids: Iterable[str]) -> None:
     if chunk_ids:
         session.execute(delete(ChunkEmbedding).where(ChunkEmbedding.chunk_id.in_(chunk_ids)))
     for model in (
+        CparsRating,
+        ContractPrimitivePersonnel,
+        ContractPrimitiveIssue,
+        ContractPrimitiveFinancial,
+        ContractPrimitiveDeliverable,
         HypothesisEvidence,
         ContractHypothesis,
         ExternalSourceRef,
@@ -340,13 +382,20 @@ def _expand_fixture_names(values: Sequence[str]) -> Set[str]:
     for value in values:
         names.update(part.strip().lower() for part in value.split(",") if part.strip())
     if not names or "all" in names:
-        return {"wwr", "agor", "natalie"}
+        return {"wwr", "agor", "natalie", "full_sample"}
     return names
+
+
+def _content_type(path: Path) -> str:
+    if path.suffix.lower() == ".docx":
+        return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    guessed, _ = mimetypes.guess_type(path.name)
+    return guessed or "application/octet-stream"
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Seed local contract analyst fixtures.")
-    parser.add_argument("--fixtures", default="all", help="Fixture names: all, wwr, agor, natalie")
+    parser.add_argument("--fixtures", default="all", help="Fixture names: all, wwr, agor, natalie, full_sample")
     parser.add_argument("--reset-analysis", action="store_true", help="Clear analysis rows for seeded documents")
     args = parser.parse_args(argv)
     seeded = seed_fixtures([args.fixtures], reset_analysis=args.reset_analysis)

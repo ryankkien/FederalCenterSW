@@ -44,6 +44,7 @@ Seed and process local contract analyst fixtures:
 
 ```sh
 bun run fixtures:seed -- --fixtures all
+bun run fixtures:seed -- --fixtures full_sample --reset-analysis
 bun run processing:run -- --limit 200
 bun run corpus:build-synthetic
 bun run knowledge:ingest -- --scope fixtures --sources local --limit 500
@@ -152,6 +153,12 @@ primitive rows for evidence that was processed before this endpoint existed, run
 ```sh
 bun run data:backfill-primitives
 ```
+
+The full-sample packet under `testdocs/full sample contract + data/` is seedable with
+`--fixtures full_sample`. After processing, `GET /api/contracts/N00173-25-C-XXXX/lifecycle`
+returns a single contract lifecycle payload for Molly's UI: contract header, source
+packet, CDRLs, monthly financial/schedule rows, IPMDAR metrics, issues, CPARS ratings,
+events, staffing signals, limitations, and `not_proven` evidence gaps.
 
 During processing, unmatched uploads can auto-create a parent contract only when the
 document is classified as `source_contract` or `task_order` with high confidence and a

@@ -263,6 +263,12 @@ bun run infra:deploy
   states such as `available`, `processing_pending`, `not_extracted`, and
   `source_absent`; the frontend should show those limitations rather than generating
   CDRL rows when backend evidence is missing.
+- Contract lifecycle views use `GET /api/contracts/{contract_id}/lifecycle`. This
+  endpoint should be Molly's frontend-ready contract packet: header fields, source
+  inventory, CDRLs, monthly report rows, IPMDAR metrics, issue register, CPARS ratings,
+  lifecycle events, staffing signals, limitations, and `not_proven` gaps. The
+  `full_sample` fixture under `testdocs/full sample contract + data/` is the regression
+  fixture for that shape.
 - Contract hard-link parentage lives on `document_uploads.contract_id`. Cross-contract
   and cross-document pattern relationships live in semantic link tables and must not
   rewrite the hard parent contract.

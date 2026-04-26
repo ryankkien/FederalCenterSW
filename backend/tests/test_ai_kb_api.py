@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Generator
 
 from fastapi.testclient import TestClient
@@ -6,6 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import Base, get_db
+from app.document_assets import _extract_docx_text, _extract_pdf_text
 from app.main import app
 from app.models import (
     BaselineObligation,
@@ -445,6 +447,82 @@ def test_backfill_report_primitives_from_existing_evidence(tmp_path) -> None:
         assert db.query(ContractPrimitiveFinancial).one().estimate_at_completion == 1200000
         assert db.query(ContractPrimitiveIssue).one().issue_id == "finding-report-1"
         assert db.query(ContractPrimitivePersonnel).one().staffing_gap_flag is True
+
+
+def test_contract_lifecycle_api_extracts_full_sample_packet(tmp_path) -> None:
+    client = _client_with_test_db(tmp_path)
+    official_token = _token(client, "official")
+    fixture_root = Path(__file__).resolve().parents[2] / "testdocs" / "full sample contract + data"
+
+    with next(_test_db_session(tmp_path)) as db:
+        db.add(
+            Contract(
+                id="full-sample",
+                contract_number="N00173-25-C-XXXX",
+                title="C4ISR Systems Design and Development",
+                agency_name="Naval Research Laboratory",
+                vendor_name="Apex Systems Engineering, Inc.",
+            )
+        )
+        fixture_docs = [
+            ("cdrl-doc", "Exhibit A CDRLs", "cdrl", fixture_root / "Exhibit+A+CDRLs.pdf"),
+            ("month-01", "Monthly Status Report Month 01", "monthly_report", fixture_root / "full contract sample" / "Monthly_Status_Report_Month01.docx"),
+            ("month-06", "Monthly Status Report Month 06", "monthly_report", fixture_root / "full contract sample" / "Monthly_Status_Report_Month06.docx"),
+            ("ipmdar-01", "IPMDAR PNR Submission 1", "ipmdar_pnr", fixture_root / "full contract sample" / "IPMDAR_PNR_Submission1_Month06_Mar2025.docx"),
+            ("ipmdar-02", "IPMDAR PNR Submission 2", "ipmdar_pnr", fixture_root / "full contract sample" / "IPMDAR_PNR_Submission2_Month10_Jul2025.docx"),
+            ("ipmdar-03", "IPMDAR PNR Submission 3", "ipmdar_pnr", fixture_root / "full contract sample" / "IPMDAR_PNR_Submission3_OY1Month04_Apr2026.docx"),
+            ("cpar-oy1", "CPAR Option Year 1", "cpars", fixture_root / "full contract sample" / "CPAR_OptionYear1.docx"),
+        ]
+        for document_id, title, kind, path in fixture_docs:
+            db.add(
+                DocumentUpload(
+                    id=document_id,
+                    contract_id="full-sample",
+                    title=title,
+                    document_type=kind.replace("_", " ").title(),
+                    document_kind=kind,
+                    original_filename=path.name,
+                    content_type="application/pdf" if path.suffix == ".pdf" else "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    size_bytes=path.stat().st_size,
+                    blob_path=f"contracts/{document_id}/main{path.suffix}",
+                    uploader_id="fixture",
+                    uploader_role="official",
+                    created_at=datetime.now(timezone.utc),
+                    processing_status="processed",
+                )
+            )
+            text = _extract_pdf_text(path.read_bytes()).text if path.suffix == ".pdf" else _extract_docx_text(path.read_bytes())
+            db.add(
+                DocumentPage(
+                    id=f"{document_id}-page-1",
+                    document_upload_id=document_id,
+                    page_number=1,
+                    text=text,
+                )
+            )
+        db.commit()
+
+    response = client.get(
+        "/api/contracts/full-sample/lifecycle",
+        headers={"Authorization": f"Bearer {official_token}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["availability"] == "available"
+    assert body["contract"]["contract_number"] == "N00173-25-C-XXXX"
+    assert body["contract"]["contractor"] == "Apex Systems Engineering, Inc."
+    assert {item["cdrl_item"] for item in body["deliverables"]} >= {"A001", "A002", "A003", "A004"}
+    assert len(body["monthly_reports"]) == 2
+    month_6 = next(item for item in body["monthly_reports"] if item["month_number"] == 6)
+    assert month_6["invoiced_to_date"] == 2074390
+    assert "MINOR SLIP" in month_6["schedule_status"]
+    assert len(body["ipmdar_metrics"]) == 3
+    assert {item["spi"] for item in body["ipmdar_metrics"]} >= {0.94, 0.898, 0.984}
+    assert any(item["rating"] == "Very Good" for item in body["cpars_ratings"])
+    assert any(item["issue_id"] == "gfi_delay" for item in body["issue_register"])
+    assert any(item["type"] == "modification" for item in body["lifecycle_events"])
+    assert body["not_proven"]
 
 
 def test_processing_jobs_and_unmatched_admin_access(tmp_path) -> None:
