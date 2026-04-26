@@ -12,9 +12,11 @@ import {
   createContract,
   downloadDocumentBlob,
   getContractAnalysis,
+  getContractAnalysisLog,
   getContractDeliverables,
   getContractLifecycle,
   getDocument,
+  getPortfolioGenerateStatus,
   getPortfolioThemes,
   listAllDocuments,
   listContractDocuments,
@@ -24,6 +26,7 @@ import {
   normalizeContract,
   normalizeDocument,
   normalizeFinding,
+  postGenerateInsights,
   uploadDocument,
 } from './api';
 
@@ -1515,6 +1518,7 @@ function ContractDetailPage({ contract, onBack, onSelectContract }) {
   const [findings, setFindings] = useState([]);
   const [analysis, setAnalysis] = useState(null);
   const [deliverables, setDeliverables] = useState(null);
+  const [analysisLog, setAnalysisLog] = useState([]);
   const [lifecycle, setLifecycle] = useState(null);
   const [lifecycleError, setLifecycleError] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
@@ -1539,6 +1543,7 @@ function ContractDetailPage({ contract, onBack, onSelectContract }) {
     setFindings([]);
     setAnalysis(null);
     setDeliverables(null);
+    setAnalysisLog([]);
     setLifecycle(null);
     setLifecycleError(false);
     let cancelled = false;
@@ -1564,6 +1569,9 @@ function ContractDetailPage({ contract, onBack, onSelectContract }) {
       .catch(() => {
         if (!cancelled) setDeliverables({ availability:'error', groups:[], limitations:['Deliverable evidence could not be loaded.'] });
       });
+    getContractAnalysisLog(c.id)
+      .then(rows => { if (!cancelled) setAnalysisLog(rows); })
+      .catch(() => {});
     getContractLifecycle(c.id)
       .then(row => {
         if (!cancelled) setLifecycle(row);
@@ -1619,7 +1627,7 @@ function ContractDetailPage({ contract, onBack, onSelectContract }) {
       <div style={{ flex:1, overflowY:'auto' }}>
         {tab === 'Overview'   && <OverviewTab contract={c} docs={docs} deliverables={deliverables} lifecycle={lifecycle} lifecycleError={lifecycleError} />}
         {tab === 'Lifecycle'  && <LifecycleTab contract={c} lifecycle={lifecycle} error={lifecycleError} />}
-        {tab === 'Insights'   && <ContractInsightsTab contract={c} findings={findings} lifecycle={lifecycle} onSelectContract={onSelectContract} />}
+        {tab === 'Insights'   && <ContractInsightsTab contract={c} findings={findings} analysisLog={analysisLog} lifecycle={lifecycle} onSelectContract={onSelectContract} />}
         {tab === 'Benchmarks' && <BenchmarksTab contract={c} analysis={analysis} />}
         {tab === 'Documents'  && <DocumentsTab docs={docs} contract={c} onUpload={() => setShowUpload(true)} />}
       </div>
@@ -2306,7 +2314,7 @@ function DocumentsTab({ docs, contract, onUpload }) {
 }
 
 // ─── CONTRACT INSIGHTS TAB — findings → patterns → similar contracts ────────
-function ContractInsightsTab({ contract: c, findings, lifecycle, onSelectContract }) {
+function ContractInsightsTab({ contract: c, findings, analysisLog = [], lifecycle, onSelectContract }) {
   const lifecycleIssues = (lifecycle?.issue_register || []).map(issue => ({
     id: `lifecycle-${issue.issue_id || issue.title}`,
     severity: issue.severity === 'high' ? 'critical' : issue.severity === 'low' ? 'healthy' : 'watch',
@@ -2326,7 +2334,7 @@ function ContractInsightsTab({ contract: c, findings, lifecycle, onSelectContrac
         title="Findings on this contract"
         subtitle={`${rows.length} backend issue rows from regressions and lifecycle extraction`}
       />
-      <div style={{ display:'grid', gap:14 }}>
+      <div style={{ display:'grid', gap:14, marginBottom:36 }}>
         {rows.length === 0 && (
           <EmptyState title="No extracted findings" sub="Run document processing or upload reports with extractable performance issues; no demo findings are shown here." />
         )}
@@ -2355,7 +2363,6 @@ function ContractInsightsTab({ contract: c, findings, lifecycle, onSelectContrac
                 </div>
               </div>
 
-              {/* Pattern link */}
               {/* Similar contracts */}
               {f.similar && f.similar.length > 0 && (
                 <div style={{ borderTop:'1px solid var(--border)', padding:'12px 22px 14px' }}>
@@ -2374,6 +2381,71 @@ function ContractInsightsTab({ contract: c, findings, lifecycle, onSelectContrac
                         </div>
                         <IcoChevron/>
                       </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Analysis history log */}
+      <SectionHeader
+        title="Analysis history"
+        subtitle={`${analysisLog.length} analysis run${analysisLog.length !== 1 ? 's' : ''} · incremental updates appended each time new documents are analyzed`}
+      />
+      <div style={{ display:'grid', gap:10 }}>
+        {analysisLog.length === 0 && (
+          <EmptyState
+            title="No analysis runs yet"
+            sub="Click 'Generate New Insights' from the Insights Library to run the first analysis on this contract."
+          />
+        )}
+        {analysisLog.map(run => {
+          const statusClr = run.status === 'complete' ? 'var(--good)'
+            : run.status === 'failed' ? 'var(--flag)'
+            : 'var(--warn)';
+          const changes = run.changes || [];
+          return (
+            <div key={run.id} style={{
+              background:'var(--surface)', border:'1px solid var(--border)',
+              borderRadius:3, padding:'16px 20px',
+            }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
+                <div style={{ fontSize:11, fontFamily:'var(--mono)', color:'var(--ink-mute)' }}>
+                  {run.completed_at
+                    ? new Date(run.completed_at).toLocaleString('en-US', { dateStyle:'medium', timeStyle:'short' })
+                    : 'In progress…'}
+                </div>
+                <span style={{
+                  fontSize:9.5, fontWeight:700, letterSpacing:'0.10em', textTransform:'uppercase',
+                  color:statusClr, fontFamily:'var(--mono)',
+                }}>{run.status}</span>
+              </div>
+              <div style={{ fontSize:12, color:'var(--ink-mute)', marginBottom: run.summary ? 8 : 0 }}>
+                {run.analyzed_doc_count} document{run.analyzed_doc_count !== 1 ? 's' : ''} analyzed
+                {run.prior_run_id ? ' · incremental update' : ' · baseline analysis'}
+              </div>
+              {run.summary && (
+                <div style={{ fontSize:13, color:'var(--ink)', lineHeight:1.55 }}>{run.summary}</div>
+              )}
+              {changes.length > 0 && (
+                <div style={{ marginTop:10, display:'flex', flexWrap:'wrap', gap:6 }}>
+                  {changes.map((ch, i) => {
+                    const chClr = ch.change_type === 'improved' ? 'var(--good)'
+                      : (ch.change_type === 'degraded' || ch.change_type === 'new_risk') ? 'var(--flag)'
+                      : 'var(--warn)';
+                    return (
+                      <span key={i} style={{
+                        fontSize:10, fontWeight:600, letterSpacing:'0.08em', textTransform:'uppercase',
+                        fontFamily:'var(--mono)', color:chClr,
+                        background:'var(--surface-alt)', border:'1px solid var(--border)',
+                        padding:'2px 7px', borderRadius:2,
+                        title: ch.description,
+                      }}>
+                        {ch.axis} · {(ch.change_type || '').replace('_', ' ')}
+                      </span>
                     );
                   })}
                 </div>
@@ -2536,14 +2608,44 @@ function InsightsTab({ psc, naics, embedded, onSelectContract, customInsights = 
 function InsightsPage({ onSelectContract }) {
   const [portfolio, setPortfolio] = useState(null);
   const [error, setError] = useState(false);
+  const [generateStatus, setGenerateStatus] = useState({ new_doc_count: 0, affected_contract_count: 0 });
+  const [generating, setGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState(null);
+
   useEffect(() => {
     let cancelled = false;
     getPortfolioThemes('fy26')
       .then(data => { if (!cancelled) { setPortfolio(data); setError(false); } })
       .catch(() => { if (!cancelled) setError(true); });
+    getPortfolioGenerateStatus()
+      .then(s => { if (!cancelled) setGenerateStatus(s); })
+      .catch(() => {});
     return () => { cancelled = true; };
   }, []);
+
+  async function handleGenerate() {
+    if (generating || generateStatus.new_doc_count === 0) return;
+    setGenerating(true);
+    setGenerateError(null);
+    try {
+      await postGenerateInsights();
+      await new Promise(r => setTimeout(r, 3000));
+      const [data, s] = await Promise.all([
+        getPortfolioThemes('fy26'),
+        getPortfolioGenerateStatus(),
+      ]);
+      setPortfolio(data);
+      setGenerateStatus(s);
+    } catch (err) {
+      setGenerateError(err?.message || 'Generation failed');
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   const themes = portfolio?.themes || [];
+  const hasNewDocs = generateStatus.new_doc_count > 0;
+
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
       <TopBar crumbs={['Insights']} />
@@ -2558,6 +2660,36 @@ function InsightsPage({ onSelectContract }) {
           <p style={{ fontSize:12, color:'var(--ink-mute)', marginTop:4 }}>
             {themes.length} backend evidence themes · generated from processed findings, facts, signals, and hypotheses
           </p>
+        </div>
+        <div style={{ display:'flex', gap:8, alignItems:'center', flexShrink:0 }}>
+          <BtnSecondary
+            onClick={() => themes.length > 0 && downloadThemesReport(themes)}
+            style={{ opacity: themes.length === 0 ? 0.45 : 1, cursor: themes.length === 0 ? 'not-allowed' : 'pointer' }}
+          >
+            Export PDF
+          </BtnSecondary>
+          <BtnPrimary
+            onClick={handleGenerate}
+            disabled={generating || !hasNewDocs}
+            style={{
+              opacity: !hasNewDocs ? 0.45 : 1,
+              cursor: !hasNewDocs ? 'not-allowed' : 'pointer',
+            }}
+            title={
+              !hasNewDocs
+                ? 'No new documents to analyze'
+                : `Analyze ${generateStatus.new_doc_count} new document${generateStatus.new_doc_count !== 1 ? 's' : ''} across ${generateStatus.affected_contract_count} contract${generateStatus.affected_contract_count !== 1 ? 's' : ''}`
+            }
+          >
+            {generating
+              ? 'Generating…'
+              : hasNewDocs
+                ? `Generate New Insights (${generateStatus.new_doc_count})`
+                : 'Generate New Insights'}
+          </BtnPrimary>
+          {generateError && (
+            <span style={{ fontSize:11, color:'var(--flag)' }}>{generateError}</span>
+          )}
         </div>
       </div>
       <div style={{ flex:1, overflowY:'auto', background:'var(--bg)', padding:'20px 24px' }}>
@@ -4266,6 +4398,52 @@ function downloadInsightReport(ins, contracts, flagged) {
 function downloadInsightLibrary(insights, flaggedSet) {
   printHTMLAsPDF(
     buildLibraryReportHTML(insights, flaggedSet),
+    `FedCenter Insights Library — ${new Date().toISOString().slice(0,10)}`
+  );
+}
+
+function downloadThemesReport(themes) {
+  const body = (themes || []).map(theme => {
+    const sev = theme.severity === 'critical' ? 'CRITICAL' : theme.severity === 'watch' ? 'WATCH' : 'HEALTHY';
+    const rows = (theme.contracts || []).map(c =>
+      `<tr>
+        <td class="mono">${esc(c.number)}</td>
+        <td>${esc(c.title)}</td>
+        <td class="mono">${esc(c.psc || '—')}</td>
+        <td>${esc(c.component || '—')}</td>
+        <td class="mono">${esc(c.value)}</td>
+        <td>${esc(c.severity)}</td>
+      </tr>`
+    ).join('');
+    return `
+      <div class="insight">
+        <div style="display:flex;gap:6px;margin-bottom:8px">
+          <span class="pill">${sev}</span>
+          <span class="pill">${esc(theme.psc)}</span>
+          <span class="pill">${esc(theme.component)}</span>
+        </div>
+        <h2 class="claim">${esc(theme.title)}</h2>
+        <div class="so-box">${esc(theme.insight || '')}</div>
+        <div style="font-size:9pt;color:#64748b;margin:8px 0 4px">
+          ${esc(String(theme.flagged))} of ${esc(String(theme.total))} visible contracts ·
+          ${esc(theme.valueFlagged)} flagged · ${esc(String(theme.evidence_count))} evidence items
+        </div>
+        <table>
+          <thead><tr>
+            <th>Contract #</th><th>Title</th><th>PSC</th><th>Component</th><th>Value</th><th>Severity</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }).join('');
+  printHTMLAsPDF(
+    `<div class="doc-mast">
+       <div class="label">FedCenter · Portfolio Insights</div>
+       <h1>Insights Library Export</h1>
+       <div class="meta">Generated ${new Date().toLocaleString('en-US')} · ${(themes || []).length} theme${(themes || []).length !== 1 ? 's' : ''}</div>
+     </div>
+     ${body}
+     <div class="footer">FedCenter Insights Library · ${new Date().toISOString().slice(0,10)}</div>`,
     `FedCenter Insights Library — ${new Date().toISOString().slice(0,10)}`
   );
 }

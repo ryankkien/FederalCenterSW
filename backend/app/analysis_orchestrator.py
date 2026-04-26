@@ -97,6 +97,24 @@ contract_ids), common_failure_patterns (list of specific findings), \
 common_success_patterns (list), delta_lessons (list — the unique contribution), \
 qualitative_quantitative_correlations (list), summary (≤300 words)."""
 
+_INCREMENTAL_SYSTEM = """ROLE You are a contract performance analyst performing an INCREMENTAL \
+update. New performance documents have been filed since the prior analysis of this contract. \
+Your job: (1) identify what has changed, improved, or degraded; (2) note newly-emerged risks \
+or issues; (3) note any resolutions; (4) produce a self-contained updated analysis.
+
+HARD RULES
+- Derive claims only from the provided primitive records (prior summary and new primitives).
+- Every output claim cites the primitive record ID(s) it derives from.
+- If a new primitive contradicts the prior summary, flag it explicitly as a change.
+- If no meaningful change is detected for an axis, carry it forward from the prior analysis.
+- If cohort.N < 20, set low_confidence: true on every percentile.
+
+OUTPUT Return JSON with the same keys as per-contract analysis: cohort_definition, cohort_N, \
+axes (array), cpars_predicted (object), summary (≤200 words, all sentences cited), PLUS:
+- prior_run_id: ID of the prior analysis run
+- new_doc_ids: list of document_upload IDs analyzed in this run
+- changes: list of {axis, change_type (improved|degraded|new_risk|resolved), description}"""
+
 
 def run_per_contract_analysis(
     db: Session,
@@ -615,6 +633,7 @@ def _insert_analysis_run(
     cohort_definition: dict | None = None,
     cohort_contract_ids: list[str] | None = None,
     status: str = "running",
+    analyzed_doc_ids: list[str] | None = None,
 ) -> None:
     from sqlalchemy import text
 
@@ -625,13 +644,14 @@ def _insert_analysis_run(
             """
             INSERT INTO analysis_runs
                 (id, run_type, target_contract_id, cohort_definition,
-                 cohort_contract_ids, status, created_at, model)
+                 cohort_contract_ids, status, created_at, model, analyzed_doc_ids)
             VALUES (:id, :run_type, :target_contract_id, {cohort_definition},
-                    {cohort_contract_ids}, :status, :created_at, :model)
+                    {cohort_contract_ids}, :status, :created_at, :model, {analyzed_doc_ids})
             """
             .format(
                 cohort_definition=_json_sql_value(db, "cohort_definition"),
                 cohort_contract_ids=_json_sql_value(db, "cohort_contract_ids"),
+                analyzed_doc_ids=_json_sql_value(db, "analyzed_doc_ids"),
             )
         ),
         {
@@ -643,6 +663,7 @@ def _insert_analysis_run(
             "status": status,
             "created_at": datetime.now(timezone.utc),
             "model": get_openai_llm_model(),
+            "analyzed_doc_ids": json.dumps(analyzed_doc_ids) if analyzed_doc_ids else None,
         },
     )
     db.commit()
@@ -881,3 +902,129 @@ def _openai_json_response(system: str, user: str) -> dict:
     )
     content = response.choices[0].message.content or "{}"
     return _parse_json(content)
+
+
+def _load_primitives_for_docs(
+    db: Session, contract_id: str, doc_ids: list[str]
+) -> dict[str, list[dict]]:
+    """Load primitives filtered to specific document upload IDs.
+
+    Falls back to all primitives if the filtered result is empty (e.g., primitives tables
+    not yet populated for these docs).
+    """
+    all_primitives = _load_primitives(db, contract_id)
+    if not doc_ids:
+        return all_primitives
+    doc_id_set = set(doc_ids)
+    filtered = {
+        key: [row for row in rows if row.get("doc_upload_id") in doc_id_set]
+        for key, rows in all_primitives.items()
+    }
+    if not any(filtered.values()):
+        return all_primitives
+    return filtered
+
+
+def _build_incremental_prompt(
+    contract: Contract,
+    new_primitives: dict,
+    cpars: list[dict],
+    cohort: "CohortDefinition",
+    prior_summary: str,
+    prior_run_id: str,
+    new_doc_ids: list[str],
+) -> str:
+    parts = [
+        f"target.contract_id: {contract.id}",
+        f"target.contract_number: {contract.contract_number}",
+        f"cohort.N: {cohort.N}",
+        "",
+        f"prior_analysis.run_id: {prior_run_id}",
+        "prior_analysis.summary:",
+        prior_summary,
+        "",
+        f"new_documents.count: {len(new_doc_ids)}",
+        "new_documents.primitives:",
+        json.dumps(new_primitives, default=str),
+        "",
+        "target.cpars:",
+        json.dumps(cpars, default=str),
+    ]
+    return "\n".join(parts)
+
+
+def run_incremental_contract_analysis(
+    db: Session,
+    contract_id: str,
+    new_doc_ids: list[str],
+) -> dict[str, Any]:
+    """Incremental analysis: compare new documents against the prior analysis result.
+
+    If no prior completed analysis exists, runs a full baseline analysis instead.
+    Always stores analyzed_doc_ids in the resulting analysis_runs row.
+    """
+    contract = db.get(Contract, contract_id)
+    if contract is None:
+        raise ValueError(f"Contract {contract_id} not found")
+
+    prior_run = get_latest_analysis_run(db, contract_id)
+    cohort = build_cohort(db, contract_id)
+    cpars = _load_cpars(db, contract_id)
+
+    run_id = str(uuid.uuid4())
+
+    if prior_run:
+        prior_summary = (
+            (prior_run.get("result") or {}).get("summary")
+            or "No prior summary available."
+        )
+        prior_run_id = prior_run["id"]
+        new_primitives = _load_primitives_for_docs(db, contract_id, new_doc_ids)
+        new_primitives_compact = _compact_primitives(new_primitives, limit_per_bucket=45)
+        prompt_user = _build_incremental_prompt(
+            contract, new_primitives_compact, cpars, cohort,
+            prior_summary, prior_run_id, new_doc_ids,
+        )
+        system_prompt = _INCREMENTAL_SYSTEM + "\n\n" + _AXES_DESCRIPTION
+    else:
+        all_primitives = _compact_primitives(_load_primitives(db, contract_id), limit_per_bucket=45)
+        prompt_user = _build_per_contract_prompt(contract, all_primitives, cpars, cohort, {})
+        system_prompt = _PER_CONTRACT_SYSTEM + "\n\n" + _AXES_DESCRIPTION
+        prior_run_id = None
+
+    _insert_analysis_run(
+        db, run_id, "per_contract", contract_id, cohort,
+        status="running", analyzed_doc_ids=new_doc_ids,
+    )
+    try:
+        result_json = _openai_json_response(system_prompt, prompt_user)
+    except Exception as exc:
+        _fail_analysis_run(db, run_id, exc)
+        raise
+    result_json = _tag_low_confidence(result_json, cohort)
+    result_json["new_doc_ids"] = new_doc_ids
+    if prior_run_id:
+        result_json["prior_run_id"] = prior_run_id
+    _complete_analysis_run(db, run_id, result_json)
+    return {"id": run_id, "status": "complete", "result": result_json}
+
+
+def get_analysis_log(db: Session, contract_id: str, limit: int = 20) -> list[dict]:
+    """Return per_contract analysis runs for a contract, newest first."""
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT * FROM analysis_runs
+                WHERE target_contract_id = :cid
+                  AND run_type = 'per_contract'
+                ORDER BY created_at DESC
+                LIMIT :limit
+                """
+            ),
+            {"cid": contract_id, "limit": limit},
+        ).mappings().all()
+    except SQLAlchemyError:
+        db.rollback()
+        return []
+    return [_analysis_run_dict(row) for row in rows]

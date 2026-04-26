@@ -89,7 +89,7 @@ These tables store structured records extracted from documents by the `feature_e
 - `contract_primitives_issues`: issues and risks — category, severity, responsible party, open/resolved dates.
 - `contract_primitives_personnel`: key persons, labor categories, FTE planned vs. actual, staffing gaps.
 - `cpars_ratings`: per-factor adjectival CPARS ratings ingested from CPARS documents.
-- `analysis_runs`: stores JSON outputs of per-contract and cohort analyses.
+- `analysis_runs`: append-only log of per-contract and cohort analyses. Key columns: `run_type` (per_contract|cohort), `target_contract_id`, `status`, `result` (JSON), `analyzed_doc_ids` (JSON array of `document_upload.id` values included in each run — enables incremental analysis and analysis history log).
 
 ### Feature Extractor Service (`feature_extractor/`)
 
