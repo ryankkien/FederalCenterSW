@@ -12,7 +12,7 @@ from app.blob_storage import get_blob_storage
 from app.database import Base, get_db
 from app.main import app
 from app.models import DocumentChunk, DocumentProcessingJob, DocumentUpload
-from app.processing_worker import drain_queued_processing_jobs
+from app.processing_worker import _worker_count_for_session_factory, drain_queued_processing_jobs
 
 
 class FakeBlobStorage:
@@ -161,6 +161,67 @@ def test_processing_worker_leaves_pending_ocr_jobs_queued_until_text_is_ready(tm
     assert second.completed == 1
     assert completed_job is not None
     assert completed_job.status == "completed"
+
+
+def test_processing_worker_concurrent_drain_claims_each_job_once(tmp_path) -> None:
+    fake_storage = FakeBlobStorage()
+    session_factory = _session_factory(tmp_path)
+    document_ids = [f"concurrent-doc-{index}" for index in range(6)]
+    with session_factory() as db:
+        for document_id in document_ids:
+            fake_storage.upload_bytes(
+                f"contracts/{document_id}/text.json",
+                json.dumps(
+                    {
+                        "document_id": document_id,
+                        "original_filename": f"{document_id}.txt",
+                        "stored_filename": "main.txt",
+                        "content_type": "text/plain",
+                        "source": "portal",
+                        "text": f"Weekly Status Report {document_id}. RFI-004 remains open.",
+                        "extraction_status": "extracted",
+                    }
+                ).encode("utf-8"),
+                "application/json",
+            )
+            db.add(_document(document_id))
+            db.add(
+                DocumentProcessingJob(
+                    id=f"job-{document_id}",
+                    document_upload_id=document_id,
+                    job_type="document_analysis",
+                    status="queued",
+                )
+            )
+        db.commit()
+
+    summary = drain_queued_processing_jobs(
+        limit=len(document_ids),
+        storage=fake_storage,
+        ai_provider=NullAIProvider(),
+        session_factory=session_factory,
+        ensure_schema=False,
+        max_workers=3,
+    )
+
+    with session_factory() as db:
+        jobs = db.scalars(select(DocumentProcessingJob)).all()
+        documents = db.scalars(select(DocumentUpload)).all()
+
+    assert summary.processed == len(document_ids)
+    assert summary.completed == len(document_ids)
+    assert summary.failed == 0
+    assert summary.queued_remaining == 0
+    assert {job.status for job in jobs} == {"completed"}
+    assert {job.attempt_count for job in jobs} == {1}
+    assert all(job.worker_id for job in jobs)
+    assert {document.processing_status for document in documents} == {"processed"}
+
+
+def test_sqlite_processing_drains_are_serialized_to_avoid_write_locks(tmp_path) -> None:
+    session_factory = _session_factory(tmp_path)
+
+    assert _worker_count_for_session_factory(4, session_factory) == 1
 
 
 def _client_with_test_dependencies(session_factory: sessionmaker, fake_storage: FakeBlobStorage) -> TestClient:

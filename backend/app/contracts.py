@@ -1,8 +1,10 @@
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any, List, Optional
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
 from sqlalchemy import or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.inspection import inspect as sqlalchemy_inspect
@@ -11,7 +13,15 @@ from sqlalchemy.orm import Session
 from app.auth import CurrentUser, get_current_user
 from app.authz import require_contract_view, seeded_contract, visible_contract_ids
 from app.database import get_db
-from app.models import ContractHypothesis, ContractPrimitiveDeliverable, DocumentProcessingJob, DocumentUpload, RegressionFinding
+from app.models import (
+    Contract,
+    ContractAccessGrant,
+    ContractHypothesis,
+    ContractPrimitiveDeliverable,
+    DocumentProcessingJob,
+    DocumentUpload,
+    RegressionFinding,
+)
 
 router = APIRouter(prefix="/api", tags=["contracts"])
 
@@ -45,6 +55,21 @@ class ContractResponse(BaseModel):
     title: str
     status: str
     source: str
+    contract_number: Optional[str] = None
+    description: Optional[str] = None
+    agency_name: Optional[str] = None
+    office_name: Optional[str] = None
+    vendor_name: Optional[str] = None
+    vendor_uei: Optional[str] = None
+    naics_code: Optional[str] = None
+    psc_code: Optional[str] = None
+    contract_type: Optional[str] = None
+    competition_type: Optional[str] = None
+    period_start: Optional[date] = None
+    period_end: Optional[date] = None
+    security_level: Optional[str] = None
+    obligated_value: Optional[Decimal] = None
+    contracting_officer: Optional[str] = None
     contractor_id: Optional[str] = None
     category_code: Optional[str] = None
     document_count: int
@@ -54,6 +79,27 @@ class ContractResponse(BaseModel):
     unmatched_document_count: int = 0
     has_knowledge_base: bool
     created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class ContractCreateRequest(BaseModel):
+    contract_number: str = Field(min_length=1, max_length=120)
+    title: str = Field(min_length=1, max_length=300)
+    description: Optional[str] = Field(default=None, max_length=4000)
+    agency_name: Optional[str] = Field(default=None, max_length=200)
+    office_name: Optional[str] = Field(default=None, max_length=200)
+    vendor_name: Optional[str] = Field(default=None, max_length=200)
+    vendor_uei: Optional[str] = Field(default=None, max_length=32)
+    naics_code: Optional[str] = Field(default=None, max_length=20)
+    psc_code: Optional[str] = Field(default=None, max_length=20)
+    contract_type: Optional[str] = Field(default=None, max_length=40)
+    competition_type: Optional[str] = Field(default=None, max_length=40)
+    period_start: Optional[date] = None
+    period_end: Optional[date] = None
+    status: str = Field(default="pending_review", max_length=40)
+    security_level: str = Field(default="standard", max_length=40)
+    obligated_value: Optional[Decimal] = None
+    contracting_officer: Optional[str] = Field(default=None, max_length=200)
 
 
 class TrendResponse(BaseModel):
@@ -70,6 +116,59 @@ def list_contracts(
 ) -> List[ContractResponse]:
     ids = visible_contract_ids(user, db)
     return [_contract_response(contract_id, db) for contract_id in ids]
+
+
+@router.post("/contracts", response_model=ContractResponse, status_code=status.HTTP_201_CREATED)
+def create_contract(
+    payload: ContractCreateRequest,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ContractResponse:
+    if user.role != "official":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Official access required")
+    existing = db.scalars(
+        select(Contract).where(Contract.contract_number == payload.contract_number)
+    ).first()
+    if existing is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Contract number already exists")
+    contract = Contract(
+        id=str(uuid4()),
+        contract_number=payload.contract_number.strip(),
+        title=payload.title.strip(),
+        description=payload.description,
+        agency_name=payload.agency_name,
+        office_name=payload.office_name,
+        vendor_name=payload.vendor_name,
+        vendor_uei=payload.vendor_uei,
+        naics_code=payload.naics_code,
+        psc_code=payload.psc_code,
+        contract_type=payload.contract_type,
+        competition_type=payload.competition_type,
+        period_start=payload.period_start,
+        period_end=payload.period_end,
+        status=payload.status,
+        security_level=payload.security_level,
+        metadata_json={
+            "created_from": "portal",
+            "created_by_id": user.id,
+            "obligated_value": str(payload.obligated_value) if payload.obligated_value is not None else None,
+            "contracting_officer": payload.contracting_officer,
+        },
+    )
+    db.add(contract)
+    db.add(
+        ContractAccessGrant(
+            id=str(uuid4()),
+            contract_id=contract.id,
+            principal_id=user.id,
+            principal_type="user",
+            role="owner",
+            security_level=contract.security_level,
+            granted_by_id=user.id,
+        )
+    )
+    db.commit()
+    return _contract_response(contract.id, db)
 
 
 @router.get("/contracts/{contract_id}", response_model=ContractResponse)
@@ -242,17 +341,34 @@ def _contract_response(contract_id: str, db: Session) -> ContractResponse:
 
     if record is not None:
         topics = topics_for_contract(db, contract_id)
+        metadata = _metadata(record)
         return ContractResponse(
             id=str(_attr(record, "id", "contract_id", "contract_key") or contract_id),
             title=str(_attr(record, "title", "contract_number", "name") or contract_id),
             status=str(_attr(record, "status") or "active"),
             source="contract_record",
+            contract_number=_attr(record, "contract_number"),
+            description=_attr(record, "description"),
+            agency_name=_attr(record, "agency_name"),
+            office_name=_attr(record, "office_name"),
+            vendor_name=_attr(record, "vendor_name"),
+            vendor_uei=_attr(record, "vendor_uei"),
+            naics_code=_attr(record, "naics_code"),
+            psc_code=_attr(record, "psc_code"),
+            contract_type=_attr(record, "contract_type"),
+            competition_type=_attr(record, "competition_type"),
+            period_start=_attr(record, "period_start"),
+            period_end=_attr(record, "period_end"),
+            security_level=_attr(record, "security_level"),
+            obligated_value=_decimal_or_none(metadata.get("obligated_value")),
+            contracting_officer=metadata.get("contracting_officer"),
             contractor_id=_attr(record, "contractor_id", "vendor_uei", "vendor_name"),
             category_code=_attr(record, "category_code", "psc_code", "naics_code"),
             document_count=_document_count(db, contract_id),
             **_contract_counts(db, contract_id),
             has_knowledge_base=bool(topics),
             created_at=_attr(record, "created_at"),
+            updated_at=_attr(record, "updated_at"),
         )
 
     if document is not None:
@@ -262,6 +378,9 @@ def _contract_response(contract_id: str, db: Session) -> ContractResponse:
             title=document.title,
             status="uploaded",
             source="document_upload",
+            contract_number=document.title,
+            description=document.notes,
+            security_level=document.security_level,
             contractor_id=document.uploader_id if document.uploader_role == "contractor" else None,
             category_code=seed.get("category_code") if seed else None,
             document_count=1,
@@ -285,6 +404,7 @@ def _contract_response(contract_id: str, db: Session) -> ContractResponse:
             unmatched_document_count=0,
             has_knowledge_base=False,
             created_at=None,
+            updated_at=None,
         )
 
     return ContractResponse(
@@ -301,6 +421,7 @@ def _contract_response(contract_id: str, db: Session) -> ContractResponse:
         unmatched_document_count=0,
         has_knowledge_base=False,
         created_at=None,
+        updated_at=None,
     )
 
 
@@ -446,11 +567,25 @@ def _contract_counts(db: Session, contract_id: str) -> dict:
 
 def _contract_record(db: Session, contract_id: str) -> Optional[Any]:
     model = _first_model("Contract", "ContractRecord")
-    if model is None or not _model_table_exists(db, model):
+    if model is None:
         return None
     try:
         return db.get(model, contract_id)
     except SQLAlchemyError:
+        return None
+
+
+def _metadata(row: Any) -> dict:
+    value = getattr(row, "metadata_json", None)
+    return value if isinstance(value, dict) else {}
+
+
+def _decimal_or_none(value: Any) -> Optional[Decimal]:
+    if value is None or value == "":
+        return None
+    try:
+        return Decimal(str(value))
+    except Exception:
         return None
 
 

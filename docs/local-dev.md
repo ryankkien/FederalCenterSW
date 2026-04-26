@@ -129,6 +129,14 @@ The `document_id` folder is the immutable document artifact folder. Contract har
 parentage lives in Postgres on `document_uploads.contract_id`; semantic links never
 rewrite that parent contract.
 
+The local portal uses real backend mock auth. Contractor and official users can upload
+documents through `/api/documents/upload`; official users can also create contract
+records through `/api/contracts` before attaching a base contract. Portal uploads may
+include `process_inline=true` when the UI needs immediate analysis feedback, such as
+logging a contract from a source document. That path stores the artifact, creates the
+processing job, and drains it immediately through the same AI-first extraction pipeline
+used by the background worker.
+
 During processing, unmatched uploads can auto-create a parent contract only when the
 document is classified as `source_contract` or `task_order` with high confidence and a
 single contract number is extracted by the regex matcher. The new contract is stored

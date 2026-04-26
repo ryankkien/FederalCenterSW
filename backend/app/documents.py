@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.auth import CurrentUser, get_current_user, require_contractor
+from app.auth import CurrentUser, get_current_user
 from app.authz import can_upload_to_contract, require_unmatched_admin
 from app.ai.providers import get_ai_provider
 from app.blob_storage import BlobStorage, get_blob_storage
@@ -30,6 +30,7 @@ from app.models import (
     DocumentSemanticLink,
     DocumentUpload,
 )
+from app.processing import process_processing_job
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
@@ -93,13 +94,12 @@ async def upload_document(
     document_type: str = Form(...),
     notes: Optional[str] = Form(default=None),
     contract_id: Optional[str] = Form(default=None),
+    process_inline: bool = Form(default=False),
     file: UploadFile = File(...),
     user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
     storage: BlobStorage = Depends(get_blob_storage),
 ) -> DocumentResponse:
-    require_contractor(user)
-
     filename = clean_filename(file.filename or "document")
     content_type = file.content_type or "application/octet-stream"
     _validate_file(filename, content_type)
@@ -145,8 +145,12 @@ async def upload_document(
     inline_text = _inline_extracted_text(storage, stored.text_blob_path) if get_ai_inline_processing_enabled() else ""
     inline_provider = get_ai_provider() if inline_text else None
     apply_inline_intake_decisions(db, document, text=inline_text, ai_provider=inline_provider)
-    db.add(_processing_job(document_id))
+    job = _processing_job(document_id)
+    db.add(job)
     db.commit()
+    if process_inline:
+        process_processing_job(db, storage, job.id, get_ai_provider())
+        db.commit()
     db.refresh(document)
     return _document_response(document)
 

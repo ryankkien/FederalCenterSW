@@ -40,9 +40,11 @@ class CountingProvider(NullAIProvider):
 
 
 class ClassificationProvider(NullAIProvider):
-    def __init__(self):
+    def __init__(self, document_kind="ipmdar_pnr", confidence=0.91):
         super().__init__("test")
         self.classify_calls = 0
+        self.document_kind = document_kind
+        self.confidence = confidence
         self._status.available = True
         self._status.enabled = True
         self._status.name = "classification-test"
@@ -52,9 +54,9 @@ class ClassificationProvider(NullAIProvider):
         return StructuredAnalysisResult(
             provider=self.status.name,
             data={
-                "document_kind": "ipmdar_pnr",
-                "confidence": 0.91,
-                "rationale": "The document is an IPMDAR narrative report.",
+                "document_kind": self.document_kind,
+                "confidence": self.confidence,
+                "rationale": f"The document is classified as {self.document_kind}.",
             },
         )
 
@@ -157,6 +159,23 @@ def test_document_classification_uses_ai_and_reuses_result():
     assert second == ("ipmdar_pnr", None)
     assert provider.classify_calls == 1
     assert document["metadata_json"]["classification"]["source"] == "ai"
+
+
+def test_document_classification_accepts_ai_cdrl_and_other_kinds():
+    for expected_kind in ("cdrl", "other"):
+        provider = ClassificationProvider(document_kind=expected_kind)
+        document = {
+            "original_filename": f"{expected_kind}.pdf",
+            "title": expected_kind,
+            "document_kind": "source_contract",
+            "metadata_json": {},
+        }
+
+        result = classify_document(document, "Ambiguous administrative document text", provider)
+
+        assert result == (expected_kind, None)
+        assert document["document_kind"] == expected_kind
+        assert document["metadata_json"]["classification"]["source"] == "ai"
 
 
 def test_contract_matching_finds_agor_contract_from_text():

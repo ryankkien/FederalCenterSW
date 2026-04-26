@@ -29,7 +29,7 @@ from app.models import (
 )
 
 
-BASELINE_DOCUMENT_KINDS = {"source_contract", "task_order", "modification", "email_context"}
+BASELINE_DOCUMENT_KINDS = {"source_contract", "task_order", "modification", "cdrl", "email_context"}
 REPORT_DOCUMENT_KINDS = {"weekly_report", "monthly_report", "status_report", "ipmdar_pnr"}
 CPARS_DOCUMENT_KINDS = {"cpars", "cpars_evaluation"}
 OFFICIAL_DOMAIN_SUFFIXES = (".gov", ".mil")
@@ -167,6 +167,9 @@ def classify_document(
     elif _contains_any(haystack, ("ipmdar", "integrated program management data and analysis report")):
         document_kind = "ipmdar_pnr"
         confidence = 0.9
+    elif _is_cdrl_document(haystack):
+        document_kind = "cdrl"
+        confidence = 0.92
     elif _contains_any(haystack, ("source contract", "request for proposal")):
         document_kind = "source_contract"
         confidence = 0.9
@@ -207,6 +210,7 @@ def classify_document(
         "ipmdar_pnr",
         "ipmdar_cpd_json",
         "ipmdar_spd_json",
+        "cdrl",
         "cpars",
         "cpars_evaluation",
         "gao_oig_report",
@@ -1063,6 +1067,7 @@ def _classify_document_with_provider(
         "ipmdar_pnr",
         "ipmdar_cpd_json",
         "ipmdar_spd_json",
+        "cdrl",
         "cpars",
         "cpars_evaluation",
         "gao_oig_report",
@@ -1082,6 +1087,27 @@ def _classify_document_with_provider(
         return None
     rationale = str(data.get("rationale") or "").strip()[:1000] or None
     return kind, modification_kind, confidence, rationale
+
+
+def _is_cdrl_document(haystack: str) -> bool:
+    return _contains_any(
+        haystack,
+        (
+            "contract data requirements list",
+            "dd form 1423",
+            "dd form 1423-1",
+            "exhibit a cdrl",
+            "exhibit a cdrls",
+            "data item no.",
+            "data item description",
+            "data acquisition document",
+            "requiring office",
+            "date of first submission",
+            "date of subsequent submission",
+            "business reports",
+            "monthly status reports",
+        ),
+    ) and _contains_any(haystack, ("cdrl", "data item", "dd form 1423", "exhibit a"))
 
 
 def _provider_model_name(ai_provider: Optional[object]) -> Optional[str]:
@@ -1714,6 +1740,10 @@ def _baseline_obligation_exists(
 
 def _update_document_semantic_links(session: Session) -> None:
     rows = list(session.scalars(select(RegressionFinding)).all())
+    seen_links = {
+        (row.source_document_upload_id, row.target_document_upload_id, row.link_type)
+        for row in session.scalars(select(DocumentSemanticLink)).all()
+    }
     for index, source in enumerate(rows):
         for target in rows[index + 1 :]:
             if not source.document_upload_id or not target.document_upload_id:
@@ -1723,15 +1753,10 @@ def _update_document_semantic_links(session: Session) -> None:
             if source.finding_type != target.finding_type:
                 continue
             source_id, target_id = sorted([source.document_upload_id, target.document_upload_id])
-            existing = session.scalars(
-                select(DocumentSemanticLink).where(
-                    DocumentSemanticLink.source_document_upload_id == source_id,
-                    DocumentSemanticLink.target_document_upload_id == target_id,
-                    DocumentSemanticLink.link_type == source.finding_type,
-                )
-            ).first()
-            if existing is not None:
+            link_key = (source_id, target_id, source.finding_type)
+            if link_key in seen_links:
                 continue
+            seen_links.add(link_key)
             session.add(
                 DocumentSemanticLink(
                     id=str(uuid4()),

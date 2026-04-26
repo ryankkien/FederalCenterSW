@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.inspection import inspect as sqlalchemy_inspect
 from sqlalchemy.orm import Session
@@ -179,6 +179,7 @@ def process_one_queued_job(
     session: Session,
     storage: BlobStorage,
     ai_provider: Optional[AIProvider] = None,
+    worker_id: Optional[str] = None,
 ) -> ProcessingResult:
     models = importlib.import_module("app.models")
     job_model = _first_model(models, "DocumentProcessingJob", "ProcessingJob", "AIProcessingJob")
@@ -192,9 +193,8 @@ def process_one_queued_job(
             ),
         )
 
-    for job in _queued_jobs(session, job_model):
-        if _job_is_waiting_for_text(session, models, job, storage):
-            continue
+    job = _claim_next_ready_job(session, models, job_model, storage, worker_id=worker_id)
+    if job is not None:
         return _process_job_with_status(session, models, job, storage, ai_provider)
 
     return ProcessingResult(
@@ -232,6 +232,56 @@ def _queued_jobs(session: Session, job_model: object) -> List[object]:
 def _next_queued_job(session: Session, job_model: object) -> Optional[object]:
     rows = _queued_jobs(session, job_model)
     return rows[0] if rows else None
+
+
+def _claim_next_ready_job(
+    session: Session,
+    models: object,
+    job_model: object,
+    storage: BlobStorage,
+    worker_id: Optional[str] = None,
+) -> Optional[object]:
+    for job in _queued_jobs(session, job_model):
+        if _job_is_waiting_for_text(session, models, job, storage):
+            continue
+        claimed = _claim_job(session, job_model, job, worker_id=worker_id)
+        if claimed is not None:
+            return claimed
+    return None
+
+
+def _claim_job(
+    session: Session,
+    job_model: object,
+    job: object,
+    worker_id: Optional[str] = None,
+) -> Optional[object]:
+    job_id = _string_attr(job, "id")
+    status_column = getattr(job_model, "status", None) or getattr(job_model, "state", None)
+    id_column = getattr(job_model, "id", None)
+    if not job_id or status_column is None or id_column is None:
+        return job
+
+    values = {status_column.key: "processing"}
+    started_at = getattr(job_model, "started_at", None) or getattr(job_model, "processing_started_at", None)
+    if started_at is not None:
+        values[started_at.key] = datetime.now(timezone.utc)
+    worker_id_column = getattr(job_model, "worker_id", None)
+    if worker_id_column is not None and worker_id:
+        values[worker_id_column.key] = worker_id
+    attempt_count = getattr(job_model, "attempt_count", None)
+    if attempt_count is not None:
+        values[attempt_count.key] = attempt_count + 1
+
+    result = session.execute(
+        update(job_model)
+        .where(id_column == job_id, status_column.in_(("queued", "pending")))
+        .values(**values)
+    )
+    session.commit()
+    if result.rowcount != 1:
+        return None
+    return session.get(job_model, job_id)
 
 
 def _queued_job_statement(job_model: object):
