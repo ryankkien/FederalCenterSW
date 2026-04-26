@@ -13,6 +13,7 @@ import {
   downloadDocumentBlob,
   getContractAnalysis,
   getContractDeliverables,
+  getContractLifecycle,
   getDocument,
   getPortfolioThemes,
   listAllDocuments,
@@ -969,7 +970,7 @@ function FilterPills({ options, value, onChange }) {
 }
 
 // ─── CONTRACT DETAIL PAGE ───────────────────────────────────────────────────
-const DETAIL_TABS = ['Overview', 'Insights', 'Benchmarks', 'Documents'];
+const DETAIL_TABS = ['Overview', 'Lifecycle', 'Insights', 'Benchmarks', 'Documents'];
 
 function ContractDetailPage({ contract, onBack, onSelectContract }) {
   const [tab, setTab] = useState('Overview');
@@ -977,6 +978,8 @@ function ContractDetailPage({ contract, onBack, onSelectContract }) {
   const [findings, setFindings] = useState([]);
   const [analysis, setAnalysis] = useState(null);
   const [deliverables, setDeliverables] = useState(null);
+  const [lifecycle, setLifecycle] = useState(null);
+  const [lifecycleError, setLifecycleError] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
 
   const c = contract;
@@ -986,6 +989,8 @@ function ContractDetailPage({ contract, onBack, onSelectContract }) {
     setFindings([]);
     setAnalysis(null);
     setDeliverables(null);
+    setLifecycle(null);
+    setLifecycleError(false);
     let cancelled = false;
     listContractDocuments(c.id)
       .then(rows => {
@@ -1008,6 +1013,13 @@ function ContractDetailPage({ contract, onBack, onSelectContract }) {
       })
       .catch(() => {
         if (!cancelled) setDeliverables({ availability:'error', groups:[], limitations:['Deliverable evidence could not be loaded.'] });
+      });
+    getContractLifecycle(c.id)
+      .then(row => {
+        if (!cancelled) setLifecycle(row);
+      })
+      .catch(() => {
+        if (!cancelled) setLifecycleError(true);
       });
     return () => { cancelled = true; };
   }, [c.id]);
@@ -1056,6 +1068,7 @@ function ContractDetailPage({ contract, onBack, onSelectContract }) {
       {/* Body */}
       <div style={{ flex:1, overflowY:'auto' }}>
         {tab === 'Overview'   && <OverviewTab contract={c} docs={docs} deliverables={deliverables} />}
+        {tab === 'Lifecycle'  && <LifecycleTab contract={c} lifecycle={lifecycle} error={lifecycleError} />}
         {tab === 'Insights'   && <ContractInsightsTab contract={c} findings={findings} onSelectContract={onSelectContract} />}
         {tab === 'Benchmarks' && <BenchmarksTab contract={c} analysis={analysis} />}
         {tab === 'Documents'  && <DocumentsTab docs={docs} contract={c} onUpload={() => setShowUpload(true)} />}
@@ -1359,6 +1372,236 @@ function normalizeBackendDeliverables(payload) {
       };
     }),
   })).filter(group => group.items.length > 0);
+}
+
+function LifecycleTab({ contract: c, lifecycle, error }) {
+  if (error) {
+    return (
+      <div style={{ padding:'24px' }}>
+        <EmptyState title="Lifecycle packet unavailable" sub="The backend lifecycle endpoint could not be loaded for this contract." />
+      </div>
+    );
+  }
+  if (!lifecycle) {
+    return (
+      <div style={{ padding:'24px' }}>
+        <Spinner label="Loading lifecycle evidence…" />
+      </div>
+    );
+  }
+
+  const monthly = lifecycle.monthly_reports || [];
+  const ipmdar = lifecycle.ipmdar_metrics || [];
+  const issues = lifecycle.issue_register || [];
+  const ratings = lifecycle.cpars_ratings || [];
+  const events = lifecycle.lifecycle_events || [];
+  const sources = lifecycle.source_packet || [];
+  const limitations = lifecycle.limitations || [];
+  const notProven = lifecycle.not_proven || [];
+  const financial = lifecycle.financial_summary || {};
+
+  return (
+    <div style={{ padding:'24px 24px 48px' }}>
+      <SectionHeader
+        title={`Lifecycle evidence for ${c.number}`}
+        subtitle="Backend extracted packet from linked contract documents, reports, IPMDAR, CPARS, and CDRLs"
+      />
+
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:12, marginBottom:20 }}>
+        <MetricCard label="Sources" value={String(sources.length)} sub={availabilityLabel(lifecycle.availability)} mono />
+        <MetricCard label="Monthly Reports" value={String(monthly.length)} sub="status rows" mono />
+        <MetricCard label="Latest CPI / SPI" value={`${fmtLifecycleNumber(financial.latest_cpi)} / ${fmtLifecycleNumber(financial.latest_spi)}`} sub="IPMDAR" mono />
+        <MetricCard label="Latest Invoiced" value={fmtLifecycleMoney(financial.latest_invoiced_to_date)} sub="monthly report" mono />
+      </div>
+
+      {(limitations.length > 0 || notProven.length > 0) && (
+        <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderLeft:'3px solid var(--warn)', borderRadius:4, padding:'14px 18px', marginBottom:20 }}>
+          <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)', marginBottom:8 }}>Evidence Limits</div>
+          {[...limitations, ...notProven].slice(0, 8).map((item, i) => (
+            <div key={`${item}-${i}`} style={{ fontSize:12, color:'var(--ink-mute)', lineHeight:1.55, padding:'3px 0' }}>{item}</div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display:'grid', gridTemplateColumns:'1.15fr 0.85fr', gap:18, marginBottom:18 }}>
+        <LifecyclePanel title="Lifecycle Events" emptyTitle="No lifecycle events extracted" emptySub="Upload and process baseline reports, mods, and IPMDAR/CPARS evidence.">
+          {events.map((event, i) => (
+            <div key={`${event.date || 'event'}-${i}`} style={{ display:'grid', gridTemplateColumns:'112px 150px 1fr', gap:12, padding:'8px 0', borderBottom: i < events.length - 1 ? '1px solid var(--border)' : 'none' }}>
+              <div style={{ fontSize:11, color:'var(--ink-soft)', fontFamily:'var(--mono)' }}>{fmtLifecycleDate(event.date)}</div>
+              <div style={{ fontSize:10, color:'var(--accent)', fontFamily:'var(--mono)', textTransform:'uppercase', letterSpacing:'0.08em' }}>{event.type || 'event'}</div>
+              <div style={{ fontSize:12.5, color:'var(--ink)', lineHeight:1.45 }}>{event.summary || 'Lifecycle event'}</div>
+            </div>
+          ))}
+        </LifecyclePanel>
+
+        <LifecyclePanel title="CPARS Ratings" emptyTitle="No CPARS ratings extracted" emptySub="Import an authorized CPARS export or process a CPARS narrative.">
+          {ratings.map((rating, i) => (
+            <div key={`${rating.label}-${i}`} style={{ display:'grid', gridTemplateColumns:'1fr auto', gap:12, padding:'8px 0', borderBottom: i < ratings.length - 1 ? '1px solid var(--border)' : 'none' }}>
+              <div>
+                <div style={{ fontSize:12.5, color:'var(--ink)', fontWeight:600 }}>{rating.label}</div>
+                <div style={{ fontSize:10.5, color:'var(--ink-faint)', marginTop:2, fontFamily:'var(--mono)' }}>{rating.period_label || rating.source_document_id || 'CPARS evidence'}</div>
+              </div>
+              <div style={{ alignSelf:'center', fontSize:11, color:'var(--ink)', fontWeight:700, fontFamily:'var(--mono)', whiteSpace:'nowrap' }}>{rating.rating}</div>
+            </div>
+          ))}
+        </LifecyclePanel>
+      </div>
+
+      <LifecycleTable
+        title="Monthly Status Reports"
+        emptyTitle="No monthly status rows extracted"
+        emptySub="Upload processed monthly reports linked to this contract."
+        columns={['Month', 'Period', 'Invoiced To Date', 'This Period', 'ETC', 'Schedule']}
+        rows={monthly}
+        renderRow={(row, i) => (
+          <tr key={`${row.document_id}-${i}`} style={{ borderBottom:'1px solid var(--border)' }}>
+            <LifecycleCell mono>{row.month_number || '—'}</LifecycleCell>
+            <LifecycleCell>{row.period || row.source || '—'}</LifecycleCell>
+            <LifecycleCell mono align="right">{fmtLifecycleMoney(row.invoiced_to_date)}</LifecycleCell>
+            <LifecycleCell mono align="right">{fmtLifecycleMoney(row.invoiced_this_period)}</LifecycleCell>
+            <LifecycleCell mono align="right">{fmtLifecycleMoney(row.estimated_cost_to_complete)}</LifecycleCell>
+            <LifecycleCell>{row.schedule_status || row.problem_signal || '—'}</LifecycleCell>
+          </tr>
+        )}
+      />
+
+      <LifecycleTable
+        title="IPMDAR Metrics"
+        emptyTitle="No IPMDAR metrics extracted"
+        emptySub="Process IPMDAR PNR/CPD/SPD evidence linked to this contract."
+        columns={['Date', 'BCWS', 'BCWP', 'ACWP', 'CV', 'SV', 'CPI', 'SPI', 'Driver']}
+        rows={ipmdar}
+        renderRow={(row, i) => (
+          <tr key={`${row.document_id}-${i}`} style={{ borderBottom:'1px solid var(--border)' }}>
+            <LifecycleCell mono>{fmtLifecycleDate(row.data_date) || row.reporting_period || '—'}</LifecycleCell>
+            <LifecycleCell mono align="right">{fmtLifecycleMoney(row.bcws)}</LifecycleCell>
+            <LifecycleCell mono align="right">{fmtLifecycleMoney(row.bcwp)}</LifecycleCell>
+            <LifecycleCell mono align="right">{fmtLifecycleMoney(row.acwp)}</LifecycleCell>
+            <LifecycleCell mono align="right">{fmtLifecycleMoney(row.cost_variance)}</LifecycleCell>
+            <LifecycleCell mono align="right">{fmtLifecycleMoney(row.schedule_variance)}</LifecycleCell>
+            <LifecycleCell mono align="right">{fmtLifecycleNumber(row.cpi)}</LifecycleCell>
+            <LifecycleCell mono align="right">{fmtLifecycleNumber(row.spi)}</LifecycleCell>
+            <LifecycleCell>{row.primary_driver || '—'}</LifecycleCell>
+          </tr>
+        )}
+      />
+
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:18 }}>
+        <LifecycleTable
+          title="Issue Register"
+          emptyTitle="No lifecycle issues extracted"
+          emptySub="Process reports with issue, variance, staffing, or delay evidence."
+          columns={['Issue', 'Owner', 'Severity', 'Status']}
+          rows={issues}
+          compact
+          renderRow={(row, i) => (
+            <tr key={`${row.issue_id}-${i}`} style={{ borderBottom:'1px solid var(--border)' }}>
+              <LifecycleCell>
+                <div style={{ fontWeight:600, color:'var(--ink)' }}>{row.title || row.category || row.issue_id}</div>
+                <div style={{ fontSize:11, color:'var(--ink-mute)', marginTop:3, lineHeight:1.45 }}>{row.summary || '—'}</div>
+              </LifecycleCell>
+              <LifecycleCell mono>{row.responsible_party || '—'}</LifecycleCell>
+              <LifecycleCell mono>{row.severity || '—'}</LifecycleCell>
+              <LifecycleCell mono>{row.status || '—'}</LifecycleCell>
+            </tr>
+          )}
+        />
+
+        <LifecycleTable
+          title="Source Packet"
+          emptyTitle="No source packet"
+          emptySub="No linked contract documents are visible yet."
+          columns={['Document', 'Kind', 'Status', 'Text']}
+          rows={sources}
+          compact
+          renderRow={(row, i) => (
+            <tr key={`${row.document_id}-${i}`} style={{ borderBottom:'1px solid var(--border)' }}>
+              <LifecycleCell>{row.title || row.filename || row.document_id}</LifecycleCell>
+              <LifecycleCell mono>{row.document_kind || row.lifecycle_role || '—'}</LifecycleCell>
+              <LifecycleCell mono>{row.processing_status || '—'}</LifecycleCell>
+              <LifecycleCell mono>{row.has_extracted_text ? 'yes' : 'no'}</LifecycleCell>
+            </tr>
+          )}
+        />
+      </div>
+    </div>
+  );
+}
+
+function LifecyclePanel({ title, emptyTitle, emptySub, children }) {
+  const hasChildren = React.Children.count(children) > 0;
+  return (
+    <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:4, padding:'16px 18px' }}>
+      <div style={{ fontSize:11, fontWeight:700, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)', marginBottom:12 }}>{title}</div>
+      {hasChildren ? children : <EmptyState title={emptyTitle} sub={emptySub} />}
+    </div>
+  );
+}
+
+function LifecycleTable({ title, emptyTitle, emptySub, columns, rows, renderRow, compact }) {
+  return (
+    <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:4, overflow:'hidden', marginBottom:18 }}>
+      <div style={{ padding:'13px 16px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 }}>
+        <div style={{ fontSize:11, fontWeight:700, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)' }}>{title}</div>
+        <div style={{ fontSize:10, color:'var(--ink-faint)', fontFamily:'var(--mono)' }}>{rows.length} rows</div>
+      </div>
+      {rows.length === 0 ? (
+        <EmptyState title={emptyTitle} sub={emptySub} />
+      ) : (
+        <div style={{ overflowX:'auto' }}>
+          <table style={{ width:'100%', borderCollapse:'collapse', minWidth: compact ? 520 : 900 }}>
+            <thead>
+              <tr style={{ background:'var(--surface-alt)' }}>
+                {columns.map((h, i) => (
+                  <th key={i} style={{
+                    padding:'9px 12px', textAlign:i > 1 && !compact ? 'right' : 'left',
+                    fontSize:10, fontWeight:700, letterSpacing:'0.12em', textTransform:'uppercase',
+                    color:'var(--ink-mute)', whiteSpace:'nowrap', fontFamily:'var(--mono)',
+                    borderBottom:'1px solid var(--border-md)',
+                  }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>{rows.map(renderRow)}</tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LifecycleCell({ children, mono, align }) {
+  return (
+    <td style={{
+      padding:'10px 12px',
+      fontSize:12,
+      color:'var(--ink-soft)',
+      lineHeight:1.45,
+      verticalAlign:'top',
+      textAlign: align || 'left',
+      fontFamily: mono ? 'var(--mono)' : 'inherit',
+      whiteSpace: align === 'right' ? 'nowrap' : 'normal',
+    }}>{children}</td>
+  );
+}
+
+function fmtLifecycleMoney(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '—';
+  return new Intl.NumberFormat('en-US', { style:'currency', currency:'USD', maximumFractionDigits:0 }).format(num);
+}
+
+function fmtLifecycleNumber(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '—';
+  return String(Math.round(num * 1000) / 1000);
+}
+
+function fmtLifecycleDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return fmtDateMil(value);
 }
 
 // ─── DOCUMENTS TAB ──────────────────────────────────────────────────────────
