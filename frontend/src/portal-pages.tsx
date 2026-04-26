@@ -21,6 +21,7 @@ import {
   listAllDocuments,
   listContractDocuments,
   listContracts,
+  listProcessingJobs,
   listRegressions,
   mockLogin,
   normalizeContract,
@@ -1021,6 +1022,8 @@ function AdminPage({ onSelectContract }) {
   const [activeContract, setActiveContract] = useState(null);
   const [lifecycle, setLifecycle] = useState(null);
   const [lifecycleError, setLifecycleError] = useState(false);
+  const [processingJobs, setProcessingJobs] = useState([]);
+  const [processingError, setProcessingError] = useState(false);
   const [creating, setCreating] = useState(false);
   const [uploading, setUploading] = useState({});
   const [packetUploading, setPacketUploading] = useState(false);
@@ -1055,9 +1058,23 @@ function AdminPage({ onSelectContract }) {
   useEffect(() => {
     if (!activeContract?.id) {
       setLifecycle(null);
+      setProcessingJobs([]);
       return;
     }
     refreshLifecycle(activeContract.id);
+    refreshProcessingJobs(activeContract.id);
+  }, [activeContract?.id]);
+
+  useEffect(() => {
+    if (!activeContract?.id) return undefined;
+    const timer = window.setInterval(async () => {
+      const jobs = await refreshProcessingJobs(activeContract.id);
+      if (jobs.some(job => ['queued', 'pending', 'running'].includes(job.status))) {
+        return;
+      }
+      await refreshLifecycle(activeContract.id);
+    }, 5000);
+    return () => window.clearInterval(timer);
   }, [activeContract?.id]);
 
   function updateField(key, value) {
@@ -1072,6 +1089,19 @@ function AdminPage({ onSelectContract }) {
       setLifecycle(row);
     } catch {
       setLifecycleError(true);
+    }
+  }
+
+  async function refreshProcessingJobs(contractId = activeContract?.id) {
+    if (!contractId) return [];
+    setProcessingError(false);
+    try {
+      const rows = await listProcessingJobs(contractId);
+      setProcessingJobs(rows);
+      return rows;
+    } catch {
+      setProcessingError(true);
+      return [];
     }
   }
 
@@ -1135,12 +1165,13 @@ function AdminPage({ onSelectContract }) {
           documentType: inferred.documentType,
           notes: `Baseline packet upload. AI intake should classify, match, and link this artifact. Hint: ${inferred.label}.`,
           file,
-          processInline: true,
+          processInline: false,
         });
         completed.push(doc);
       }
       setPacketUploaded(prev => [...completed, ...prev]);
       setPacketFiles([]);
+      await refreshProcessingJobs(activeContract.id);
       await refreshLifecycle(activeContract.id);
     } catch (err) {
       setPacketUploaded(prev => [...completed, ...prev]);
@@ -1163,9 +1194,10 @@ function AdminPage({ onSelectContract }) {
         documentType: slot.documentType,
         notes: slot.notes,
         file,
-        processInline: true,
+        processInline: false,
       });
       setUploaded(prev => ({ ...prev, [slot.id]: doc }));
+      await refreshProcessingJobs(activeContract.id);
       await refreshLifecycle(activeContract.id);
     } catch (err) {
       setError(err?.message || `${slot.label} upload failed.`);
@@ -1175,6 +1207,7 @@ function AdminPage({ onSelectContract }) {
   }
 
   const readiness = lifecycleReadiness(lifecycle);
+  const processingSummary = summarizeProcessingJobs(processingJobs);
   const recentContracts = (contracts || []).slice(0, 6);
 
   return (
@@ -1190,7 +1223,7 @@ function AdminPage({ onSelectContract }) {
           <MetricCard label="Visible Contracts" value={contracts === null ? '—' : String(contracts.length)} sub="backend records" mono />
           <MetricCard label="Active Setup" value={activeContract?.number || 'None'} sub={activeContract ? activeContract.title : 'Create or select'} mono />
           <MetricCard label="Source Docs" value={String(readiness.sources)} sub={availabilityLabel(lifecycle?.availability || (activeContract ? 'loading' : 'source_absent'))} mono />
-          <MetricCard label="Evidence Gaps" value={String(readiness.gaps)} sub="limitations + not proven" mono />
+          <MetricCard label="Processing" value={`${processingSummary.active} / ${processingSummary.total}`} sub={processingError ? 'status unavailable' : 'active jobs'} mono />
         </div>
 
         {error && (
@@ -1294,7 +1327,7 @@ function AdminPage({ onSelectContract }) {
                       )}
                       {packetUploaded.length > 0 && (
                         <div style={{ fontSize:10.5, color:'var(--good)', marginTop:4, fontFamily:'var(--mono)' }}>
-                          {packetUploaded.length} packet files uploaded in this setup session.
+                          {packetUploaded.length} packet files uploaded and queued in this setup session.
                         </div>
                       )}
                     </div>
@@ -1356,7 +1389,7 @@ function AdminPage({ onSelectContract }) {
                     <SetupReadinessCell label="Sources" value={readiness.sources} />
                     <SetupReadinessCell label="CDRLs" value={readiness.deliverables} border />
                     <SetupReadinessCell label="Monthly" value={readiness.monthly} border />
-                    <SetupReadinessCell label="IPMDAR" value={readiness.ipmdar} border />
+                    <SetupReadinessCell label="Jobs" value={`${processingSummary.completed}/${processingSummary.total}`} border />
                   </div>
                   <div style={{ display:'grid', gap:7 }}>
                     {[
@@ -1364,6 +1397,7 @@ function AdminPage({ onSelectContract }) {
                       ['Source packet has extracted text', readiness.sources > 0],
                       ['CDRL / deliverable rows available', readiness.deliverables > 0],
                       ['Recurring report row available', readiness.monthly > 0],
+                      ['Queued processing is complete', processingSummary.active === 0],
                       ['Lifecycle gaps are visible', readiness.gaps >= 0],
                     ].map(([label, ok]) => (
                       <div key={label} style={{ display:'flex', justifyContent:'space-between', gap:12, padding:'7px 0', borderBottom:'1px solid var(--border)' }}>
@@ -1377,6 +1411,17 @@ function AdminPage({ onSelectContract }) {
                       <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.12em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)', marginBottom:6 }}>Current Evidence Gaps</div>
                       {[...(lifecycle.limitations || []), ...(lifecycle.not_proven || [])].slice(0, 5).map((item, i) => (
                         <div key={i} style={{ fontSize:11.5, color:'var(--ink-mute)', lineHeight:1.5, padding:'2px 0' }}>{item}</div>
+                      ))}
+                    </div>
+                  )}
+                  {processingJobs.length > 0 && (
+                    <div style={{ marginTop:12, padding:'10px 12px', background:'var(--surface-alt)', border:'1px solid var(--border)', borderRadius:3 }}>
+                      <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.12em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)', marginBottom:6 }}>Processing Queue</div>
+                      {processingJobs.slice(0, 6).map(job => (
+                        <div key={job.id} style={{ display:'grid', gridTemplateColumns:'1fr auto', gap:10, padding:'4px 0', borderBottom:'1px solid var(--border)' }}>
+                          <span style={{ fontSize:11.5, color:'var(--ink-mute)', fontFamily:'var(--mono)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{job.id}</span>
+                          <span style={{ fontSize:10, fontWeight:700, fontFamily:'var(--mono)', color:processingJobTone(job.status), textTransform:'uppercase' }}>{job.status}</span>
+                        </div>
                       ))}
                     </div>
                   )}
@@ -1430,6 +1475,20 @@ function lifecycleReadiness(lifecycle) {
     issues: (lifecycle.issue_register || []).length,
     gaps: (lifecycle.limitations || []).length + (lifecycle.not_proven || []).length,
   };
+}
+
+function summarizeProcessingJobs(jobs) {
+  const rows = jobs || [];
+  const active = rows.filter(job => ['queued', 'pending', 'running'].includes(job.status)).length;
+  const completed = rows.filter(job => job.status === 'completed').length;
+  const failed = rows.filter(job => job.status === 'failed').length;
+  return { total: rows.length, active, completed, failed };
+}
+
+function processingJobTone(status) {
+  if (status === 'completed') return 'var(--good)';
+  if (status === 'failed') return 'var(--flag)';
+  return 'var(--warn)';
 }
 
 async function filesFromDataTransfer(dataTransfer) {

@@ -340,7 +340,10 @@ flow creates the contract record, accepts a drag-and-drop packet folder or manua
 source contract/CDRL/modification/baseline/status uploads, then reads the lifecycle
 endpoint to show readiness and evidence gaps before analysts move into the contract
 workspace. Folder uploads use filename hints only to set an initial document type; AI
-intake and processing still classify, match, and link the artifacts.
+intake and processing still classify, match, and link the artifacts. Admin packet
+uploads queue processing instead of running inline so a completed upload remains
+durable if the user leaves the page; the UI polls processing jobs and refreshes
+lifecycle readiness as queued work completes.
 
 Email or portal uploads that cannot match an existing contract remain unmatched unless
 processing can safely scaffold a new parent. Auto-scaffolding only runs for high
