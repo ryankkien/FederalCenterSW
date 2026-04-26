@@ -58,11 +58,7 @@ param staticWebAppLocation string = 'eastus2'
 @description('Summarizer Docker image tag to deploy.')
 param summarizerImageTag string = 'latest'
 
-@description('Anthropic API key secret for the Summarizer.')
-@secure()
-param anthropicApiKey string = ''
-
-@description('OpenAI API key secret for the Summarizer (used if Anthropic key is empty).')
+@description('OpenAI API key secret for the Summarizer and Backend.')
 @secure()
 param openaiApiKey string = ''
 
@@ -324,10 +320,6 @@ resource summarizerApp 'Microsoft.App/containerApps@2024-03-01' = {
           value: 'DefaultEndpointsProtocol=https;AccountName=${appStorage.name};AccountKey=${appStorage.listKeys().keys[0].value};EndpointSuffix=${environment().suffixes.storage}'
         }
         {
-          name: 'anthropic-api-key'
-          value: anthropicApiKey
-        }
-        {
           name: 'openai-api-key'
           value: openaiApiKey
         }
@@ -340,8 +332,8 @@ resource summarizerApp 'Microsoft.App/containerApps@2024-03-01' = {
     template: {
       containers: [
         {
-          name: 'summarizer'
-          image: '${acr.properties.loginServer}/summarizer:${summarizerImageTag}'
+          name: 'feature-extractor'
+          image: '${acr.properties.loginServer}/feature-extractor:${summarizerImageTag}'
           resources: {
             cpu: json('0.5')
             memory: '1Gi'
@@ -356,16 +348,12 @@ resource summarizerApp 'Microsoft.App/containerApps@2024-03-01' = {
               value: appAssetsContainerName
             }
             {
-              name: 'ANTHROPIC_API_KEY'
-              secretRef: 'anthropic-api-key'
-            }
-            {
               name: 'OPENAI_API_KEY'
               secretRef: 'openai-api-key'
             }
             {
               name: 'MODEL_PREFERENCE'
-              value: 'claude'
+              value: 'openai'
             }
             {
               name: 'DATABASE_URL'
@@ -504,4 +492,3 @@ output acrLoginServer string = acr.properties.loginServer
 output summarizerUrl string = 'https://${summarizerApp.properties.configuration.ingress.fqdn}'
 output backendUrl string = 'https://${backendApp.properties.configuration.ingress.fqdn}'
 output staticWebAppUrl string = 'https://${staticWebApp.properties.defaultHostname}'
-output staticWebAppApiKey string = staticWebApp.listSecrets().properties.apiKey

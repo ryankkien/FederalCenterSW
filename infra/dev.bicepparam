@@ -20,4 +20,4 @@ param acaEnvironmentName = 'fcsw-dev-aca-env'
 param summarizerAppName = 'fcsw-summarizer-dev'
 param backendAppName = 'fcsw-backend-dev'
 param staticWebAppName = 'fcsw-frontend-dev'
-// anthropicApiKey, openaiApiKey, summarizerDatabaseUrl, and backendDatabaseUrl are intentionally not set here — supply via CI/CD secrets or az deployment group create --parameters
+// openaiApiKey, summarizerDatabaseUrl, and backendDatabaseUrl are intentionally not set here — supply via CI/CD secrets or az deployment group create --parameters
