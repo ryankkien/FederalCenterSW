@@ -26,3 +26,11 @@ def get_openai_api_key() -> str | None:
 
 def get_model_preference() -> str:
     return os.getenv("MODEL_PREFERENCE", "claude").lower()
+
+
+def get_database_url() -> str:
+    return os.getenv("DATABASE_URL", "")
+
+
+def get_embedding_model() -> str:
+    return os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
