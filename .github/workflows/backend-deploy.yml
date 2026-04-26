@@ -1,12 +1,12 @@
-name: Summarizer Deploy
+name: Backend Deploy
 
 on:
   push:
     branches:
       - main
     paths:
-      - 'feature_extractor/**'
-      - '.github/workflows/summarizer-deploy.yml'
+      - 'backend/**'
+      - '.github/workflows/backend-deploy.yml'
   workflow_dispatch:
 
 permissions:
@@ -15,7 +15,7 @@ permissions:
 
 env:
   ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER || 'fcswdevacr.azurecr.io' }}
-  ACA_APP_NAME: ${{ vars.SUMMARIZER_APP_NAME || 'fcsw-summarizer-dev' }}
+  ACA_APP_NAME: ${{ vars.BACKEND_APP_NAME || 'fcsw-backend-dev' }}
   AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || 'federal-center-sw-dev' }}
   AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID || '99596387-8247-4e94-9917-cf8bc695f106' }}
 
@@ -39,8 +39,8 @@ jobs:
 
       - name: Build and push image
         run: |
-          IMAGE="${{ env.ACR_LOGIN_SERVER }}/feature-extractor"
-          docker build -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" feature_extractor/
+          IMAGE="${{ env.ACR_LOGIN_SERVER }}/backend"
+          docker build -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" backend/
           docker push "$IMAGE:${{ github.sha }}"
           docker push "$IMAGE:latest"
 
@@ -49,4 +49,4 @@ jobs:
           az containerapp update \
             --name "$ACA_APP_NAME" \
             --resource-group "$AZURE_RESOURCE_GROUP" \
-            --image "${{ env.ACR_LOGIN_SERVER }}/feature-extractor:${{ github.sha }}"
+            --image "${{ env.ACR_LOGIN_SERVER }}/backend:${{ github.sha }}"

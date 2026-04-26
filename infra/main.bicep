@@ -42,6 +42,19 @@ param acaEnvironmentName string
 @description('Container App name for the Summarizer service.')
 param summarizerAppName string
 
+@description('Container App name for the Backend API service.')
+param backendAppName string
+
+@description('PostgreSQL connection string for the Backend API.')
+@secure()
+param backendDatabaseUrl string = ''
+
+@description('Azure Static Web App name for the Frontend.')
+param staticWebAppName string
+
+@description('Azure region for the Static Web App (limited regions supported).')
+param staticWebAppLocation string = 'eastus2'
+
 @description('Summarizer Docker image tag to deploy.')
 param summarizerImageTag string = 'latest'
 
@@ -373,8 +386,122 @@ resource summarizerApp 'Microsoft.App/containerApps@2024-03-01' = {
   }
 }
 
+// --- Backend Container App ---
+
+resource backendApp 'Microsoft.App/containerApps@2024-03-01' = {
+  name: backendAppName
+  location: appLocation
+  properties: {
+    managedEnvironmentId: acaEnvironment.id
+    configuration: {
+      activeRevisionsMode: 'Single'
+      ingress: {
+        external: true
+        targetPort: 8000
+        transport: 'http'
+      }
+      registries: [
+        {
+          server: acr.properties.loginServer
+          username: acr.listCredentials().username
+          passwordSecretRef: 'acr-password'
+        }
+      ]
+      secrets: [
+        {
+          name: 'acr-password'
+          value: acr.listCredentials().passwords[0].value
+        }
+        {
+          name: 'storage-connection-string'
+          value: 'DefaultEndpointsProtocol=https;AccountName=${appStorage.name};AccountKey=${appStorage.listKeys().keys[0].value};EndpointSuffix=${environment().suffixes.storage}'
+        }
+        {
+          name: 'openai-api-key'
+          value: openaiApiKey
+        }
+        {
+          name: 'database-url'
+          value: backendDatabaseUrl
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'backend'
+          image: '${acr.properties.loginServer}/backend:latest'
+          resources: {
+            cpu: json('0.5')
+            memory: '1Gi'
+          }
+          env: [
+            {
+              name: 'DATABASE_URL'
+              secretRef: 'database-url'
+            }
+            {
+              name: 'AZURE_STORAGE_CONNECTION_STRING'
+              secretRef: 'storage-connection-string'
+            }
+            {
+              name: 'AZURE_STORAGE_CONTAINER'
+              value: appAssetsContainerName
+            }
+            {
+              name: 'OPENAI_API_KEY'
+              secretRef: 'openai-api-key'
+            }
+            {
+              name: 'AUTH_MODE'
+              value: 'mock'
+            }
+            {
+              name: 'AI_PROVIDER'
+              value: 'openai'
+            }
+            {
+              name: 'AI_PROCESSING_ENABLED'
+              value: 'true'
+            }
+          ]
+        }
+      ]
+      scale: {
+        minReplicas: 0
+        maxReplicas: 5
+      }
+    }
+  }
+}
+
+// --- Frontend Static Web App ---
+
+resource staticWebApp 'Microsoft.Web/staticSites@2023-01-01' = {
+  name: staticWebAppName
+  location: staticWebAppLocation
+  sku: {
+    name: 'Standard'
+    tier: 'Standard'
+  }
+  properties: {}
+}
+
+// Proxy /api/* from the SWA to the backend Container App (no frontend code changes needed)
+resource linkedBackend 'Microsoft.Web/staticSites/linkedBackends@2023-01-01' = {
+  parent: staticWebApp
+  name: 'backend'
+  properties: {
+    backendResourceId: backendApp.id
+    region: appLocation
+  }
+}
+
 output functionAppHostName string = functionApp.properties.defaultHostName
 output postgresFullyQualifiedDomainName string = postgresServer.properties.fullyQualifiedDomainName
 output appStorageBlobEndpoint string = appStorage.properties.primaryEndpoints.blob
 output acrLoginServer string = acr.properties.loginServer
 output summarizerUrl string = 'https://${summarizerApp.properties.configuration.ingress.fqdn}'
+output backendUrl string = 'https://${backendApp.properties.configuration.ingress.fqdn}'
+output staticWebAppUrl string = 'https://${staticWebApp.properties.defaultHostname}'
+output staticWebAppApiKey string = staticWebApp.listSecrets().properties.apiKey
