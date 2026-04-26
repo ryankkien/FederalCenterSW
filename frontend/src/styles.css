@@ -194,6 +194,31 @@ h3 {
   margin: 0 auto;
 }
 
+.secondary-knowledge-index {
+  border: 1px solid #cdd6e1;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.secondary-knowledge-index > summary {
+  cursor: pointer;
+  padding: 12px 16px;
+  color: #344054;
+  font-weight: 800;
+}
+
+.secondary-knowledge-index[open] {
+  padding-bottom: 16px;
+}
+
+.secondary-knowledge-index[open] > summary {
+  border-bottom: 1px solid #e3e8ef;
+}
+
+.secondary-knowledge-index .wiki-layout {
+  margin: 16px;
+}
+
 .analysis-workspace,
 .wiki-layout {
   min-width: 0;

@@ -92,16 +92,16 @@ def classify_document(document: object, text: str = "") -> Tuple[str, Optional[s
         if value
     ).lower()
 
-    if _contains_any(haystack, ("rfp", "request for proposal", "source contract", "pws", "sow")):
+    if _contains_any(haystack, ("weekly status report", "weekly report", "_wsr-", " wsr-")):
+        document_kind = "weekly_report"
+    elif _contains_any(haystack, ("monthly status report", "monthly report", "_msr", " msr")):
+        document_kind = "monthly_report"
+    elif _contains_any(haystack, ("rfp", "request for proposal", "source contract", "pws", "sow")):
         document_kind = "source_contract"
     elif _contains_any(haystack, ("task order", "to 000", "delivery order")):
         document_kind = "task_order"
     elif _contains_any(haystack, ("modification", " mod ", "p000", "amendment")):
         document_kind = "modification"
-    elif _contains_any(haystack, ("weekly status report", "weekly report", "_wsr-", " wsr-")):
-        document_kind = "weekly_report"
-    elif _contains_any(haystack, ("monthly status report", "monthly report", "_msr", " msr")):
-        document_kind = "monthly_report"
     elif _contains_any(haystack, ("gao", "oig", "inspector general")):
         document_kind = "gao_oig_report"
     elif _contains_any(haystack, ("federal register", "far ", "cfr ", "regulation", "policy")):

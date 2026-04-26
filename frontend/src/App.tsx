@@ -314,10 +314,15 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, user: User) => void
 }
 
 function OfficialWorkspace({ token, setError }: { token: string; setError: (message: string) => void }) {
+  const [indexOpen, setIndexOpen] = useState(false);
+
   return (
     <div className="official-stack">
       <OfficialAnalysisWorkspace token={token} setError={setError} />
-      <WikiWorkspace token={token} setError={setError} />
+      <details className="secondary-knowledge-index" onToggle={(event) => setIndexOpen(event.currentTarget.open)}>
+        <summary>Evidence index</summary>
+        {indexOpen ? <WikiWorkspace token={token} setError={setError} /> : null}
+      </details>
     </div>
   );
 }
@@ -326,7 +331,6 @@ function OfficialAnalysisWorkspace({ token, setError }: { token: string; setErro
   const [contracts, setContracts] = useState<ContractRecord[]>([]);
   const [selectedContractId, setSelectedContractId] = useState('');
   const [analysis, setAnalysis] = useState<ContractTimelineAnalysis | null>(null);
-  const [article, setArticle] = useState<WikiArticle | null>(null);
   const [cohort, setCohort] = useState<CohortAnalysis | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -342,7 +346,6 @@ function OfficialAnalysisWorkspace({ token, setError }: { token: string; setErro
         api<CohortAnalysis>('/api/analysis/cohort', token),
       ]);
       setAnalysis(nextAnalysis);
-      setArticle(nextSelectedId ? await api<WikiArticle>(`/api/wiki/contracts/${nextSelectedId}`, token) : null);
       setCohort(nextCohort);
     } catch (currentError) {
       setError(currentError instanceof Error ? currentError.message : 'Could not load contract analysis');
@@ -359,12 +362,8 @@ function OfficialAnalysisWorkspace({ token, setError }: { token: string; setErro
     setSelectedContractId(contractId);
     setIsLoading(true);
     try {
-      const [nextAnalysis, nextArticle] = await Promise.all([
-        api<ContractTimelineAnalysis>(`/api/analysis/contracts/${contractId}`, token),
-        api<WikiArticle>(`/api/wiki/contracts/${contractId}`, token),
-      ]);
+      const nextAnalysis = await api<ContractTimelineAnalysis>(`/api/analysis/contracts/${contractId}`, token);
       setAnalysis(nextAnalysis);
-      setArticle(nextArticle);
     } catch (currentError) {
       setError(currentError instanceof Error ? currentError.message : 'Could not load contract analysis');
     } finally {
@@ -373,6 +372,9 @@ function OfficialAnalysisWorkspace({ token, setError }: { token: string; setErro
   }
 
   const latestSignals = analysis?.timeline.flatMap((report) => report.signals.slice(0, 3)).slice(0, 8) ?? [];
+  const selectedContract = contracts.find((contract) => contract.id === selectedContractId);
+  const hasCpars = Boolean(analysis?.cpars_ratings.length);
+  const topRecurring = analysis?.recurring_issues.slice(0, 2).map((issue) => issue.title).join(', ');
 
   return (
     <section className="analysis-workspace" aria-labelledby="analysis-title">
@@ -396,28 +398,33 @@ function OfficialAnalysisWorkspace({ token, setError }: { token: string; setErro
         <div className="article-header">
           <div>
             <p className="eyebrow">Contract Brief</p>
-            <h3>{article?.title ?? analysis?.contract_title ?? 'Contract'}</h3>
+            <h3>{analysis?.contract_title ?? selectedContract?.title ?? 'Contract'}</h3>
           </div>
           <span className="security-badge">
-            <ShieldCheck size={14} /> {toTitle(article?.security_level ?? 'standard')}
+            <ShieldCheck size={14} /> Standard
           </span>
         </div>
-        <p className="article-summary">{article?.summary ?? 'Run knowledge ingestion to build a cited contract brief.'}</p>
+        <p className="article-summary">
+          {buildContractBriefSummary(selectedContract, analysis, cohort)}
+        </p>
         <div className="brief-section-grid">
-          {(article?.sections ?? []).slice(0, 4).map((section) => (
-            <article className="brief-section" key={section.title}>
-              <strong>{section.title}</strong>
-              <p>{section.body}</p>
-            </article>
-          ))}
+          <article className="brief-section">
+            <strong>Current Read</strong>
+            <p>{topRecurring ? `Recurring signals: ${topRecurring}.` : 'No recurring issue family has crossed the current threshold.'}</p>
+          </article>
+          <article className="brief-section">
+            <strong>Outcome Context</strong>
+            <p>{hasCpars ? 'Imported CPARS ratings are available for outcome comparison.' : 'No actual CPARS ratings are imported for this contract yet.'}</p>
+          </article>
+          <article className="brief-section">
+            <strong>Child Records</strong>
+            <p>{selectedContract?.document_count ?? analysis?.timeline.length ?? 0} linked document(s), {selectedContract?.open_regression_count ?? 0} open regression finding(s), {selectedContract?.active_hypothesis_count ?? 0} active hypothesis item(s).</p>
+          </article>
+          <article className="brief-section">
+            <strong>Cohort</strong>
+            <p>{cohort?.contract_count ? `${cohort.contract_count} visible contract(s) are available for pattern comparison.` : 'No comparable visible contracts are available yet.'}</p>
+          </article>
         </div>
-        {article?.citations.length ? (
-          <div className="brief-citations">
-            {article.citations.slice(0, 4).map((citation) => (
-              <span key={citation.id}>{citation.label}</span>
-            ))}
-          </div>
-        ) : null}
       </section>
       <div className="metric-grid">
         <MetricCard label="Reports" value={analysis?.timeline.length ?? 0} icon={<FileText size={17} />} />
@@ -584,6 +591,19 @@ function CohortBriefList({ contracts }: { contracts: CohortContractBrief[] }) {
       ))}
     </div>
   );
+}
+
+function buildContractBriefSummary(
+  contract: ContractRecord | undefined,
+  analysis: ContractTimelineAnalysis | null,
+  cohort: CohortAnalysis | null,
+) {
+  const title = analysis?.contract_title ?? contract?.title ?? 'This contract';
+  const reportCount = analysis?.timeline.length ?? contract?.document_count ?? 0;
+  const recurringCount = analysis?.recurring_issues.length ?? 0;
+  const positiveCount = analysis?.positive_signals.length ?? 0;
+  const cohortCount = cohort?.contract_count ?? 0;
+  return `${title} has ${reportCount} linked report/document record(s), ${recurringCount} recurring issue pattern(s), ${positiveCount} positive signal(s), and ${cohortCount} visible contract(s) in the comparison set.`;
 }
 
 function WikiWorkspace({ token, setError }: { token: string; setError: (message: string) => void }) {
