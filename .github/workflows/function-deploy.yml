@@ -105,11 +105,17 @@ jobs:
               APPINSIGHTS_CONNECTION_STRING="$APPINSIGHTS_CONNECTION_STRING" \
               APPLICATIONINSIGHTS_CONNECTION_STRING="$APPINSIGHTS_CONNECTION_STRING"
 
+      - name: Install production dependencies into package
+        if: steps.deploy_config.outputs.deploy_ready == 'true'
+        run: |
+          pip install \
+            --requirement backend/requirements.txt \
+            --target backend/.python_packages/lib/site-packages
+
       - name: Deploy Function App
         if: steps.deploy_config.outputs.deploy_ready == 'true'
         uses: Azure/functions-action@v1
         with:
           app-name: ${{ env.AZURE_FUNCTION_APP_NAME }}
           package: backend
-          remote-build: true
           respect-funcignore: true
