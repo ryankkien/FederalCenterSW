@@ -84,6 +84,18 @@ class DocumentUpload(Base):
     )
 
     contract: Mapped[Optional["Contract"]] = relationship(back_populates="documents")
+    classification_decisions: Mapped[List["DocumentClassificationDecision"]] = relationship(
+        back_populates="document_upload",
+        cascade="all, delete-orphan",
+    )
+    match_decisions: Mapped[List["DocumentMatchDecision"]] = relationship(
+        back_populates="document_upload",
+        cascade="all, delete-orphan",
+    )
+    processing_jobs: Mapped[List["DocumentProcessingJob"]] = relationship(
+        back_populates="document_upload",
+        cascade="all, delete-orphan",
+    )
 
 
 class Contract(Base):
@@ -215,6 +227,8 @@ class DocumentMatchDecision(Base):
         nullable=False,
     )
 
+    document_upload: Mapped["DocumentUpload"] = relationship(back_populates="match_decisions")
+
 
 class DocumentClassificationDecision(Base):
     __tablename__ = "document_classification_decisions"
@@ -243,6 +257,8 @@ class DocumentClassificationDecision(Base):
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+
+    document_upload: Mapped["DocumentUpload"] = relationship(back_populates="classification_decisions")
 
 
 class DocumentProcessingJob(Base):
@@ -280,6 +296,8 @@ class DocumentProcessingJob(Base):
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+
+    document_upload: Mapped["DocumentUpload"] = relationship(back_populates="processing_jobs")
 
 
 class ProcessingRun(Base):

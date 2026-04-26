@@ -6,7 +6,10 @@ _CHUNK_WORDS = 256
 
 
 def chunk_and_store(
-    conn: psycopg.Connection, document_upload_id: str, pages: list[str]
+    conn: psycopg.Connection,
+    document_upload_id: str,
+    pages: list[str],
+    contract_id: str | None = None,
 ) -> list[tuple[str, str]]:
     """Split all pages into 256-word chunks and bulk-insert into document_chunks.
 
@@ -15,10 +18,10 @@ def chunk_and_store(
     full_text = " ".join(pages)
     words = full_text.split()
 
-    rows: list[tuple[str, str, None, int, str]] = []
+    rows: list[tuple[str, str, str | None, int, str]] = []
     for i, start in enumerate(range(0, len(words), _CHUNK_WORDS)):
         chunk_text = " ".join(words[start : start + _CHUNK_WORDS])
-        rows.append((str(uuid.uuid4()), document_upload_id, None, i, chunk_text))
+        rows.append((str(uuid.uuid4()), document_upload_id, contract_id, i, chunk_text))
 
     if not rows:
         return []

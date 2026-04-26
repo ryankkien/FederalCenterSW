@@ -39,7 +39,12 @@ def trigger_feature_extractor(
 
     summary_metadata: Dict[str, Any] = {"endpoint": "/summarize", "service_url": base_url}
     try:
-        summary = _post_json(base_url, "/summarize", {"doc_id": document_id}, headers=headers)
+        summary = _post_json(
+            base_url,
+            "/summarize",
+            {"doc_id": document_id, "contract_id": contract_id},
+            headers=headers,
+        )
     except Exception as error:
         return [
             FeatureExtractorStepResult(

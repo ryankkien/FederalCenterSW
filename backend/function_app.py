@@ -6,7 +6,9 @@ import azure.functions as func
 
 from app.email_intake import EmailIntakeConfig, run_once
 from app.config import get_document_processing_max_workers
+from app.database import SessionLocal
 from app.observability import configure_observability, get_logger, log_context
+from app.portfolio import run_portfolio_lessons_analysis
 from app.processing_worker import drain_queued_processing_jobs
 
 
@@ -66,5 +68,33 @@ def document_processing_timer(timer: func.TimerRequest) -> None:
                 "processing_waiting_for_text_count": summary.waiting_for_text,
                 "processing_queued_remaining_count": summary.queued_remaining,
                 "processing_max_workers": max_workers,
+            },
+        )
+
+
+@app.timer_trigger(
+    schedule="%PORTFOLIO_LESSONS_TIMER_SCHEDULE%",
+    arg_name="timer",
+    run_on_startup=False,
+    use_monitor=True,
+)
+def portfolio_lessons_timer(timer: func.TimerRequest) -> None:
+    with log_context(request_id=getattr(timer, "invocation_id", None) or str(uuid4())):
+        if timer.past_due:
+            logger.warning("Portfolio lessons timer is past due.")
+
+        period = os.getenv("PORTFOLIO_LESSONS_PERIOD", "fy26")
+        db = SessionLocal()
+        try:
+            result = run_portfolio_lessons_analysis(db, period=period, use_ai=True)
+        finally:
+            db.close()
+
+        logger.info(
+            "Portfolio lessons analysis completed",
+            extra={
+                "analysis_run_id": result.get("id"),
+                "portfolio_lessons_status": result.get("status"),
+                "portfolio_lessons_period": period,
             },
         )

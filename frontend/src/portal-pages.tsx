@@ -10,12 +10,15 @@ import {
 } from './portal-shell';
 import {
   createContract,
+  downloadContractInsightsPdf,
   downloadDocumentBlob,
   getContractAnalysis,
   getContractAnalysisLog,
   getContractDeliverables,
   getContractLifecycle,
+  getContractSimilarityInsights,
   getDocument,
+  getPortfolioLessons,
   getPortfolioGenerateStatus,
   getPortfolioThemes,
   listAllDocuments,
@@ -1580,6 +1583,8 @@ function ContractDetailPage({ contract, onBack, onSelectContract }) {
   const [analysisLog, setAnalysisLog] = useState([]);
   const [lifecycle, setLifecycle] = useState(null);
   const [lifecycleError, setLifecycleError] = useState(false);
+  const [similarityInsights, setSimilarityInsights] = useState(null);
+  const [similarityError, setSimilarityError] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
 
   const c = contract;
@@ -1605,6 +1610,8 @@ function ContractDetailPage({ contract, onBack, onSelectContract }) {
     setAnalysisLog([]);
     setLifecycle(null);
     setLifecycleError(false);
+    setSimilarityInsights(null);
+    setSimilarityError(false);
     let cancelled = false;
     listContractDocuments(c.id)
       .then(rows => {
@@ -1637,6 +1644,16 @@ function ContractDetailPage({ contract, onBack, onSelectContract }) {
       })
       .catch(() => {
         if (!cancelled) setLifecycleError(true);
+      });
+    getContractSimilarityInsights(c.id)
+      .then(row => {
+        if (!cancelled) {
+          setSimilarityInsights(row);
+          setSimilarityError(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setSimilarityError(true);
       });
     return () => { cancelled = true; };
   }, [c.id]);
@@ -1686,7 +1703,7 @@ function ContractDetailPage({ contract, onBack, onSelectContract }) {
       <div style={{ flex:1, overflowY:'auto' }}>
         {tab === 'Overview'   && <OverviewTab contract={c} docs={docs} deliverables={deliverables} lifecycle={lifecycle} lifecycleError={lifecycleError} />}
         {tab === 'Lifecycle'  && <LifecycleTab contract={c} lifecycle={lifecycle} error={lifecycleError} />}
-        {tab === 'Insights'   && <ContractInsightsTab contract={c} findings={findings} analysisLog={analysisLog} lifecycle={lifecycle} onSelectContract={onSelectContract} />}
+        {tab === 'Insights'   && <ContractInsightsTab contract={c} findings={findings} analysisLog={analysisLog} lifecycle={lifecycle} similarity={similarityInsights} similarityError={similarityError} onSelectContract={onSelectContract} />}
         {tab === 'Benchmarks' && <BenchmarksTab contract={c} analysis={analysis} />}
         {tab === 'Documents'  && <DocumentsTab docs={docs} contract={c} onUpload={() => setShowUpload(true)} />}
       </div>
@@ -2373,7 +2390,7 @@ function DocumentsTab({ docs, contract, onUpload }) {
 }
 
 // ─── CONTRACT INSIGHTS TAB — findings → patterns → similar contracts ────────
-function ContractInsightsTab({ contract: c, findings, analysisLog = [], lifecycle, onSelectContract }) {
+function ContractInsightsTab({ contract: c, findings, analysisLog = [], lifecycle, similarity, similarityError, onSelectContract }) {
   const lifecycleIssues = (lifecycle?.issue_register || []).map(issue => ({
     id: `lifecycle-${issue.issue_id || issue.title}`,
     severity: issue.severity === 'high' ? 'critical' : issue.severity === 'low' ? 'healthy' : 'watch',
@@ -2387,12 +2404,46 @@ function ContractInsightsTab({ contract: c, findings, analysisLog = [], lifecycl
     rowsById.set(row.id, row);
   }
   const rows = [...rowsById.values()];
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState(null);
+  const canExport = rows.length > 0 || analysisLog.length > 0;
+  async function handleExport() {
+    if (exporting || !canExport) return;
+    setExporting(true);
+    setExportError(null);
+    try {
+      await downloadContractInsightsPdf(c.id, c.number);
+    } catch (err) {
+      setExportError(err?.message || 'Export failed');
+    } finally {
+      setExporting(false);
+    }
+  }
+  const similarContracts = similarity?.similar_contracts || [];
+  const sharedFailurePoints = similarity?.shared_failure_points || [];
+  const recommendations = similarity?.recommendations || [];
+  const limitations = similarity?.limitations || [];
   return (
     <div style={{ padding:'24px 24px 48px' }}>
-      <SectionHeader
-        title="Findings on this contract"
-        subtitle={`${rows.length} backend issue rows from regressions and lifecycle extraction`}
-      />
+      <div style={{ display:'flex', alignItems:'flex-end', justifyContent:'space-between', gap:16, marginBottom:8 }}>
+        <SectionHeader
+          title="Findings on this contract"
+          subtitle={`${rows.length} backend issue rows from regressions and lifecycle extraction`}
+        />
+        <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
+          {exportError && (
+            <span style={{ fontSize:11, color:'var(--flag)', fontFamily:'var(--mono)' }}>{exportError}</span>
+          )}
+          <BtnSecondary
+            onClick={handleExport}
+            disabled={!canExport || exporting}
+            style={{ opacity: !canExport || exporting ? 0.45 : 1, cursor: !canExport || exporting ? 'not-allowed' : 'pointer' }}
+            title={canExport ? 'Download a PDF of findings, hypotheses, and analysis history' : 'No insights to export yet'}
+          >
+            {exporting ? 'Exporting…' : 'Export PDF'}
+          </BtnSecondary>
+        </div>
+      </div>
       <div style={{ display:'grid', gap:14, marginBottom:36 }}>
         {rows.length === 0 && (
           <EmptyState title="No extracted findings" sub="Run document processing or upload reports with extractable performance issues; no demo findings are shown here." />
@@ -2448,6 +2499,50 @@ function ContractInsightsTab({ contract: c, findings, analysisLog = [], lifecycl
           );
         })}
       </div>
+
+      <div style={{ height:28 }} />
+      <SectionHeader
+        title="Similar-contract guidance"
+        subtitle="Backend comparison of visible contracts, shared failure points, early warnings, and recommended controls"
+      />
+      {!similarity && !similarityError && <Spinner label="Loading similar-contract evidence…" />}
+      {similarityError && <EmptyState title="Similar-contract guidance unavailable" sub="The backend similarity-insights endpoint could not be loaded." />}
+      {similarity && similarContracts.length === 0 && sharedFailurePoints.length === 0 && recommendations.length === 0 && (
+        <EmptyState title="No comparable contract guidance yet" sub={(limitations || [])[0] || 'Process more visible contracts to build comparable failure points and drafting guidance.'} />
+      )}
+      {similarity && (similarContracts.length > 0 || sharedFailurePoints.length > 0 || recommendations.length > 0) && (
+        <div style={{ display:'grid', gridTemplateColumns:'1.1fr 0.9fr', gap:14, alignItems:'start' }}>
+          <div style={{ display:'grid', gap:14 }}>
+            <InsightPanel title="Similar Visible Contracts">
+              {similarContracts.map(item => (
+                <SimilarContractCard key={item.contract_id} item={item} />
+              ))}
+            </InsightPanel>
+            <InsightPanel title="Shared Failure Points">
+              {sharedFailurePoints.map(point => (
+                <PatternRow key={point.key || point.title} pattern={point} />
+              ))}
+            </InsightPanel>
+          </div>
+          <div style={{ display:'grid', gap:14 }}>
+            <InsightPanel title="Recommended Controls">
+              {recommendations.map((item, i) => (
+                <div key={`${item}-${i}`} style={{ display:'grid', gridTemplateColumns:'22px 1fr', gap:10, padding:'8px 0', borderBottom: i < recommendations.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                  <span style={{ fontSize:11, color:'var(--accent)', fontFamily:'var(--mono)', fontWeight:700 }}>{String(i + 1).padStart(2, '0')}</span>
+                  <span style={{ fontSize:12.5, color:'var(--ink)', lineHeight:1.5 }}>{item}</span>
+                </div>
+              ))}
+            </InsightPanel>
+            {(limitations.length > 0 || (similarity.methodology || []).length > 0) && (
+              <InsightPanel title="Methodology And Limits">
+                {[...(similarity.methodology || []), ...limitations].slice(0, 8).map((item, i) => (
+                  <div key={`${item}-${i}`} style={{ fontSize:11.5, color:'var(--ink-mute)', lineHeight:1.55, padding:'4px 0' }}>{item}</div>
+                ))}
+              </InsightPanel>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Analysis history log */}
       <SectionHeader
@@ -2528,6 +2623,60 @@ function ContractInsightsTab({ contract: c, findings, analysisLog = [], lifecycl
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function InsightPanel({ title, children }) {
+  const hasChildren = React.Children.count(children) > 0;
+  return (
+    <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:4, padding:'16px 18px' }}>
+      <div style={{ fontSize:10.5, fontWeight:700, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)', marginBottom:12 }}>{title}</div>
+      {hasChildren ? children : <EmptyState title="No evidence yet" sub="No backend rows are available for this section." />}
+    </div>
+  );
+}
+
+function SimilarContractCard({ item }) {
+  const score = item.similarity_score == null ? 'match' : `${Math.round(Number(item.similarity_score) * 100)}%`;
+  const failurePoints = item.failure_points || [];
+  const earlyWarnings = item.early_warnings || [];
+  return (
+    <div style={{ borderBottom:'1px solid var(--border)', padding:'10px 0 12px' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:6 }}>
+        <span style={{ fontFamily:'var(--mono)', fontSize:11.5, fontWeight:700, color:'var(--accent)' }}>{item.contract_id}</span>
+        <Tag>{score}</Tag>
+      </div>
+      <div style={{ fontSize:13, color:'var(--ink)', fontWeight:600, lineHeight:1.35 }}>{item.contract_title}</div>
+      {(item.match_basis || []).slice(0, 2).map((basis, i) => (
+        <div key={`${basis}-${i}`} style={{ fontSize:11.5, color:'var(--ink-mute)', lineHeight:1.45, marginTop:4 }}>{basis}</div>
+      ))}
+      {failurePoints.length > 0 && (
+        <div style={{ marginTop:8 }}>
+          <div style={{ fontSize:10, color:'var(--ink-faint)', fontFamily:'var(--mono)', letterSpacing:'0.08em', textTransform:'uppercase' }}>Failure points</div>
+          {failurePoints.slice(0, 3).map(point => <PatternRow key={point.key || point.title} pattern={point} compact />)}
+        </div>
+      )}
+      {earlyWarnings.length > 0 && (
+        <div style={{ marginTop:8 }}>
+          <div style={{ fontSize:10, color:'var(--ink-faint)', fontFamily:'var(--mono)', letterSpacing:'0.08em', textTransform:'uppercase' }}>Early warnings</div>
+          {earlyWarnings.slice(0, 2).map(signal => (
+            <div key={signal.id} style={{ fontSize:11.5, color:'var(--ink-mute)', lineHeight:1.45, padding:'3px 0' }}>{signal.label}: {signal.summary}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PatternRow({ pattern, compact = false }) {
+  return (
+    <div style={{ padding: compact ? '5px 0' : '8px 0', borderBottom: compact ? 'none' : '1px solid var(--border)' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:3 }}>
+        <span style={{ fontSize:12.5, color:'var(--ink)', fontWeight:600 }}>{pattern.title || pattern.key || 'Pattern'}</span>
+        {pattern.contract_count != null && <Tag>{pattern.contract_count} contracts</Tag>}
+      </div>
+      <div style={{ fontSize:11.5, color:'var(--ink-mute)', lineHeight:1.5 }}>{pattern.summary || pattern.description || 'No summary available.'}</div>
     </div>
   );
 }
@@ -2681,19 +2830,38 @@ function InsightsTab({ psc, naics, embedded, onSelectContract, customInsights = 
 
 function InsightsPage({ onSelectContract }) {
   const [portfolio, setPortfolio] = useState(null);
+  const [portfolioLessons, setPortfolioLessons] = useState(null);
   const [error, setError] = useState(false);
+  const [lessonError, setLessonError] = useState(false);
   const [generateStatus, setGenerateStatus] = useState({ new_doc_count: 0, affected_contract_count: 0 });
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
-    getPortfolioThemes('fy26')
-      .then(data => { if (!cancelled) { setPortfolio(data); setError(false); } })
-      .catch(() => { if (!cancelled) setError(true); });
-    getPortfolioGenerateStatus()
-      .then(s => { if (!cancelled) setGenerateStatus(s); })
-      .catch(() => {});
+    Promise.allSettled([
+      getPortfolioThemes('fy26'),
+      getPortfolioLessons('fy26'),
+      getPortfolioGenerateStatus(),
+    ]).then(results => {
+      if (cancelled) return;
+      const [themesResult, lessonsResult, statusResult] = results;
+      if (themesResult.status === 'fulfilled') {
+        setPortfolio(themesResult.value);
+        setError(false);
+      } else {
+        setError(true);
+      }
+      if (lessonsResult.status === 'fulfilled') {
+        setPortfolioLessons(lessonsResult.value);
+        setLessonError(false);
+      } else {
+        setLessonError(true);
+      }
+      if (statusResult.status === 'fulfilled') {
+        setGenerateStatus(statusResult.value);
+      }
+    });
     return () => { cancelled = true; };
   }, []);
 
@@ -2704,11 +2872,14 @@ function InsightsPage({ onSelectContract }) {
     try {
       await postGenerateInsights();
       await new Promise(r => setTimeout(r, 3000));
-      const [data, s] = await Promise.all([
+      const [data, lessonsData, s] = await Promise.all([
         getPortfolioThemes('fy26'),
+        getPortfolioLessons('fy26'),
         getPortfolioGenerateStatus(),
       ]);
       setPortfolio(data);
+      setPortfolioLessons(lessonsData);
+      setLessonError(false);
       setGenerateStatus(s);
     } catch (err) {
       setGenerateError(err?.message || 'Generation failed');
@@ -2718,8 +2889,16 @@ function InsightsPage({ onSelectContract }) {
   }
 
   const themes = portfolio?.themes || [];
+  const lessons = portfolioLessons?.lessons || [];
+  const kpis = portfolio?.kpis || {};
+  const priorityThemes = themes.slice(0, 4);
+  const contractRows = portfolioContractRows(themes).slice(0, 8);
+  const contractLookup = new Map(contractRows.map(row => [row.id, row.contract]));
+  const controls = (lessons.length
+    ? lessonControlRows(lessons)
+    : portfolioControlPrompts(themes)
+  ).slice(0, 6);
   const hasNewDocs = generateStatus.new_doc_count > 0;
-
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
       <TopBar crumbs={['Insights']} />
@@ -2730,9 +2909,9 @@ function InsightsPage({ onSelectContract }) {
       }}>
         <div>
           <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.18em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)', marginBottom:6 }}>Cross-portfolio</div>
-          <h1 style={{ fontSize:22, fontWeight:700, letterSpacing:'-0.02em', color:'var(--ink)' }}>Insights Library</h1>
+          <h1 style={{ fontSize:22, fontWeight:700, letterSpacing:'-0.02em', color:'var(--ink)' }}>Global Insights</h1>
           <p style={{ fontSize:12, color:'var(--ink-mute)', marginTop:4 }}>
-            {themes.length} backend evidence themes · generated from processed findings, facts, signals, and hypotheses
+            Main cross-contract view · {themes.length} backend evidence themes from processed findings, facts, signals, and hypotheses
           </p>
         </div>
         <div style={{ display:'flex', gap:8, alignItems:'center', flexShrink:0 }}>
@@ -2768,7 +2947,76 @@ function InsightsPage({ onSelectContract }) {
       </div>
       <div style={{ flex:1, overflowY:'auto', background:'var(--bg)', padding:'20px 24px' }}>
         {!portfolio && !error && <Spinner label="Loading backend insights…" />}
-        {themes.map(theme => <ThemeCard key={theme.id} theme={theme} onSelectContract={onSelectContract} />)}
+        {portfolio && themes.length > 0 && (
+          <>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:12, marginBottom:20 }}>
+              <MetricCard label="Flagged Contracts" value={String(kpis.flagged ?? 0)} sub={`${kpis.total_contracts ?? 0} visible`} mono />
+              <MetricCard label="Evidence Themes" value={String(kpis.theme_count ?? themes.length)} sub="backend grouped" mono />
+              <MetricCard label="Evidence Items" value={String(kpis.evidence_count ?? 0)} sub="findings, signals, facts" mono />
+              <MetricCard label="Value Flagged" value={compactCurrency(kpis.aggregate_value_flagged || 0)} sub="visible portfolio" mono />
+            </div>
+
+            <SectionHeader
+              title="AI Portfolio Lessons"
+              subtitle={portfolioLessons?.source === 'ai_from_backend_evidence'
+                ? 'AI-authored semantic lessons grounded in backend evidence IDs'
+                : 'Semantic lessons assembled from backend evidence themes; AI synthesis is unavailable'}
+            />
+            {!portfolioLessons && !lessonError && <Spinner label="Loading portfolio lessons…" />}
+            {lessonError && <EmptyState title="Portfolio lessons unavailable" sub="The backend portfolio lessons endpoint could not be loaded." />}
+            {portfolioLessons && lessons.length === 0 && (
+              <EmptyState title="No portfolio lessons yet" sub={(portfolioLessons.limitations || [])[0] || 'Process more visible contract evidence to synthesize semantic lessons.'} />
+            )}
+            {lessons.length > 0 && (
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(2, minmax(0, 1fr))', gap:12, marginBottom:22 }}>
+                {lessons.slice(0, 4).map(lesson => (
+                  <PortfolioLessonCard key={lesson.id} lesson={lesson} contractLookup={contractLookup} onSelectContract={onSelectContract} />
+                ))}
+              </div>
+            )}
+
+            <div style={{ display:'grid', gridTemplateColumns:'1.15fr 0.85fr', gap:16, alignItems:'start', marginBottom:22 }}>
+              <InsightPanel title="Recurring Failure Points">
+                {priorityThemes.map(theme => (
+                  <PortfolioThemeSummary key={theme.id} theme={theme} onSelectContract={onSelectContract} />
+                ))}
+              </InsightPanel>
+              <div style={{ display:'grid', gap:16 }}>
+                <InsightPanel title="Recommended Review Controls">
+                  {controls.map((item, i) => (
+                    <div key={`${item.control}-${i}`} style={{ display:'grid', gridTemplateColumns:'22px 1fr', gap:10, padding:'8px 0', borderBottom: i < controls.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                      <span style={{ fontSize:11, color:'var(--accent)', fontFamily:'var(--mono)', fontWeight:700 }}>{String(i + 1).padStart(2, '0')}</span>
+                      <div>
+                        <div style={{ fontSize:12.5, color:'var(--ink)', lineHeight:1.45 }}>{item.control}</div>
+                        <div style={{ fontSize:10.5, color:'var(--ink-faint)', lineHeight:1.4, marginTop:3 }}>{item.basis}</div>
+                      </div>
+                    </div>
+                  ))}
+                </InsightPanel>
+                <InsightPanel title="Contracts To Review">
+                  {contractRows.map((row, i) => (
+                    <div key={row.id} onClick={() => onSelectContract(row.contract)} style={{ display:'grid', gridTemplateColumns:'125px 1fr 70px', gap:10, alignItems:'center', cursor:'pointer', padding:'8px 0', borderBottom: i < contractRows.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                      <span style={{ fontFamily:'var(--mono)', fontSize:11.5, fontWeight:600, color:'var(--accent)' }}>{row.number}</span>
+                      <div style={{ minWidth:0 }}>
+                        <div style={{ fontSize:12.5, color:'var(--ink)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{row.title}</div>
+                        <div style={{ fontSize:10.5, color:'var(--ink-faint)', marginTop:2 }}>{row.themeCount} theme{row.themeCount === 1 ? '' : 's'} · {row.evidenceCount} evidence item{row.evidenceCount === 1 ? '' : 's'}</div>
+                      </div>
+                      <Tag>{row.severity}</Tag>
+                    </div>
+                  ))}
+                </InsightPanel>
+              </div>
+            </div>
+
+            <SectionHeader
+              title="All Evidence Themes"
+              subtitle="Expandable backend theme cards with linked visible contracts"
+            />
+            <div style={{ display:'grid', gap:10 }}>
+              {themes.map(theme => <ThemeCard key={theme.id} theme={theme} onSelectContract={onSelectContract} />)}
+            </div>
+          </>
+        )}
         {portfolio && themes.length === 0 && (
           <EmptyState title="No backend insights yet" sub={(portfolio.limitations || [])[0] || 'Process contract documents to create evidence-backed themes.'} />
         )}
@@ -2776,6 +3024,153 @@ function InsightsPage({ onSelectContract }) {
       </div>
     </div>
   );
+}
+
+function PortfolioLessonCard({ lesson, contractLookup, onSelectContract }) {
+  const confidenceTone = lesson.confidence === 'high' ? 'good' : lesson.confidence === 'medium' ? 'warn' : 'default';
+  const contracts = lesson.affected_contract_ids || [];
+  const evidence = lesson.evidence || [];
+  const controls = lesson.recommended_controls || [];
+  const firstContract = contractLookup.get(contracts[0]);
+  return (
+    <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderLeft:'3px solid var(--accent)', borderRadius:4, padding:'16px 18px' }}>
+      <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', marginBottom:8 }}>
+        <Tag tone={confidenceTone}>{lesson.confidence || 'low'} confidence</Tag>
+        <Tag>{lesson.subject_type}</Tag>
+        <Tag>{contracts.length} contract{contracts.length === 1 ? '' : 's'}</Tag>
+      </div>
+      <div style={{ fontSize:14, color:'var(--ink)', fontWeight:700, lineHeight:1.35 }}>{lesson.title}</div>
+      <div style={{ fontSize:11.5, color:'var(--accent)', fontFamily:'var(--mono)', marginTop:5 }}>{lesson.subject_label} · {lesson.semantic_pattern}</div>
+      <div style={{ fontSize:12, color:'var(--ink-mute)', lineHeight:1.55, marginTop:9 }}>{lesson.summary}</div>
+      {controls.length > 0 && (
+        <div style={{ marginTop:12, background:'var(--surface-alt)', borderLeft:'2px solid var(--accent)', padding:'9px 11px' }}>
+          <div style={{ fontSize:10, color:'var(--ink-faint)', fontFamily:'var(--mono)', letterSpacing:'0.08em', textTransform:'uppercase', marginBottom:5 }}>Recommended controls</div>
+          {controls.slice(0, 2).map((control, i) => (
+            <div key={`${control}-${i}`} style={{ fontSize:11.5, color:'var(--ink-soft)', lineHeight:1.45, padding:'2px 0' }}>{control}</div>
+          ))}
+        </div>
+      )}
+      <div style={{ display:'flex', justifyContent:'space-between', gap:12, marginTop:12, alignItems:'center' }}>
+        <div style={{ fontSize:10.5, color:'var(--ink-faint)', fontFamily:'var(--mono)' }}>{evidence.length} cited evidence item{evidence.length === 1 ? '' : 's'}</div>
+        {firstContract && (
+          <button type="button" onClick={() => onSelectContract(firstContract)} style={{ border:'1px solid var(--border-md)', background:'var(--surface-alt)', color:'var(--accent)', borderRadius:3, padding:'4px 7px', fontSize:11, fontFamily:'var(--mono)', cursor:'pointer' }}>
+            Open {contracts[0]}
+          </button>
+        )}
+      </div>
+      {(lesson.limitations || []).length > 0 && (
+        <div style={{ fontSize:10.5, color:'var(--ink-faint)', lineHeight:1.45, marginTop:8 }}>{lesson.limitations[0]}</div>
+      )}
+    </div>
+  );
+}
+
+function PortfolioThemeSummary({ theme, onSelectContract }) {
+  const sev = SEVERITY_META[theme.severity] || SEVERITY_META.watch;
+  const contracts = (theme.contracts || []).map(normalizeThemeContract).filter(Boolean).slice(0, 3);
+  return (
+    <div style={{ padding:'10px 0 12px', borderBottom:'1px solid var(--border)' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6 }}>
+        <span style={{ fontSize:9.5, fontWeight:700, letterSpacing:'0.10em', textTransform:'uppercase', color:sev.clr, background:sev.bg, border:`1px solid ${sev.border}`, padding:'2px 7px', borderRadius:2, fontFamily:'var(--mono)' }}>{sev.label}</span>
+        <Tag>{theme.psc}</Tag>
+        <Tag>{theme.flagged} / {theme.total}</Tag>
+      </div>
+      <div style={{ fontSize:13, color:'var(--ink)', fontWeight:600, lineHeight:1.4 }}>{theme.title}</div>
+      <div style={{ fontSize:11.5, color:'var(--ink-mute)', lineHeight:1.5, marginTop:4 }}>{theme.insight}</div>
+      {contracts.length > 0 && (
+        <div style={{ marginTop:9, display:'flex', gap:6, flexWrap:'wrap' }}>
+          {contracts.map(contract => (
+            <button key={contract.id} type="button" onClick={() => onSelectContract(contract)} style={{ border:'1px solid var(--border-md)', background:'var(--surface-alt)', color:'var(--accent)', borderRadius:3, padding:'4px 7px', fontSize:11, fontFamily:'var(--mono)', cursor:'pointer' }}>
+              {contract.number}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function lessonControlRows(lessons) {
+  const rows = [];
+  const seen = new Set();
+  for (const lesson of lessons || []) {
+    for (const control of lesson.recommended_controls || []) {
+      if (!control || seen.has(control)) continue;
+      seen.add(control);
+      rows.push({
+        control,
+        basis: `${lesson.title} · ${lesson.confidence || 'low'} confidence`,
+      });
+    }
+  }
+  return rows;
+}
+
+function portfolioContractRows(themes) {
+  const byId = new Map();
+  for (const theme of themes || []) {
+    for (const raw of theme.contracts || []) {
+      const contract = normalizeThemeContract(raw);
+      if (!contract?.id) continue;
+      const current = byId.get(contract.id) || {
+        id: contract.id,
+        number: contract.number,
+        title: contract.title,
+        contract,
+        themeCount: 0,
+        evidenceCount: 0,
+        severity: 'watch',
+        severityRank: 0,
+      };
+      current.themeCount += 1;
+      current.evidenceCount += raw.evidence_count || theme.evidence_count || 0;
+      const rank = theme.severity === 'critical' ? 2 : theme.severity === 'watch' ? 1 : 0;
+      if (rank > current.severityRank) {
+        current.severity = theme.severity;
+        current.severityRank = rank;
+      }
+      byId.set(contract.id, current);
+    }
+  }
+  return [...byId.values()].sort((a, b) => b.severityRank - a.severityRank || b.evidenceCount - a.evidenceCount || a.number.localeCompare(b.number));
+}
+
+function portfolioControlPrompts(themes) {
+  const controls = [];
+  const seen = new Set();
+  for (const theme of themes || []) {
+    const text = `${theme.title || ''} ${theme.insight || ''}`.toLowerCase();
+    const control = portfolioControlForTheme(text);
+    if (!control || seen.has(control)) continue;
+    seen.add(control);
+    controls.push({
+      control,
+      basis: `${theme.title} · ${theme.flagged || 0} contract${theme.flagged === 1 ? '' : 's'} flagged`,
+    });
+  }
+  return controls;
+}
+
+function portfolioControlForTheme(text) {
+  if (/schedule|late|delay|milestone|deliverable|cdrl/.test(text)) {
+    return 'Add explicit deliverable due dates, recovery-plan triggers, and government acceptance timelines.';
+  }
+  if (/staff|personnel|vacancy|turnover|pm substitution|coverage/.test(text)) {
+    return 'Require named key-person backup coverage, vacancy notice timing, and transition plans.';
+  }
+  if (/cost|funding|invoice|eac|variance|overrun|odc/.test(text)) {
+    return 'Set cost-variance thresholds, invoice evidence requirements, and escalation rules.';
+  }
+  if (/scope|change|modification|equitable|direction|gfe|gfi/.test(text)) {
+    return 'Clarify government-furnished information, direction authority, and change-control gates.';
+  }
+  if (/quality|defect|rework|acceptance|inspection/.test(text)) {
+    return 'Add quality gates, acceptance criteria, and rework reporting requirements.';
+  }
+  if (/compliance|cyber|security|license|regulatory/.test(text)) {
+    return 'Add compliance evidence cadence, owner assignments, and deadline-based escalation.';
+  }
+  return 'Review whether recurring evidence themes need clearer ownership, cadence, and escalation language.';
 }
 
 // ─── BENCHMARKS TAB (within contract) ───────────────────────────────────────

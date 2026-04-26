@@ -434,16 +434,25 @@ def _run_tesseract(image_data: bytes) -> str:
     command = os.getenv("DOCUMENT_OCR_TESSERACT_CMD", "tesseract")
     language = os.getenv("DOCUMENT_OCR_LANGUAGE", "eng")
     try:
+        timeout_seconds = max(1, int(os.getenv("DOCUMENT_OCR_TIMEOUT_SECONDS", "60")))
+    except ValueError:
+        timeout_seconds = 60
+    try:
         result = subprocess.run(
             [command, "stdin", "stdout", "-l", language],
             input=image_data,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             check=False,
+            timeout=timeout_seconds,
         )
     except FileNotFoundError as error:
         raise RuntimeError(
             f"Tesseract command '{command}' is not installed or not on PATH"
+        ) from error
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError(
+            f"Tesseract timed out after {timeout_seconds}s"
         ) from error
 
     if result.returncode != 0:

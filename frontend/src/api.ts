@@ -134,11 +134,22 @@ export async function getContractCohort(contractId: string) {
   return request(`/api/contracts/${encodeURIComponent(contractId)}/cohort`);
 }
 
+export async function getContractSimilarityInsights(contractId: string) {
+  return request(`/api/contracts/${encodeURIComponent(contractId)}/similarity-insights`);
+}
+
 export async function getPortfolioThemes(period?: string) {
   const params = new URLSearchParams();
   if (period) params.set('period', period);
   const suffix = params.toString() ? `?${params}` : '';
   return request(`/api/portfolio/themes${suffix}`);
+}
+
+export async function getPortfolioLessons(period?: string) {
+  const params = new URLSearchParams();
+  if (period) params.set('period', period);
+  const suffix = params.toString() ? `?${params}` : '';
+  return request(`/api/portfolio/lessons${suffix}`);
 }
 
 export async function getPortfolioGenerateStatus(): Promise<{
@@ -166,6 +177,23 @@ export async function getContractAnalysisLog(contractId: string): Promise<Array<
   insight_hypothesis_id?: string;
 }>> {
   return request(`/api/contracts/${encodeURIComponent(contractId)}/analysis-log`);
+}
+
+export async function downloadContractInsightsPdf(contractId: string, contractNumber: string): Promise<void> {
+  const response = await fetch(`/api/contracts/${encodeURIComponent(contractId)}/insights-pdf`, {
+    headers: authHeaders(),
+  });
+  if (!response.ok) throw new Error(`Export failed with ${response.status}`);
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const safe = (contractNumber || contractId || 'contract').replace(/[^A-Za-z0-9._-]+/g, '_');
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `${safe}_insights.pdf`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 }
 
 export function normalizeContract(row: any) {
