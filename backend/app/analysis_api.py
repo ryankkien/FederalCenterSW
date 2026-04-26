@@ -2729,16 +2729,22 @@ def _document_semantic_link_response(
 
 # ─── Contract Analysis Log ────────────────────────────────────────────────────
 
+class AnalysisLogChangeEntry(BaseModel):
+    axis: str
+    change_type: str
+    description: str
+
+
 class AnalysisLogEntryResponse(BaseModel):
     id: str
     status: str
     run_type: Optional[str] = None
-    created_at: Optional[datetime]
+    created_at: datetime
     completed_at: Optional[datetime]
     analyzed_doc_count: int
     summary: Optional[str] = None
     prior_run_id: Optional[str] = None
-    changes: Optional[List[Dict[str, Any]]] = None
+    changes: Optional[List[AnalysisLogChangeEntry]] = None
     investigated_contract_ids: Optional[List[str]] = None
     insight_hypothesis_id: Optional[str] = None
 
