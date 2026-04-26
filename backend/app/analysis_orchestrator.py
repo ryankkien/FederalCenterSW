@@ -3,21 +3,24 @@ from __future__ import annotations
 """Orchestrate per-contract and cohort contract performance analysis.
 
 Loads five primitive tables (deliverable, financial, decisions, issue, personnel)
-plus CPARS ratings, assembles them into the analysis prompt, calls Claude, and
+plus CPARS ratings, assembles them into the analysis prompt, calls OpenAI, and
 stores the JSON result in analysis_runs.
 """
 
 import uuid
 from datetime import datetime, timezone
-import os
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.cohort_builder import CohortDefinition, build_cohort
+from app.config import (
+    get_ai_max_retries,
+    get_ai_request_timeout_seconds,
+    get_openai_api_key,
+    get_openai_llm_model,
+)
 from app.models import Contract
-
-_CLAUDE_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 
 _PER_CONTRACT_SYSTEM = """ROLE You are a contract performance analyst. You evaluate a target federal \
 contract against a cohort of comparable contracts using structured primitive records. You never \
@@ -104,14 +107,10 @@ def run_per_contract_analysis(
     run_id = str(uuid.uuid4())
     _insert_analysis_run(db, run_id, "per_contract", contract_id, cohort)
 
-    client = _anthropic_client()
-    message = client.messages.create(
-        model=_CLAUDE_MODEL,
-        max_tokens=4096,
-        system=_PER_CONTRACT_SYSTEM + "\n\n" + _AXES_DESCRIPTION,
-        messages=[{"role": "user", "content": prompt_user}],
+    result_json = _openai_json_response(
+        _PER_CONTRACT_SYSTEM + "\n\n" + _AXES_DESCRIPTION,
+        prompt_user,
     )
-    result_json = _parse_json(message.content[0].text)
 
     _complete_analysis_run(db, run_id, result_json)
     return {"id": run_id, "status": "complete", "result": result_json}
@@ -143,14 +142,7 @@ def run_cohort_analysis(
         cohort_contract_ids=contract_ids,
     )
 
-    client = _anthropic_client()
-    message = client.messages.create(
-        model=_CLAUDE_MODEL,
-        max_tokens=6000,
-        system=_COHORT_SYSTEM,
-        messages=[{"role": "user", "content": prompt_user}],
-    )
-    result_json = _parse_json(message.content[0].text)
+    result_json = _openai_json_response(_COHORT_SYSTEM, prompt_user)
 
     _complete_analysis_run(db, run_id, result_json)
     return {"id": run_id, "status": "complete", "result": result_json}
@@ -260,7 +252,7 @@ def _insert_analysis_run(
             "cohort_definition": json.dumps(cd) if cd else None,
             "cohort_contract_ids": json.dumps(cids) if cids else None,
             "created_at": datetime.now(timezone.utc),
-            "model": _CLAUDE_MODEL,
+            "model": get_openai_llm_model(),
         },
     )
     db.commit()
@@ -308,12 +300,27 @@ def _parse_json(text: str) -> dict:
         return {"raw": text}
 
 
-def _anthropic_client():
-    api_key = os.getenv("ANTHROPIC_API_KEY")
+def _openai_json_response(system: str, user: str) -> dict:
+    api_key = get_openai_api_key()
     if not api_key:
-        raise RuntimeError("ANTHROPIC_API_KEY is required for orchestrated performance analysis")
+        raise RuntimeError("OPENAI_API_KEY is required for orchestrated performance analysis")
     try:
-        from anthropic import Anthropic
+        from openai import OpenAI
     except ImportError as error:
-        raise RuntimeError("anthropic package is required for orchestrated performance analysis") from error
-    return Anthropic(api_key=api_key)
+        raise RuntimeError("openai package is required for orchestrated performance analysis") from error
+
+    client = OpenAI(
+        api_key=api_key,
+        timeout=get_ai_request_timeout_seconds(),
+        max_retries=get_ai_max_retries(),
+    )
+    response = client.chat.completions.create(
+        model=get_openai_llm_model(),
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+    )
+    content = response.choices[0].message.content or "{}"
+    return _parse_json(content)
