@@ -94,6 +94,10 @@ export async function uploadDocument({
   return request('/api/documents/upload', { method: 'POST', form });
 }
 
+export async function listDeliverables(contractId: string) {
+  return request(`/api/contracts/${encodeURIComponent(contractId)}/deliverables`);
+}
+
 export async function listRegressions(contractId: string) {
   return request(`/api/contracts/${encodeURIComponent(contractId)}/regressions`);
 }
@@ -145,6 +149,11 @@ export function normalizeContract(row: any) {
 
 export function normalizeDocument(row: any, contract?: any) {
   const docType = row.document_type || row.document_kind || 'Document';
+  const periodStart = row.report_period_start;
+  const periodEnd = row.report_period_end;
+  const period = periodStart && periodEnd
+    ? `${fmtDateMil(periodStart)} — ${fmtDateMil(periodEnd)}`
+    : periodStart || periodEnd || row.notes || '—';
   return {
     ...row,
     id: row.id,
@@ -156,7 +165,7 @@ export function normalizeDocument(row: any, contract?: any) {
     size_bytes: row.size_bytes || 0,
     uploader: row.uploader_role || row.uploader_id || 'Unknown',
     created_at: row.created_at || new Date().toISOString(),
-    period: row.report_period_start || row.report_period_end || row.notes || '—',
+    period,
     contract_id: row.contract_id || contract?.id,
     pinned: docType.toLowerCase().includes('contract') || row.document_kind === 'source_contract',
     processing_status: row.processing_status,
@@ -171,7 +180,7 @@ export function normalizeFinding(row: any) {
     themeId: null,
     claim: row.title || row.finding_type || 'Contract finding',
     observed: row.summary || row.quote || 'No summary is available yet.',
-    sourceDoc: row.document_id || row.document_upload_id || 'Analysis evidence',
+    sourceDoc: row.document_title || row.document_id || row.document_upload_id || 'Analysis evidence',
     similar: [],
     raw: row,
   };

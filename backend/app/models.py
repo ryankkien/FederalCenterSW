@@ -759,6 +759,33 @@ class PrimitiveExtractionRun(Base):
     status: Mapped[str] = mapped_column(String(20), default="success", nullable=False, index=True)
 
 
+class ContractPrimitiveDeliverable(Base):
+    __tablename__ = "contract_primitives_deliverable"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    extraction_run_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("primitive_extraction_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    contract_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("contracts.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    source_doc_ids: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True)
+    period_label: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
+    deliverable_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    cdrl_item: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    planned_due_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    actual_delivery_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    acceptance_status: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    days_late: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+
 class ContractPrimitiveDecision(Base):
     __tablename__ = "contract_primitives_decisions"
 

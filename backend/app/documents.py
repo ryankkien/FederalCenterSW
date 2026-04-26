@@ -59,6 +59,8 @@ class DocumentResponse(BaseModel):
     document_kind: str = "report"
     match_status: str = "pending"
     processing_status: str = "pending"
+    report_period_start: Optional[str] = None
+    report_period_end: Optional[str] = None
     created_at: datetime
 
 
@@ -389,6 +391,11 @@ def _get_authorized_document(document_id: str, user: CurrentUser, db: Session) -
 
 
 def _document_response(document: DocumentUpload) -> DocumentResponse:
+    def _date_str(d) -> Optional[str]:
+        if d is None:
+            return None
+        return d.isoformat() if hasattr(d, "isoformat") else str(d)
+
     return DocumentResponse(
         id=document.id,
         title=document.title,
@@ -406,6 +413,8 @@ def _document_response(document: DocumentUpload) -> DocumentResponse:
         document_kind=document.document_kind,
         match_status=document.match_status,
         processing_status=document.processing_status,
+        report_period_start=_date_str(getattr(document, "report_period_start", None)),
+        report_period_end=_date_str(getattr(document, "report_period_end", None)),
         created_at=document.created_at,
     )
 

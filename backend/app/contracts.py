@@ -17,6 +17,7 @@ from app.models import (
     Contract,
     ContractAccessGrant,
     ContractHypothesis,
+    ContractPrimitiveDeliverable,
     DocumentProcessingJob,
     DocumentUpload,
     RegressionFinding,
@@ -242,6 +243,54 @@ def list_contract_documents(
             "original_filename": row.original_filename,
             "created_at": row.created_at,
         }
+        for row in rows
+    ]
+
+
+class DeliverableItemResponse(BaseModel):
+    id: str
+    cdrl_item: Optional[str] = None
+    deliverable_name: Optional[str] = None
+    period_label: Optional[str] = None
+    planned_due_date: Optional[str] = None
+    actual_delivery_date: Optional[str] = None
+    status: Optional[str] = None
+    acceptance_status: Optional[str] = None
+    days_late: Optional[int] = None
+
+
+@router.get("/contracts/{contract_id}/deliverables", response_model=List[DeliverableItemResponse])
+def list_contract_deliverables(
+    contract_id: str,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> List[DeliverableItemResponse]:
+    require_contract_view(user, db, contract_id)
+    rows = list(
+        db.scalars(
+            select(ContractPrimitiveDeliverable)
+            .where(ContractPrimitiveDeliverable.contract_id == contract_id)
+            .order_by(ContractPrimitiveDeliverable.planned_due_date.asc())
+        ).all()
+    )
+
+    def _date_str(d) -> Optional[str]:
+        if d is None:
+            return None
+        return d.isoformat() if hasattr(d, "isoformat") else str(d)
+
+    return [
+        DeliverableItemResponse(
+            id=row.id,
+            cdrl_item=row.cdrl_item,
+            deliverable_name=row.deliverable_name,
+            period_label=row.period_label,
+            planned_due_date=_date_str(row.planned_due_date),
+            actual_delivery_date=_date_str(row.actual_delivery_date),
+            status=row.status,
+            acceptance_status=row.acceptance_status,
+            days_late=row.days_late,
+        )
         for row in rows
     ]
 
