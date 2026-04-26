@@ -1,5 +1,5 @@
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import date, datetime
 import re
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -627,10 +627,10 @@ def _contract_timeline_analysis(db: Session, contract_id: str) -> ContractTimeli
         TimelineReportResponse(
             document_id=document.id,
             title=document.title,
-            document_kind=document.document_kind,
-            period_label=_period_label(document),
-            report_period_start=str(document.report_period_start) if document.report_period_start else None,
-            report_period_end=str(document.report_period_end) if document.report_period_end else None,
+            document_kind=_display_document_kind(document),
+            period_label=_period_label(db, document),
+            report_period_start=str(_report_period(db, document)[0]) if _report_period(db, document)[0] else None,
+            report_period_end=str(_report_period(db, document)[1]) if _report_period(db, document)[1] else None,
             created_at=document.created_at,
             processing_status=document.processing_status,
             signals=signals_by_document.get(document.id, []),
@@ -708,7 +708,7 @@ def _timeline_documents(db: Session, contract_id: str) -> List[DocumentUpload]:
     return sorted(
         rows,
         key=lambda item: (
-            item.report_period_start or item.report_period_end or item.created_at.date(),
+            _report_period(db, item)[0] or _report_period(db, item)[1] or item.created_at.date(),
             item.created_at,
             item.title,
         ),
@@ -741,6 +741,7 @@ def _timeline_signals_by_document(db: Session, contract_id: str) -> Dict[str, Li
         polarity = _polarity(evidence_text)
         category = "execution_pattern" if _is_execution_text(evidence_text) else "report_fact"
         label = _specific_signal_label(fact.label, evidence_text)
+        responsible_party = "government" if fact.fact_type == "rfi_age" else _responsible_party(evidence_text)
         signal = TimelineSignalResponse(
             id=fact.id,
             category=category,
@@ -750,7 +751,7 @@ def _timeline_signals_by_document(db: Session, contract_id: str) -> Dict[str, Li
             confidence=fact.confidence,
             document_id=fact.document_upload_id,
             quote=fact.quote,
-            responsible_party=_responsible_party(evidence_text),
+            responsible_party=responsible_party,
             recurrence_key=_recurrence_key(fact.fact_type, label),
         )
         if fact.document_upload_id:
@@ -781,11 +782,11 @@ def _timeline_signals_by_document(db: Session, contract_id: str) -> Dict[str, Li
             id=f"execution:{chunk.id}",
             category="execution_pattern",
             label=_execution_label(chunk.text),
-            summary=_trim(_snippet_for_execution(chunk.text), 500),
+            summary=_execution_summary(chunk.text),
             polarity=_polarity(chunk.text),
             confidence=0.55,
             document_id=chunk.document_upload_id,
-            quote=_trim(_snippet_for_execution(chunk.text), 500),
+            quote=None,
             responsible_party=_responsible_party(chunk.text),
             recurrence_key=_recurrence_key("execution", _execution_label(chunk.text)),
         )
@@ -1013,14 +1014,60 @@ def _execution_correlations(analyses: Sequence[ContractTimelineAnalysisResponse]
     ]
 
 
-def _period_label(document: DocumentUpload) -> str:
-    if document.report_period_start and document.report_period_end:
-        return f"{document.report_period_start} to {document.report_period_end}"
-    if document.report_period_start:
-        return str(document.report_period_start)
-    if document.report_period_end:
-        return str(document.report_period_end)
+def _period_label(db: Session, document: DocumentUpload) -> str:
+    start, end = _report_period(db, document)
+    if start and end:
+        return f"{start} to {end}"
+    if start:
+        return str(start)
+    if end:
+        return str(end)
     return document.created_at.strftime("%Y-%m-%d")
+
+
+def _report_period(db: Session, document: DocumentUpload) -> Tuple[Optional[date], Optional[date]]:
+    if document.report_period_start or document.report_period_end:
+        return document.report_period_start, document.report_period_end
+    text = _document_text_sample(db, document.id)
+    match = re.search(
+        r"Reporting Period:\s*([0-9]{1,2}\s+[A-Za-z]+\s+[0-9]{4})\s*[–-]\s*([0-9]{1,2}\s+[A-Za-z]+\s+[0-9]{4})",
+        text,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None, None
+    return _parse_day_month_year(match.group(1)), _parse_day_month_year(match.group(2))
+
+
+def _document_text_sample(db: Session, document_id: str) -> str:
+    chunks = list(
+        db.scalars(
+            select(DocumentChunk)
+            .where(DocumentChunk.document_upload_id == document_id)
+            .order_by(DocumentChunk.chunk_index.asc())
+            .limit(3)
+        ).all()
+    )
+    return "\n".join(chunk.text for chunk in chunks)
+
+
+def _parse_day_month_year(value: str) -> Optional[date]:
+    normalized = value.strip()
+    for pattern in ("%d %B %Y", "%d %b %Y"):
+        try:
+            return datetime.strptime(normalized, pattern).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _display_document_kind(document: DocumentUpload) -> str:
+    haystack = f"{document.original_filename} {document.title} {document.document_kind}".lower()
+    if "_wsr-" in haystack or " wsr-" in haystack or "weekly status report" in haystack:
+        return "weekly_report"
+    if "_msr" in haystack or " msr" in haystack or "monthly status report" in haystack:
+        return "monthly_report"
+    return document.document_kind
 
 
 def _recurrence_key(category: str, label: str) -> str:
@@ -1029,10 +1076,10 @@ def _recurrence_key(category: str, label: str) -> str:
 
 def _polarity(text: str) -> str:
     lower = text.lower()
-    if _contains_any(lower, ("resolved", "recovered", "on schedule", "ahead of schedule", "accepted", "approved", "completed", "effective", "worked well", "expedited")):
-        return "positive"
     if _contains_any(lower, ("delay", "risk", "late", "overrun", "variance", "unbudgeted", "unauthorized", "defect", "missing", "open", "slip", "rework")):
         return "negative"
+    if _contains_any(lower, ("resolved", "recovered", "on schedule", "ahead of schedule", "accepted", "approved", "completed", "effective", "worked well", "expedited")):
+        return "positive"
     return "neutral"
 
 
@@ -1108,6 +1155,26 @@ def _snippet_for_execution(text: str) -> str:
         if index >= 0:
             return text[max(0, index - 160) : index + 360].strip()
     return text[:500]
+
+
+def _execution_summary(text: str) -> str:
+    label = _execution_label(text)
+    lower = text.lower()
+    if label == "Subcontractor management":
+        if "authority" in lower or "authorized" in lower or "rfi" in lower:
+            return "Subcontractor labor or authority depended on written government clarification."
+        return "Subcontractor activity appears in the report history and may need review with schedule/cost outcomes."
+    if label == "Quality control":
+        if _polarity(text) == "positive":
+            return "Quality control activity appears to support acceptance or recovery."
+        return "Quality control, defect, or rework language appears in the report history."
+    if label == "Work sequencing":
+        return "Work sequencing or phasing depended on access, approvals, or planned next-period activity."
+    if label == "Project management plan adherence":
+        return "Program management or PMP-related activity appears in the report history."
+    if label == "Staffing and labor mix":
+        return "Staffing or labor mix appears as an execution factor in the report history."
+    return "Execution approach appears in the report history."
 
 
 def _metadata_quote(metadata: Optional[Dict[str, object]]) -> Optional[str]:

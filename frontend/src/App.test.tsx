@@ -101,7 +101,10 @@ describe('App', () => {
 
     expect(await screen.findByRole('heading', { name: 'Contract Analysis Workspace' })).toBeInTheDocument();
     expect(await screen.findByRole('heading', { name: 'Contract Timeline And Cohort Patterns' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Grokipedia Index' })).toBeInTheDocument();
+    expect(screen.getByText('Evidence index')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Grokipedia Index' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Evidence index'));
+    expect(await screen.findByRole('heading', { name: 'Grokipedia Index' })).toBeInTheDocument();
     expect(
       await screen.findByRole('button', { name: /contract result Environmental Compliance/ }),
     ).toBeInTheDocument();
@@ -115,6 +118,7 @@ describe('App', () => {
     render(<App />);
     fireEvent.change(screen.getByLabelText('Role'), { target: { value: 'official' } });
     fireEvent.submit(screen.getByRole('button', { name: 'Continue' }).closest('form')!);
+    fireEvent.click(await screen.findByText('Evidence index'));
 
     fireEvent.change(await screen.findByLabelText('Search knowledge index'), { target: { value: 'Aging RFI' } });
     fireEvent.click(await screen.findByRole('button', { name: /regression result Aging RFI/ }));
