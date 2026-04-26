@@ -173,7 +173,7 @@ def _create_analysis_tables(db) -> None:
     db.execute(
         text(
             """
-            CREATE TABLE analysis_runs (
+            CREATE TABLE IF NOT EXISTS analysis_runs (
                 id TEXT PRIMARY KEY,
                 run_type TEXT NOT NULL,
                 target_contract_id TEXT,
