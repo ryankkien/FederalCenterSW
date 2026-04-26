@@ -2,6 +2,8 @@
 
 ## Database Schema
 
+> **Rule:** Any change to an existing schema or introduction of a new schema must be reflected in this file immediately — before the task is considered complete. If a table, column, enum, index, or relationship is added, removed, or modified anywhere in the codebase, update the relevant section below. If a schema is referenced that does not yet appear here, add it.
+
 Full schema: [psql/schema.sql](psql/schema.sql)
 
 ### Extensions
