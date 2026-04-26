@@ -11,6 +11,7 @@ from app.main import app
 from app.models import (
     Contract,
     ContractAccessGrant,
+    ContractSimilarityLink,
     DocumentReportFact,
     DocumentUpload,
     KnowledgeSourceRecord,
@@ -233,6 +234,60 @@ def test_cohort_analysis_is_official_only_and_compares_visible_contract_outputs(
     assert body["well_performing_common_patterns"][0]["title"] == "Expedited approvals"
     assert body["delta_lessons"]
     assert body["qualitative_quantitative_correlations"]
+
+
+def test_similarity_insights_returns_similar_failures_and_guidance(tmp_path) -> None:
+    client = _client_with_test_db(tmp_path)
+    official_token = _token(client, "official")
+    contractor_token = _token(client, "contractor")
+
+    with next(_test_db_session(tmp_path)) as db:
+        _seed_analysis_contract(db, "target", "N40080-26-D-0100", "Target Services")
+        _seed_analysis_contract(db, "similar", "N40080-26-D-0101", "Similar Services")
+        db.add_all(
+            [
+                _access("grant-official-target", "target", "official-demo"),
+                _access("grant-official-similar", "similar", "official-demo"),
+                _document("similar-report", "similar", "Similar report", date(2026, 3, 1), date(2026, 3, 31)),
+                ContractSimilarityLink(
+                    id="target-similar-link",
+                    source_contract_id="target",
+                    target_contract_id="similar",
+                    link_type="shared_failure_pattern",
+                    summary="Both contracts show access and onboarding risk.",
+                    score=0.82,
+                    metadata_json={"shared_tags": ["gfe_delay", "access"]},
+                ),
+                RegressionFinding(
+                    id="similar-gfe-delay",
+                    contract_id="similar",
+                    document_upload_id="similar-report",
+                    finding_type="schedule_regression",
+                    title="GFE access delay",
+                    summary="Government-furnished access was delayed and pushed field work past the planned start.",
+                    severity="high",
+                    confidence=0.8,
+                ),
+            ]
+        )
+        db.commit()
+
+    contractor = client.get(
+        "/api/contracts/target/similarity-insights",
+        headers={"Authorization": f"Bearer {contractor_token}"},
+    )
+    official = client.get(
+        "/api/contracts/target/similarity-insights",
+        headers={"Authorization": f"Bearer {official_token}"},
+    )
+
+    assert contractor.status_code == 403
+    assert official.status_code == 200
+    body = official.json()
+    assert body["similar_contracts"][0]["contract_id"] == "similar"
+    assert body["similar_contracts"][0]["failure_points"][0]["title"] == "GFE availability delay"
+    assert any("GFE/GFI/access responsibility matrix" in item for item in body["recommendations"])
+    assert "embedding" in body["methodology"][0]
 
 
 def _client_with_test_db(tmp_path) -> TestClient:

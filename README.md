@@ -190,6 +190,7 @@ GET  /api/contracts/{contract_id}/hypotheses/{hypothesis_id}
 POST /api/contracts/{contract_id}/hypotheses/{hypothesis_id}/investigate
 POST /api/contracts/{contract_id}/hypotheses/{hypothesis_id}/status
 GET  /api/contracts/{contract_id}/similar-contracts
+GET  /api/contracts/{contract_id}/similarity-insights
 GET  /api/documents/{document_id}
 GET  /api/documents/{document_id}/relationships
 POST /api/documents/{document_id}/match-decisions
@@ -218,7 +219,8 @@ bun run corpus:build-synthetic
 The generated corpus lives under ignored `backend/data/corpus/navy-service-v1/` and
 keeps `real_fixture` downloaded anchors separate from `synthetic_fixture` reports,
 CPARS-style narratives, IPMDAR-style JSON, decision logs, and cross-contract lesson
-notes.
+notes. Each contract has one CPARS-style `cpars_evaluation` fixture for extraction
+testing; these generated records are not real CPARS data.
 
 ## Auth Modes
 
@@ -257,7 +259,9 @@ Government officials see a contract-first analysis workspace. The current v1 vie
 existing extracted primitives and wiki records to show a cited contract brief,
 chronological report signals, recurring versus one-off issues, early warnings before
 degradation, positive signals, contractor execution patterns, CPARS outcome context
-when imported, and cohort-level pattern comparisons.
+when imported, cohort-level pattern comparisons, similar-contract failure points, and
+drafting guidance for future contract writing. Similarity insights use chunk embeddings
+when available, stored semantic links when available, and cohort metadata as a fallback.
 
 For local development without Azure env values, the backend falls back to ignored
 local storage under `backend/data/`. For Azure-backed runs, fill in `DATABASE_URL`,
@@ -277,4 +281,4 @@ Use `--commit` only after dry-run output looks correct; commit mode moves proces
 
 Azure resource inventory, access steps, PostgreSQL commands, and Blob Storage commands are documented in [docs/cloud.md](docs/cloud.md).
 
-Local development mirrors the cloud-facing PostgreSQL and Blob Storage contract with Docker Compose. Keep Azure inventory and access notes in `docs/cloud.md`, infrastructure workflow notes in `docs/infra.md`, and local mirror instructions in `docs/local-dev.md`.
+Local development mirrors the cloud-facing PostgreSQL and Blob Storage contract with Docker Compose: PostgreSQL 16 plus pgvector, database `federal_center_sw`, and private Blob container `app-assets`. The Azure Function deploy workflow writes the matching non-secret app settings and expects the database and storage connection strings in GitHub secrets. Keep Azure inventory and access notes in `docs/cloud.md`, infrastructure workflow notes in `docs/infra.md`, and local mirror instructions in `docs/local-dev.md`.

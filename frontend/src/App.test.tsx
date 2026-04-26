@@ -106,6 +106,8 @@ describe('App', () => {
     expect(screen.getByText('Model: gpt-5.4-mini')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Source Signal Context' })).toBeInTheDocument();
     expect(screen.getByText('Measurement Axes')).toBeInTheDocument();
+    expect(screen.getByText('Similar Contracts')).toBeInTheDocument();
+    expect(screen.getAllByText('Include a GFE/GFI/access responsibility matrix with owner, due date, acceptance criteria, and schedule relief rules.').length).toBeGreaterThan(0);
     expect(screen.getByText('Evidence index')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Grokipedia Index' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByText('Evidence index'));
@@ -170,6 +172,9 @@ function officialFetch() {
     }
     if (url === '/api/analysis/cohort') {
       return Promise.resolve(jsonResponse(cohortAnalysis));
+    }
+    if (url === '/api/contracts/N40080-24-D-1042/similarity-insights') {
+      return Promise.resolve(jsonResponse(similarityInsights));
     }
     if (url.startsWith('/api/wiki/search')) {
       if (url.includes('Aging+RFI')) {
@@ -377,6 +382,46 @@ const cohortAnalysis = {
   qualitative_quantitative_correlations: [],
   execution_correlations: [],
   limitations: ['Cohort analysis needs at least two visible contracts to compare patterns.'],
+};
+
+const similarityInsights = {
+  contract_id: 'N40080-24-D-1042',
+  target_contract_title: 'Environmental Compliance and Permitting Support Services',
+  similar_contracts: [
+    {
+      contract_id: 'N40080-24-D-2042',
+      contract_title: 'Base Operations Access Support',
+      similarity_score: 0.82,
+      match_basis: ['Shared extracted tags: gfe_delay, access.'],
+      failure_points: [
+        {
+          key: 'schedule-regression-gfe',
+          title: 'GFE availability delay',
+          count: 2,
+          document_count: 2,
+          examples: ['Government-furnished access arrived late and delayed field work.'],
+        },
+      ],
+      early_warnings: [],
+      recommendations: [
+        'Include a GFE/GFI/access responsibility matrix with owner, due date, acceptance criteria, and schedule relief rules.',
+      ],
+    },
+  ],
+  shared_failure_points: [
+    {
+      key: 'schedule-regression-gfe',
+      title: 'GFE availability delay',
+      count: 2,
+      document_count: 2,
+      examples: ['Government-furnished access arrived late and delayed field work.'],
+    },
+  ],
+  recommendations: [
+    'Include a GFE/GFI/access responsibility matrix with owner, due date, acceptance criteria, and schedule relief rules.',
+  ],
+  methodology: ['Use chunk-embedding similarity when indexed embeddings exist.'],
+  limitations: [],
 };
 
 function jsonResponse(body: unknown, status = 200) {

@@ -206,6 +206,26 @@ type CohortAnalysis = {
   limitations: string[];
 };
 
+type SimilarContractInsight = {
+  contract_id: string;
+  contract_title: string;
+  similarity_score?: number | null;
+  match_basis: string[];
+  failure_points: ContractPattern[];
+  early_warnings: TimelineSignal[];
+  recommendations: string[];
+};
+
+type ContractSimilarityInsights = {
+  contract_id: string;
+  target_contract_title: string;
+  similar_contracts: SimilarContractInsight[];
+  shared_failure_points: ContractPattern[];
+  recommendations: string[];
+  methodology: string[];
+  limitations: string[];
+};
+
 type WikiNodeSummary = {
   id: string;
   node_type: string;
@@ -394,6 +414,7 @@ function OfficialAnalysisWorkspace({ token, setError }: { token: string; setErro
   const [selectedContractId, setSelectedContractId] = useState('');
   const [analysis, setAnalysis] = useState<ContractTimelineAnalysis | null>(null);
   const [cohort, setCohort] = useState<CohortAnalysis | null>(null);
+  const [similarityInsights, setSimilarityInsights] = useState<ContractSimilarityInsights | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isRunningAi, setIsRunningAi] = useState(false);
 
@@ -404,12 +425,14 @@ function OfficialAnalysisWorkspace({ token, setError }: { token: string; setErro
       setContracts(nextContracts);
       const nextSelectedId = selectedContractId || nextContracts[0]?.id || '';
       setSelectedContractId(nextSelectedId);
-      const [nextAnalysis, nextCohort] = await Promise.all([
+      const [nextAnalysis, nextCohort, nextSimilarityInsights] = await Promise.all([
         nextSelectedId ? api<ContractTimelineAnalysis>(`/api/analysis/contracts/${nextSelectedId}`, token) : Promise.resolve(null),
         api<CohortAnalysis>('/api/analysis/cohort', token),
+        nextSelectedId ? api<ContractSimilarityInsights>(`/api/contracts/${nextSelectedId}/similarity-insights`, token) : Promise.resolve(null),
       ]);
       setAnalysis(nextAnalysis);
       setCohort(nextCohort);
+      setSimilarityInsights(nextSimilarityInsights);
     } catch (currentError) {
       setError(currentError instanceof Error ? currentError.message : 'Could not load contract analysis');
     } finally {
@@ -425,8 +448,12 @@ function OfficialAnalysisWorkspace({ token, setError }: { token: string; setErro
     setSelectedContractId(contractId);
     setIsLoading(true);
     try {
-      const nextAnalysis = await api<ContractTimelineAnalysis>(`/api/analysis/contracts/${contractId}`, token);
+      const [nextAnalysis, nextSimilarityInsights] = await Promise.all([
+        api<ContractTimelineAnalysis>(`/api/analysis/contracts/${contractId}`, token),
+        api<ContractSimilarityInsights>(`/api/contracts/${contractId}/similarity-insights`, token),
+      ]);
       setAnalysis(nextAnalysis);
+      setSimilarityInsights(nextSimilarityInsights);
     } catch (currentError) {
       setError(currentError instanceof Error ? currentError.message : 'Could not load contract analysis');
     } finally {
@@ -523,6 +550,14 @@ function OfficialAnalysisWorkspace({ token, setError }: { token: string; setErro
         <MetricCard label="Cohort Contracts" value={cohort?.contract_count ?? 0} icon={<Layers3 size={17} />} />
       </div>
       <div className="analysis-grid">
+        <AnalysisPanel title="Similar Contracts" icon={<Link2 size={16} />}>
+          <SimilarContractsList insights={similarityInsights} />
+        </AnalysisPanel>
+        <AnalysisPanel title="Future Contract Writing" icon={<BookOpen size={16} />}>
+          <TextList items={similarityInsights?.recommendations ?? []} empty="No similar-contract drafting guidance is available yet." />
+          <div className="rail-divider" />
+          <PatternList patterns={similarityInsights?.shared_failure_points ?? []} empty="No shared failure points have crossed the current threshold." compact />
+        </AnalysisPanel>
         <AnalysisPanel title="Chronological Report Signals" icon={<BarChart3 size={16} />}>
           {analysis?.timeline.length ? (
             <div className="timeline-list">
@@ -574,9 +609,9 @@ function OfficialAnalysisWorkspace({ token, setError }: { token: string; setErro
           <PatternList patterns={cohort?.well_performing_common_patterns ?? []} empty="No well-performing or recovered cohort pattern set yet." compact />
         </AnalysisPanel>
       </div>
-      {analysis?.limitations.length || cohort?.limitations.length ? (
+      {analysis?.limitations.length || cohort?.limitations.length || similarityInsights?.limitations.length ? (
         <div className="limitations-row">
-          {[...(analysis?.limitations ?? []), ...(cohort?.limitations ?? [])].map((item) => (
+          {[...(analysis?.limitations ?? []), ...(cohort?.limitations ?? []), ...(similarityInsights?.limitations ?? [])].map((item) => (
             <span key={item}>{item}</span>
           ))}
         </div>
@@ -759,6 +794,30 @@ function CitationChips({ citations }: { citations: PrimitiveCitation[] }) {
         <span title={citation.excerpt ?? citation.label ?? citation.primitive_id} key={`${citation.primitive_type}-${citation.primitive_id}`}>
           {citation.primitive_type}: {citation.primitive_id.slice(0, 8)}
         </span>
+      ))}
+    </div>
+  );
+}
+
+function SimilarContractsList({ insights }: { insights: ContractSimilarityInsights | null }) {
+  const contracts = insights?.similar_contracts ?? [];
+  if (!contracts.length) {
+    return <p className="empty">No similar visible contracts have enough extracted evidence yet.</p>;
+  }
+  return (
+    <div className="pattern-list">
+      {contracts.slice(0, 4).map((contract) => (
+        <article className="pattern-row" key={contract.contract_id}>
+          <strong>{contract.contract_title}</strong>
+          <small>
+            {contract.similarity_score !== null && contract.similarity_score !== undefined
+              ? `${Math.round(contract.similarity_score * 100)}% similarity`
+              : 'Comparable contract'}
+          </small>
+          {contract.match_basis[0] ? <span>{contract.match_basis[0]}</span> : null}
+          {contract.failure_points[0] ? <p>{contract.failure_points[0].title}: {contract.failure_points[0].examples[0]}</p> : null}
+          {contract.recommendations[0] ? <p>{contract.recommendations[0]}</p> : null}
+        </article>
       ))}
     </div>
   );
