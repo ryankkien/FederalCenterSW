@@ -44,7 +44,7 @@ then referencing them from app settings.
 
 ## GitHub Actions
 
-The repo includes three Azure-facing workflows:
+The repo includes four Azure-facing workflows:
 
 - `.github/workflows/infra-whatif.yml` runs Bicep build and Azure what-if on pull requests
   that touch infrastructure files, and can also be run manually.
@@ -57,6 +57,8 @@ The repo includes three Azure-facing workflows:
   login, app setting writes, and Function App deployment when required deployment
   variables or secrets are missing, so code validation can still pass in repositories
   that have not completed Azure secret setup.
+- `.github/workflows/feature-extractor-deploy.yml` builds `feature_extractor/`, pushes
+  the `feature-extractor` image to ACR, and updates the dev Container App.
 
 The repo also includes `.github/workflows/discord-pr-notifications.yml`, which posts
 pull request lifecycle events to Discord. Create a Discord channel such as
@@ -65,16 +67,20 @@ repository secret `DISCORD_PULL_REQUEST_WEBHOOK_URL`. The workflow uses
 `pull_request_target` so forked pull requests can still notify Discord, but it does not
 check out or run pull request code.
 
-The Azure workflows use Azure OIDC login. Configure these GitHub repository variables:
+The Azure workflows use Azure OIDC login. Configure these GitHub `azure-dev`
+environment variables:
 
 | Variable | Value |
 | --- | --- |
-| `AZURE_CLIENT_ID` | Client ID for the Azure app registration or managed identity used by GitHub Actions. |
+| `AZURE_CLIENT_ID` | `4650ab5a-7546-45cd-8694-83fc65ae586c` |
 | `AZURE_TENANT_ID` | `c821732f-0ded-4db0-96c8-cf2013d16974` |
 | `AZURE_SUBSCRIPTION_ID` | `99596387-8247-4e94-9917-cf8bc695f106` |
 | `AZURE_RESOURCE_GROUP` | `federal-center-sw-dev` |
 | `AZURE_FUNCTION_APP_NAME` | `fcsw-email-intake-e7e9f2` |
 | `AZURE_STORAGE_CONTAINER` | Optional override; defaults to `app-assets`. |
+| `ACR_NAME` | `fcswdevacr` |
+| `ACR_LOGIN_SERVER` | `fcswdevacr.azurecr.io` |
+| `FEATURE_EXTRACTOR_APP_NAME` | `fcsw-feature-extractor-dev` |
 | `EMAIL_INTAKE_DEFAULT_UPLOADER_ID` | Optional override; defaults to `contractor-demo`. |
 | `EMAIL_INTAKE_DEFAULT_DOCUMENT_TYPE` | Optional override; defaults to `Email Attachment`. |
 | `DOCUMENT_PROCESSING_TIMER_SCHEDULE` | Optional Azure Functions NCRONTAB schedule; defaults to every five minutes. |
@@ -89,12 +95,13 @@ Configure these GitHub repository secrets for deployment and notifications:
 | `DISCORD_PULL_REQUEST_WEBHOOK_URL` | Discord webhook URL for the pull request notification channel. |
 
 The Azure identity needs permission to run resource group deployments in
-`federal-center-sw-dev` and deploy to the Function App. Use least privilege when possible;
-Contributor at the resource group is the simple starting point.
+`federal-center-sw-dev`, deploy to the Function App, push ACR images, and update the
+feature extractor Container App. Use least privilege when possible; Contributor at the
+resource group is the simple starting point.
 
 The Azure app registration or managed identity also needs federated credentials that match
-the GitHub workflow subjects. The deploy workflows use the `azure-dev` GitHub environment,
-so include that environment in the deploy federated credential.
+the GitHub workflow subjects. The Azure workflows use the `azure-dev` GitHub environment,
+so include that environment in the federated credential.
 
 ## Drift Policy
 
@@ -111,3 +118,9 @@ change back into `infra/` immediately. Otherwise the next what-if will report dr
 Azure what-if can report provider default noise. At the time this was added, the known
 noise is on `Microsoft.Web/sites/fcsw-email-intake-e7e9f2` for default Function App
 `siteConfig` fields.
+
+Renaming the feature extractor Container App from the prior dev app name to
+`fcsw-feature-extractor-dev` is a delete/create change in Azure because Container App
+resource names are immutable. Coordinate the cutover window, confirm the new app has the
+expected secrets and image, then remove the old dev app after traffic and manual checks
+are complete.

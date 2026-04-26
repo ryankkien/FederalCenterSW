@@ -92,7 +92,8 @@ The preferred deployment is an Azure Function timer trigger, not a VM. The funct
 
 Create a Linux Python Function App, configure the `EMAIL_INTAKE_*` app settings, then deploy the `backend/` folder. The repo deploys this automatically from `.github/workflows/function-deploy.yml` after backend changes land on `main`, and the workflow can also be run manually.
 
-The deployment workflow uses the `azure-dev` GitHub environment plus these repository values:
+The deployment workflow uses the `azure-dev` GitHub environment plus these environment
+variables:
 
 - `AZURE_CLIENT_ID`
 - `AZURE_TENANT_ID`
