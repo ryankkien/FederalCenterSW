@@ -53,7 +53,10 @@ The repo includes three Azure-facing workflows:
 - `.github/workflows/function-deploy.yml` deploys the backend worker Function App from
   `backend/` on pushes to `main` that touch backend files, and can also be run manually.
   The Function App currently hosts the email intake timer and the queued document
-  processing timer.
+  processing timer. The workflow always runs backend lint and tests. It skips the Azure
+  login, app setting writes, and Function App deployment when required deployment
+  variables or secrets are missing, so code validation can still pass in repositories
+  that have not completed Azure secret setup.
 
 The repo also includes `.github/workflows/discord-pr-notifications.yml`, which posts
 pull request lifecycle events to Discord. Create a Discord channel such as

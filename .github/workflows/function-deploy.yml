@@ -45,7 +45,33 @@ jobs:
       - name: Test backend
         run: python -m pytest backend/tests
 
+      - name: Check deployment configuration
+        id: deploy_config
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_FUNCTION_STORAGE_CONNECTION_STRING }}
+          DATABASE_URL: ${{ secrets.AZURE_FUNCTION_DATABASE_URL }}
+        run: |
+          missing=""
+          if [ -z "$AZURE_CLIENT_ID" ]; then
+            missing="$missing AZURE_CLIENT_ID"
+          fi
+          if [ -z "$AZURE_STORAGE_CONNECTION_STRING" ]; then
+            missing="$missing AZURE_FUNCTION_STORAGE_CONNECTION_STRING"
+          fi
+          if [ -z "$DATABASE_URL" ]; then
+            missing="$missing AZURE_FUNCTION_DATABASE_URL"
+          fi
+
+          if [ -n "$missing" ]; then
+            echo "::notice::Skipping Function App deploy; missing GitHub configuration:$missing"
+            echo "deploy_ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy_ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Azure login
+        if: steps.deploy_config.outputs.deploy_ready == 'true'
         uses: azure/login@v2
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
@@ -53,6 +79,7 @@ jobs:
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
 
       - name: Configure non-secret Function App settings
+        if: steps.deploy_config.outputs.deploy_ready == 'true'
         run: |
           az functionapp config appsettings set \
             --resource-group "$AZURE_RESOURCE_GROUP" \
@@ -65,34 +92,27 @@ jobs:
               DOCUMENT_PROCESSING_LIMIT="$DOCUMENT_PROCESSING_LIMIT"
 
       - name: Configure Blob Storage Function App setting
+        if: steps.deploy_config.outputs.deploy_ready == 'true'
         env:
           AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_FUNCTION_STORAGE_CONNECTION_STRING }}
         run: |
-          if [ -z "$AZURE_STORAGE_CONNECTION_STRING" ]; then
-            echo "::error::AZURE_FUNCTION_STORAGE_CONNECTION_STRING is not set; refusing to deploy code that needs Blob Storage."
-            exit 1
-          fi
-
           az functionapp config appsettings set \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_FUNCTION_APP_NAME" \
             --settings AZURE_STORAGE_CONNECTION_STRING="$AZURE_STORAGE_CONNECTION_STRING"
 
       - name: Configure database Function App setting
+        if: steps.deploy_config.outputs.deploy_ready == 'true'
         env:
           DATABASE_URL: ${{ secrets.AZURE_FUNCTION_DATABASE_URL }}
         run: |
-          if [ -z "$DATABASE_URL" ]; then
-            echo "::error::AZURE_FUNCTION_DATABASE_URL is not set; refusing to deploy code that needs PostgreSQL."
-            exit 1
-          fi
-
           az functionapp config appsettings set \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_FUNCTION_APP_NAME" \
             --settings DATABASE_URL="$DATABASE_URL"
 
       - name: Deploy Function App
+        if: steps.deploy_config.outputs.deploy_ready == 'true'
         uses: Azure/functions-action@v1
         with:
           app-name: ${{ env.AZURE_FUNCTION_APP_NAME }}
