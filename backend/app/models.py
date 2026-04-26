@@ -1529,6 +1529,28 @@ class KnowledgeCitation(Base):
     )
 
 
+class AnalysisRun(Base):
+    __tablename__ = "analysis_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    run_type: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    target_contract_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("contracts.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )
+    cohort_definition: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    cohort_contract_ids: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending", index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    model: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+    result: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    analyzed_doc_ids: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
+
+
 class ContractorProfile(Base):
     __tablename__ = "contractor_profiles"
 

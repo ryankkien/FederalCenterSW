@@ -795,7 +795,8 @@ CREATE TABLE analysis_runs (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     completed_at TIMESTAMPTZ,
     model VARCHAR(160),
-    result JSON
+    result JSON,
+    analyzed_doc_ids JSON
 );
 
 CREATE INDEX ix_analysis_runs_run_type ON analysis_runs (run_type);

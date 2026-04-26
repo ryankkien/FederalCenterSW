@@ -3,7 +3,7 @@ from datetime import date, datetime
 import math
 import re
 import secrets
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -14,6 +14,7 @@ from app.ai.providers import get_ai_provider
 from app.analysis_orchestrator import (
     enqueue_per_contract_analysis_after_extraction,
     execute_enqueued_per_contract_analysis,
+    get_analysis_log,
     get_analysis_run,
     get_latest_analysis_run,
     run_cohort_analysis,
@@ -2681,3 +2682,51 @@ def _document_semantic_link_response(
         score=item.score,
         metadata=item.metadata_json or {},
     )
+
+
+# ─── Contract Analysis Log ────────────────────────────────────────────────────
+
+class AnalysisLogEntryResponse(BaseModel):
+    id: str
+    status: str
+    created_at: Optional[datetime]
+    completed_at: Optional[datetime]
+    analyzed_doc_count: int
+    summary: Optional[str] = None
+    prior_run_id: Optional[str] = None
+    changes: Optional[List[Dict[str, Any]]] = None
+
+
+@router.get(
+    "/contracts/{contract_id}/analysis-log",
+    response_model=List[AnalysisLogEntryResponse],
+)
+def get_contract_analysis_log(
+    contract_id: str,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> List[AnalysisLogEntryResponse]:
+    require_contract_view(user, db, contract_id)
+    runs = get_analysis_log(db, contract_id)
+    entries = []
+    for run in runs:
+        result = run.get("result") or {}
+        if isinstance(result, str):
+            try:
+                import json as _json
+                result = _json.loads(result)
+            except Exception:
+                result = {}
+        entries.append(
+            AnalysisLogEntryResponse(
+                id=run["id"],
+                status=run.get("status", "unknown"),
+                created_at=run.get("created_at"),
+                completed_at=run.get("completed_at"),
+                analyzed_doc_count=len(run.get("analyzed_doc_ids") or []),
+                summary=result.get("summary") if isinstance(result, dict) else None,
+                prior_run_id=result.get("prior_run_id") if isinstance(result, dict) else None,
+                changes=result.get("changes") if isinstance(result, dict) else None,
+            )
+        )
+    return entries
