@@ -19,5 +19,9 @@ param postgresAdministratorLogin = 'fcadmin'
 
 param acrName = 'fcswdevacr'
 param acaEnvironmentName = 'fcsw-dev-aca-env'
-param featureExtractorAppName = 'fcsw-feature-extractor-dev'
+param featureExtractorAppName = 'fcsw-summarizer-dev'
 param featureExtractorManagedIdentityName = 'fcsw-feature-extractor-dev-mi'
+param backendAppName = 'fcsw-backend-dev'
+param backendManagedIdentityName = 'fcsw-backend-dev-mi'
+param staticWebAppName = 'fcsw-frontend-dev'
+// All secrets (openaiApiKey, databaseUrl, storageConnectionString, etc.) are stored in Key Vault — not passed as deployment parameters

@@ -54,13 +54,24 @@ param featureExtractorManagedIdentityName string
 @description('Feature Extractor Docker image tag to deploy.')
 param featureExtractorImageTag string = 'latest'
 
+@description('Container App name for the Backend API service.')
+param backendAppName string
+
+@description('User-assigned managed identity name for the Backend API Container App.')
+param backendManagedIdentityName string
+
+@description('Azure Static Web App name for the Frontend.')
+param staticWebAppName string
+
+@description('Azure region for the Static Web App (limited regions supported).')
+param staticWebAppLocation string = 'eastus2'
+
 var keyVaultSecretsUserRoleDefinitionId = subscriptionResourceId(
   'Microsoft.Authorization/roleDefinitions',
   '4633458b-17de-408a-b874-0445c86b69e6'
 )
 
 var keyVaultSecretUris = {
-  anthropicApiKey: '${keyVault.properties.vaultUri}secrets/anthropic-api-key'
   appStorageConnectionString: '${keyVault.properties.vaultUri}secrets/app-storage-connection-string'
   databaseUrl: '${keyVault.properties.vaultUri}secrets/database-url'
   emailIntakeHost: '${keyVault.properties.vaultUri}secrets/email-intake-host'
@@ -466,11 +477,6 @@ resource featureExtractorApp 'Microsoft.App/containerApps@2024-03-01' = {
           identity: featureExtractorManagedIdentity.id
         }
         {
-          name: 'anthropic-api-key'
-          keyVaultUrl: keyVaultSecretUris.anthropicApiKey
-          identity: featureExtractorManagedIdentity.id
-        }
-        {
           name: 'openai-api-key'
           keyVaultUrl: keyVaultSecretUris.openaiApiKey
           identity: featureExtractorManagedIdentity.id
@@ -505,6 +511,10 @@ resource featureExtractorApp 'Microsoft.App/containerApps@2024-03-01' = {
               secretRef: 'openai-api-key'
             }
             {
+              name: 'MODEL_PREFERENCE'
+              value: 'openai'
+            }
+            {
               name: 'OPENAI_LLM_MODEL'
               value: 'gpt-5.4-mini'
             }
@@ -535,11 +545,159 @@ resource featureExtractorApp 'Microsoft.App/containerApps@2024-03-01' = {
   }
 }
 
+// --- Backend Container App ---
+
+resource backendManagedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: backendManagedIdentityName
+  location: appLocation
+}
+
+resource backendKeyVaultSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(keyVault.id, backendManagedIdentity.id, keyVaultSecretsUserRoleDefinitionId)
+  scope: keyVault
+  properties: {
+    roleDefinitionId: keyVaultSecretsUserRoleDefinitionId
+    principalId: backendManagedIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource backendApp 'Microsoft.App/containerApps@2024-03-01' = {
+  name: backendAppName
+  location: appLocation
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${backendManagedIdentity.id}': {}
+    }
+  }
+  dependsOn: [
+    backendKeyVaultSecretsUser
+  ]
+  properties: {
+    managedEnvironmentId: acaEnvironment.id
+    configuration: {
+      activeRevisionsMode: 'Single'
+      ingress: {
+        external: true
+        targetPort: 8000
+        transport: 'http'
+      }
+      registries: [
+        {
+          server: acr.properties.loginServer
+          username: acr.listCredentials().username
+          passwordSecretRef: 'acr-password'
+        }
+      ]
+      secrets: [
+        {
+          name: 'acr-password'
+          value: acr.listCredentials().passwords[0].value
+        }
+        {
+          name: 'storage-connection-string'
+          keyVaultUrl: keyVaultSecretUris.appStorageConnectionString
+          identity: backendManagedIdentity.id
+        }
+        {
+          name: 'openai-api-key'
+          keyVaultUrl: keyVaultSecretUris.openaiApiKey
+          identity: backendManagedIdentity.id
+        }
+        {
+          name: 'database-url'
+          keyVaultUrl: keyVaultSecretUris.databaseUrl
+          identity: backendManagedIdentity.id
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'backend'
+          image: '${acr.properties.loginServer}/backend:latest'
+          resources: {
+            cpu: json('0.5')
+            memory: '1Gi'
+          }
+          env: [
+            {
+              name: 'DATABASE_URL'
+              secretRef: 'database-url'
+            }
+            {
+              name: 'AZURE_STORAGE_CONNECTION_STRING'
+              secretRef: 'storage-connection-string'
+            }
+            {
+              name: 'AZURE_STORAGE_CONTAINER'
+              value: appAssetsContainerName
+            }
+            {
+              name: 'OPENAI_API_KEY'
+              secretRef: 'openai-api-key'
+            }
+            {
+              name: 'AUTH_MODE'
+              value: 'mock'
+            }
+            {
+              name: 'AI_PROVIDER'
+              value: 'openai'
+            }
+            {
+              name: 'AI_PROCESSING_ENABLED'
+              value: 'true'
+            }
+            {
+              name: 'APPINSIGHTS_CONNECTION_STRING'
+              value: appInsights.properties.ConnectionString
+            }
+            {
+              name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
+              value: appInsights.properties.ConnectionString
+            }
+          ]
+        }
+      ]
+      scale: {
+        minReplicas: 0
+        maxReplicas: 5
+      }
+    }
+  }
+}
+
+// --- Frontend Static Web App ---
+
+resource staticWebApp 'Microsoft.Web/staticSites@2023-01-01' = {
+  name: staticWebAppName
+  location: staticWebAppLocation
+  sku: {
+    name: 'Standard'
+    tier: 'Standard'
+  }
+  properties: {}
+}
+
+// Proxy /api/* from the SWA to the backend Container App (no frontend code changes needed)
+resource linkedBackend 'Microsoft.Web/staticSites/linkedBackends@2023-01-01' = {
+  parent: staticWebApp
+  name: 'backend'
+  properties: {
+    backendResourceId: backendApp.id
+    region: appLocation
+  }
+}
+
 output functionAppHostName string = functionApp.properties.defaultHostName
 output postgresFullyQualifiedDomainName string = postgresServer.properties.fullyQualifiedDomainName
 output appStorageBlobEndpoint string = appStorage.properties.primaryEndpoints.blob
 output keyVaultUri string = keyVault.properties.vaultUri
 output acrLoginServer string = acr.properties.loginServer
 output featureExtractorUrl string = 'https://${featureExtractorApp.properties.configuration.ingress.fqdn}'
+output backendUrl string = 'https://${backendApp.properties.configuration.ingress.fqdn}'
+output staticWebAppUrl string = 'https://${staticWebApp.properties.defaultHostname}'
 output appInsightsName string = appInsights.name
 output appInsightsConnectionString string = appInsights.properties.ConnectionString
