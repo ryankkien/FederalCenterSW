@@ -20,7 +20,6 @@ from app.models import (
     ContractorProfile,
     DocumentReportFact,
     DocumentUpload,
-    ExternalSourceRef,
     HypothesisEvidence,
     KnowledgeCitation,
     KnowledgeEdge,
@@ -486,7 +485,7 @@ def _contract_sections(payload: Dict[str, Any]) -> List[Dict[str, str]]:
     regressions = payload["regressions"]
     hypotheses = payload["hypotheses"]
     sources = payload["sources"]
-    obligations = payload["obligations"]
+    obligations = _clean_obligation_briefs(payload["obligations"])
     facts = payload["facts"]
     return [
         {
@@ -510,7 +509,7 @@ def _contract_sections(payload: Dict[str, Any]) -> List[Dict[str, str]]:
         {
             "title": "Baseline And Obligations",
             "body": _join_or_empty(
-                [f"{item['type']}: {item['title']} - {item['reference']}" for item in obligations[:8]],
+                [f"{item['type']}: {item['title']} - {item['reference']}" for item in obligations[:12]],
                 "No interpreted baseline obligations are available yet.",
             ),
         },
@@ -558,6 +557,57 @@ def _contract_limitations(payload: Dict[str, Any]) -> List[str]:
     if not any(item["source"] == "cpars" and item["status"] == "available" for item in payload["sources"]):
         limitations.append("CPARS performance narratives are absent unless authorized exports are imported.")
     return limitations
+
+
+def _clean_obligation_briefs(obligations: Sequence[Dict[str, Any]]) -> List[Dict[str, str]]:
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    for obligation in obligations:
+        key = _clean_obligation_type(str(obligation.get("type") or "other"))
+        grouped.setdefault(key, []).append(obligation)
+
+    cleaned = []
+    for key, rows in grouped.items():
+        examples = []
+        seen = set()
+        for row in rows:
+            reference = str(row.get("reference") or row.get("title") or "").strip()
+            if not reference or reference in seen:
+                continue
+            seen.add(reference)
+            examples.append(_trim(reference, 220))
+            if len(examples) == 3:
+                break
+        cleaned.append(
+            {
+                "type": key,
+                "title": _clean_obligation_title(key),
+                "reference": " | ".join(examples) or f"{len(rows)} source obligation row(s) grouped for review.",
+            }
+        )
+    return sorted(cleaned, key=lambda item: item["title"])[:30]
+
+
+def _clean_obligation_type(value: str) -> str:
+    normalized = value.lower()
+    if normalized in {"scope", "scope_boundary"}:
+        return "scope_boundary"
+    if normalized in {"reporting_cadence", "deliverable"}:
+        return "deliverables_and_reporting"
+    if normalized in {"authority_rule", "approval_workflow"}:
+        return "authority_and_approvals"
+    if normalized in {"cost_schedule_expectation", "period_of_performance"}:
+        return "cost_schedule_and_pop"
+    return normalized or "other"
+
+
+def _clean_obligation_title(value: str) -> str:
+    titles = {
+        "scope_boundary": "Scope boundaries",
+        "deliverables_and_reporting": "Deliverables and reporting",
+        "authority_and_approvals": "Authority and approvals",
+        "cost_schedule_and_pop": "Cost, schedule, and period of performance",
+    }
+    return titles.get(value, value.replace("_", " ").title())
 
 
 def _contractor_sections(payload: Dict[str, Any]) -> List[Dict[str, str]]:

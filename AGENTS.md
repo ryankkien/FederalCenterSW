@@ -248,6 +248,11 @@ bun run infra:deploy
   records, wiki nodes, edges, citations, and contractor evidence profiles. The
   frontend uses `/api/wiki/*` for the Grokipedia workspace; it should not rebuild the
   full wiki client-side from every contract analysis endpoint.
+- Government officials use the contract analysis workspace for contract-first
+  narrative briefs, chronological report signals, recurring versus one-off issues,
+  early warnings, positive signals, contractor execution patterns, CPARS outcome
+  context, and cohort comparisons. Contractors remain upload-focused and use the
+  contract selector to hard-link new reports to `document_uploads.contract_id`.
 - External research references are restricted in v1 to official sources such as `.gov`,
   `.mil`, Acquisition.gov, Federal Register, GAO/OIG, Congress.gov, and agency domains.
   Uploaded contract-file evidence remains authoritative for contract-specific findings.
