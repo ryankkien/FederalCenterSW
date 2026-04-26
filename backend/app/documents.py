@@ -142,6 +142,7 @@ async def upload_document(
         created_at=datetime.now(timezone.utc),
     )
     db.add(document)
+    db.flush()
     inline_text = _inline_extracted_text(storage, stored.text_blob_path) if get_ai_inline_processing_enabled() else ""
     inline_provider = get_ai_provider() if inline_text else None
     apply_inline_intake_decisions(db, document, text=inline_text, ai_provider=inline_provider)

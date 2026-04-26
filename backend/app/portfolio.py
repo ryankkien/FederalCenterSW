@@ -9,16 +9,18 @@ import re
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.analysis_orchestrator import run_incremental_contract_analysis
+from app.cross_contract_agent import run_cross_contract_agent
 from app.auth import CurrentUser, get_current_user
 from app.authz import visible_contract_ids
 from app.config import get_ai_max_retries, get_ai_request_timeout_seconds, get_openai_api_key, get_openai_llm_model
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.models import (
     Contract,
     ContractHypothesis,
@@ -1159,3 +1161,99 @@ def _trim(value: str, limit: int) -> str:
     if len(clean) <= limit:
         return clean
     return clean[: limit - 1].rstrip() + "..."
+
+
+# ─── Generate Insights endpoints ─────────────────────────────────────────────
+
+class GenerateStatusResponse(BaseModel):
+    new_doc_count: int
+    affected_contract_count: int
+
+
+class GenerateInsightsResponse(BaseModel):
+    queued: int
+
+
+def _contracts_with_new_docs(
+    db: Session, visible_ids: List[str]
+) -> Dict[str, List[str]]:
+    """Return {contract_id: [new_doc_id, ...]} for contracts with unanalyzed completed docs."""
+    if not visible_ids:
+        return {}
+    result: Dict[str, List[str]] = {}
+    for cid in visible_ids:
+        rows = db.execute(
+            text(
+                """
+                SELECT id FROM document_uploads
+                WHERE contract_id = :cid
+                  AND processing_status = 'completed'
+                  AND created_at > COALESCE(
+                      (SELECT MAX(ar.completed_at) FROM analysis_runs ar
+                       WHERE ar.target_contract_id = :cid
+                         AND ar.run_type = 'per_contract'
+                         AND ar.status = 'complete'),
+                      '1970-01-01T00:00:00+00:00'
+                  )
+                ORDER BY created_at ASC
+                """
+            ),
+            {"cid": cid},
+        ).all()
+        if rows:
+            result[cid] = [str(r[0]) for r in rows]
+    return result
+
+
+@router.get("/generate-status", response_model=GenerateStatusResponse)
+def get_generate_status(
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> GenerateStatusResponse:
+    visible_ids = visible_contract_ids(user, db)
+    contracts_new_docs = _contracts_with_new_docs(db, visible_ids)
+    total_docs = sum(len(v) for v in contracts_new_docs.values())
+    return GenerateStatusResponse(
+        new_doc_count=total_docs,
+        affected_contract_count=len(contracts_new_docs),
+    )
+
+
+@router.post("/generate-insights", response_model=GenerateInsightsResponse, status_code=202)
+def post_generate_insights(
+    background_tasks: BackgroundTasks,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> GenerateInsightsResponse:
+    visible_ids = visible_contract_ids(user, db)
+    contracts_new_docs = _contracts_with_new_docs(db, visible_ids)
+    visible_list = list(visible_ids)
+    for cid, doc_ids in contracts_new_docs.items():
+        background_tasks.add_task(_portfolio_analysis_task, cid, doc_ids, visible_list)
+    return GenerateInsightsResponse(queued=len(contracts_new_docs))
+
+
+def _portfolio_analysis_task(
+    contract_id: str,
+    new_doc_ids: List[str],
+    visible_contract_ids_list: List[str],
+) -> None:
+    db = SessionLocal()
+    try:
+        incremental_run = None
+        try:
+            incremental_run = run_incremental_contract_analysis(db, contract_id, new_doc_ids)
+        except Exception:
+            return
+        try:
+            run_cross_contract_agent(
+                db,
+                contract_id,
+                visible_contract_ids=visible_contract_ids_list,
+                triggering_run_id=incremental_run.get("id") if incremental_run else None,
+            )
+        except Exception:
+            # Agent failures must not roll back the per-contract analysis row.
+            pass
+    finally:
+        db.close()

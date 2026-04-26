@@ -152,6 +152,33 @@ export async function getPortfolioLessons(period?: string) {
   return request(`/api/portfolio/lessons${suffix}`);
 }
 
+export async function getPortfolioGenerateStatus(): Promise<{
+  new_doc_count: number;
+  affected_contract_count: number;
+}> {
+  return request('/api/portfolio/generate-status');
+}
+
+export async function postGenerateInsights(): Promise<{ queued: number }> {
+  return request('/api/portfolio/generate-insights', { method: 'POST' });
+}
+
+export async function getContractAnalysisLog(contractId: string): Promise<Array<{
+  id: string;
+  status: string;
+  run_type?: string;
+  created_at: string;
+  completed_at?: string;
+  analyzed_doc_count: number;
+  summary?: string;
+  prior_run_id?: string;
+  changes?: Array<{ axis: string; change_type: string; description: string }>;
+  investigated_contract_ids?: string[];
+  insight_hypothesis_id?: string;
+}>> {
+  return request(`/api/contracts/${encodeURIComponent(contractId)}/analysis-log`);
+}
+
 export function normalizeContract(row: any) {
   const start = row.period_start || row.start || '2026-01-01';
   const end = row.period_end || row.end || '2027-12-31';

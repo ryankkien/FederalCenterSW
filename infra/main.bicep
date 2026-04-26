@@ -74,8 +74,12 @@ var keyVaultSecretsUserRoleDefinitionId = subscriptionResourceId(
 var keyVaultSecretUris = {
   appStorageConnectionString: '${keyVault.properties.vaultUri}secrets/app-storage-connection-string'
   databaseUrl: '${keyVault.properties.vaultUri}secrets/database-url'
+  emailIntakeAutoReplyFrom: '${keyVault.properties.vaultUri}secrets/email-intake-auto-reply-from'
   emailIntakeHost: '${keyVault.properties.vaultUri}secrets/email-intake-host'
   emailIntakePassword: '${keyVault.properties.vaultUri}secrets/email-intake-password'
+  emailIntakeSmtpHost: '${keyVault.properties.vaultUri}secrets/email-intake-smtp-host'
+  emailIntakeSmtpPassword: '${keyVault.properties.vaultUri}secrets/email-intake-smtp-password'
+  emailIntakeSmtpUsername: '${keyVault.properties.vaultUri}secrets/email-intake-smtp-username'
   emailIntakeUsername: '${keyVault.properties.vaultUri}secrets/email-intake-username'
   functionStorageConnectionString: '${keyVault.properties.vaultUri}secrets/function-storage-connection-string'
   openaiApiKey: '${keyVault.properties.vaultUri}secrets/openai-api-key'
@@ -85,8 +89,12 @@ var keyVaultSecretUris = {
 var keyVaultReferences = {
   appStorageConnectionString: '@Microsoft.KeyVault(SecretUri=${keyVaultSecretUris.appStorageConnectionString})'
   databaseUrl: '@Microsoft.KeyVault(SecretUri=${keyVaultSecretUris.databaseUrl})'
+  emailIntakeAutoReplyFrom: '@Microsoft.KeyVault(SecretUri=${keyVaultSecretUris.emailIntakeAutoReplyFrom})'
   emailIntakeHost: '@Microsoft.KeyVault(SecretUri=${keyVaultSecretUris.emailIntakeHost})'
   emailIntakePassword: '@Microsoft.KeyVault(SecretUri=${keyVaultSecretUris.emailIntakePassword})'
+  emailIntakeSmtpHost: '@Microsoft.KeyVault(SecretUri=${keyVaultSecretUris.emailIntakeSmtpHost})'
+  emailIntakeSmtpPassword: '@Microsoft.KeyVault(SecretUri=${keyVaultSecretUris.emailIntakeSmtpPassword})'
+  emailIntakeSmtpUsername: '@Microsoft.KeyVault(SecretUri=${keyVaultSecretUris.emailIntakeSmtpUsername})'
   emailIntakeUsername: '@Microsoft.KeyVault(SecretUri=${keyVaultSecretUris.emailIntakeUsername})'
   functionStorageConnectionString: '@Microsoft.KeyVault(SecretUri=${keyVaultSecretUris.functionStorageConnectionString})'
   openaiApiKey: '@Microsoft.KeyVault(SecretUri=${keyVaultSecretUris.openaiApiKey})'
@@ -287,6 +295,7 @@ resource functionAppSettings 'Microsoft.Web/sites/config@2024-04-01' = {
     PORTFOLIO_LESSONS_TIMER_SCHEDULE: '0 15 */6 * * *'
     PORTFOLIO_LESSONS_PERIOD: 'fy26'
     EMAIL_INTAKE_AUTO_REPLY_ENABLED: 'false'
+    EMAIL_INTAKE_AUTO_REPLY_FROM: keyVaultReferences.emailIntakeAutoReplyFrom
     EMAIL_INTAKE_DEFAULT_DOCUMENT_TYPE: 'Email Attachment'
     EMAIL_INTAKE_DEFAULT_UPLOADER_ID: 'contractor-demo'
     EMAIL_INTAKE_DRY_RUN: 'false'
@@ -297,6 +306,9 @@ resource functionAppSettings 'Microsoft.Web/sites/config@2024-04-01' = {
     EMAIL_INTAKE_PASSWORD: keyVaultReferences.emailIntakePassword
     EMAIL_INTAKE_PROCESSED_MAILBOX: 'Processed'
     EMAIL_INTAKE_SEARCH: 'UNSEEN'
+    EMAIL_INTAKE_SMTP_HOST: keyVaultReferences.emailIntakeSmtpHost
+    EMAIL_INTAKE_SMTP_PASSWORD: keyVaultReferences.emailIntakeSmtpPassword
+    EMAIL_INTAKE_SMTP_USERNAME: keyVaultReferences.emailIntakeSmtpUsername
     EMAIL_INTAKE_STUB_BLOB_CONTAINER: appAssetsContainerName
     EMAIL_INTAKE_STUB_BLOB_ENABLED: 'true'
     EMAIL_INTAKE_STUB_BLOB_PREFIX: 'email-intake'

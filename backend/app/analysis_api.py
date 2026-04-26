@@ -3,7 +3,7 @@ from datetime import date, datetime
 import math
 import re
 import secrets
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -14,6 +14,7 @@ from app.ai.providers import get_ai_provider
 from app.analysis_orchestrator import (
     enqueue_per_contract_analysis_after_extraction,
     execute_enqueued_per_contract_analysis,
+    get_analysis_log,
     get_analysis_run,
     get_latest_analysis_run,
     run_cohort_analysis,
@@ -2703,3 +2704,64 @@ def _document_semantic_link_response(
         score=item.score,
         metadata=item.metadata_json or {},
     )
+
+
+# ─── Contract Analysis Log ────────────────────────────────────────────────────
+
+class AnalysisLogEntryResponse(BaseModel):
+    id: str
+    status: str
+    run_type: Optional[str] = None
+    created_at: Optional[datetime]
+    completed_at: Optional[datetime]
+    analyzed_doc_count: int
+    summary: Optional[str] = None
+    prior_run_id: Optional[str] = None
+    changes: Optional[List[Dict[str, Any]]] = None
+    investigated_contract_ids: Optional[List[str]] = None
+    insight_hypothesis_id: Optional[str] = None
+
+
+@router.get(
+    "/contracts/{contract_id}/analysis-log",
+    response_model=List[AnalysisLogEntryResponse],
+)
+def get_contract_analysis_log(
+    contract_id: str,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> List[AnalysisLogEntryResponse]:
+    require_contract_view(user, db, contract_id)
+    runs = get_analysis_log(db, contract_id)
+    entries = []
+    for run in runs:
+        result = run.get("result") or {}
+        if isinstance(result, str):
+            try:
+                import json as _json
+                result = _json.loads(result)
+            except Exception:
+                result = {}
+        result_dict = result if isinstance(result, dict) else {}
+        summary = result_dict.get("summary")
+        if not summary and isinstance(result_dict.get("submitted"), dict):
+            submitted = result_dict["submitted"]
+            title = submitted.get("title") or ""
+            narrative = submitted.get("narrative") or ""
+            summary = (f"{title}\n\n{narrative}" if title and narrative else (title or narrative)).strip() or None
+        entries.append(
+            AnalysisLogEntryResponse(
+                id=run["id"],
+                status=run.get("status", "unknown"),
+                run_type=run.get("run_type"),
+                created_at=run.get("created_at"),
+                completed_at=run.get("completed_at"),
+                analyzed_doc_count=len(run.get("analyzed_doc_ids") or []),
+                summary=summary,
+                prior_run_id=result_dict.get("prior_run_id"),
+                changes=result_dict.get("changes"),
+                investigated_contract_ids=result_dict.get("investigated_contract_ids"),
+                insight_hypothesis_id=result_dict.get("insight_hypothesis_id"),
+            )
+        )
+    return entries
