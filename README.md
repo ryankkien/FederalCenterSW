@@ -336,10 +336,11 @@ contract detail UI uses this lifecycle packet as its evidence spine for the Over
 Lifecycle, and contract-specific Insights tabs.
 
 Officials can stage a new production contract packet from the Admin page. The setup
-flow creates the contract record, uploads the source contract, CDRL exhibit,
-modification/baseline evidence, and first recurring report, then reads the lifecycle
+flow creates the contract record, accepts a drag-and-drop packet folder or manual
+source contract/CDRL/modification/baseline/status uploads, then reads the lifecycle
 endpoint to show readiness and evidence gaps before analysts move into the contract
-workspace.
+workspace. Folder uploads use filename hints only to set an initial document type; AI
+intake and processing still classify, match, and link the artifacts.
 
 Email or portal uploads that cannot match an existing contract remain unmatched unless
 processing can safely scaffold a new parent. Auto-scaffolding only runs for high
