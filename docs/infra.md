@@ -93,7 +93,9 @@ The repo includes four Azure-facing workflows:
   variables or secrets are missing, so code validation can still pass in repositories
   that have not completed Azure secret setup.
 - `.github/workflows/feature-extractor-deploy.yml` builds `feature_extractor/`, pushes
-  the `feature-extractor` image to ACR, and updates the dev Container App.
+  the `feature-extractor` image to ACR, and updates the dev Container App. It skips
+  Azure login and deploy steps when the GitHub OIDC variable is missing, and skips the
+  image push/update when the dev ACR or Container App has not been deployed yet.
 
 The repo also includes `.github/workflows/discord-pr-notifications.yml`, which posts
 pull request lifecycle events to Discord. Create a Discord channel such as

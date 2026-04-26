@@ -28,17 +28,55 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check deployment configuration
+        id: deploy_config
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+        run: |
+          missing=""
+          if [ -z "$AZURE_CLIENT_ID" ]; then
+            missing="$missing AZURE_CLIENT_ID"
+          fi
+
+          if [ -n "$missing" ]; then
+            echo "::notice::Skipping Feature Extractor deploy; missing GitHub configuration:$missing"
+            echo "deploy_ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy_ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Azure login
+        if: steps.deploy_config.outputs.deploy_ready == 'true'
         uses: azure/login@v2
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID || 'c821732f-0ded-4db0-96c8-cf2013d16974' }}
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Check Azure resources
+        id: azure_resources
+        if: steps.deploy_config.outputs.deploy_ready == 'true'
+        run: |
+          if ! az acr show --name "$ACR_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --only-show-errors >/dev/null; then
+            echo "::notice::Skipping Feature Extractor deploy; ACR $ACR_NAME is not available."
+            echo "deploy_ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! az containerapp show --name "$ACA_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --only-show-errors >/dev/null; then
+            echo "::notice::Skipping Feature Extractor deploy; Container App $ACA_APP_NAME is not available."
+            echo "deploy_ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "deploy_ready=true" >> "$GITHUB_OUTPUT"
+
       - name: Log in to ACR
+        if: steps.deploy_config.outputs.deploy_ready == 'true' && steps.azure_resources.outputs.deploy_ready == 'true'
         run: az acr login --name ${{ env.ACR_NAME }}
 
       - name: Build and push image
+        if: steps.deploy_config.outputs.deploy_ready == 'true' && steps.azure_resources.outputs.deploy_ready == 'true'
         run: |
           IMAGE="${{ env.ACR_LOGIN_SERVER }}/feature-extractor"
           docker build -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" feature_extractor/
@@ -46,6 +84,7 @@ jobs:
           docker push "$IMAGE:latest"
 
       - name: Deploy to Container App
+        if: steps.deploy_config.outputs.deploy_ready == 'true' && steps.azure_resources.outputs.deploy_ready == 'true'
         run: |
           az containerapp update \
             --name "$ACA_APP_NAME" \
