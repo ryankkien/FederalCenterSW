@@ -50,7 +50,10 @@ def drain_queued_processing_jobs(
     failed = 0
     storage_adapter = storage or get_blob_storage()
     provider = ai_provider or get_ai_provider()
-    worker_count = max(1, max_workers or get_document_processing_max_workers())
+    worker_count = _worker_count_for_session_factory(
+        max_workers or get_document_processing_max_workers(),
+        session_factory,
+    )
 
     if worker_count == 1:
         with session_factory() as session:
@@ -105,6 +108,20 @@ def drain_queued_processing_jobs(
         waiting_for_text=waiting_for_text,
         queued_remaining=queued_remaining,
     )
+
+
+def _worker_count_for_session_factory(requested_workers: int, session_factory: sessionmaker) -> int:
+    worker_count = max(1, requested_workers)
+    if worker_count > 1 and _uses_sqlite(session_factory):
+        return 1
+    return worker_count
+
+
+def _uses_sqlite(session_factory: sessionmaker) -> bool:
+    bind = getattr(session_factory, "kw", {}).get("bind")
+    url = getattr(bind, "url", None)
+    drivername = getattr(url, "drivername", "")
+    return str(drivername).startswith("sqlite")
 
 
 def _process_one_in_new_session(

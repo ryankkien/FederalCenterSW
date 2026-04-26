@@ -290,13 +290,17 @@ class OpenAIProvider:
                 "Return JSON with document_kind, confidence from 0 to 1, rationale, and optional "
                 "modification_kind. document_kind must be one of: source_contract, task_order, "
                 "modification, weekly_report, monthly_report, status_report, ipmdar_pnr, "
-                "ipmdar_cpd_json, ipmdar_spd_json, cpars, gao_oig_report, policy_or_regulation, "
+                "ipmdar_cpd_json, ipmdar_spd_json, cdrl, cpars, gao_oig_report, policy_or_regulation, "
                 "email_context, or other. modification_kind, when relevant, must be one of: "
                 "funding_only, pop_change, scope_change, labor_change, cdrl_change, clause_update, "
                 "equitable_adjustment, administrative, or unclear. Prefer IPMDAR kinds for "
                 "Integrated Program Management Data and Analysis Report documents, CPARS for "
-                "Contractor Performance Assessment Report documents, and source_contract for "
-                "solicitations, RFPs, PWS, SOW, or awarded contract text."
+                "Contractor Performance Assessment Report documents, cdrl for CDRL exhibits, "
+                "DD Form 1423 content, deliverable schedules, Exhibit A CDRLs, DID/reporting "
+                "deliverable matrices, and source_contract for solicitations, RFPs, PWS, SOW, "
+                "or awarded contract text. Use other when the document does not fit one of "
+                "these categories; do not force ambiguous administrative material into "
+                "source_contract."
             ),
             {
                 "filename": payload.get("filename"),
