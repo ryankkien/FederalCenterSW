@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import CurrentUser, get_current_user
-from app.authz import can_upload_to_contract, require_unmatched_admin
+from app.authz import can_upload_to_contract, can_view_contract, require_unmatched_admin
 from app.ai.providers import get_ai_provider
 from app.blob_storage import BlobStorage, get_blob_storage
 from app.config import get_ai_inline_processing_enabled
@@ -68,6 +68,12 @@ class MatchDecisionRequest(BaseModel):
     contract_id: Optional[str] = Field(default=None, max_length=36)
     decision_status: str = Field(default="matched", max_length=40)
     rationale: Optional[str] = Field(default=None, max_length=2000)
+
+
+class MatchDecisionResponse(BaseModel):
+    id: str
+    document_id: str
+    contract_id: Optional[str] = None
 
 
 class ProcessingJobResponse(BaseModel):
@@ -305,16 +311,23 @@ def get_document_detail(
     )
 
 
-@router.post("/{document_id}/match-decisions")
+@router.post("/{document_id}/match-decisions", response_model=MatchDecisionResponse)
 def create_match_decision(
     document_id: str,
     payload: MatchDecisionRequest,
     user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> Dict[str, object]:
+) -> MatchDecisionResponse:
     require_unmatched_admin(user)
     document = _get_authorized_document(document_id, user, db)
-    contract = db.get(Contract, payload.contract_id) if payload.contract_id else None
+    contract: Optional[Contract] = None
+    if payload.contract_id:
+        contract = db.get(Contract, payload.contract_id)
+        if contract is None or not can_view_contract(user, db, contract.id):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Contract not found",
+            )
     document.contract_id = contract.id if contract is not None else None
     document.match_status = payload.decision_status
     decision = DocumentMatchDecision(
@@ -331,7 +344,11 @@ def create_match_decision(
     )
     db.add(decision)
     db.commit()
-    return {"id": decision.id, "document_id": document.id, "contract_id": document.contract_id}
+    return MatchDecisionResponse(
+        id=decision.id,
+        document_id=document.id,
+        contract_id=document.contract_id,
+    )
 
 
 @router.post(

@@ -66,22 +66,37 @@ def load_text_json(
     document_id: Optional[str] = None,
     text_blob_path: Optional[str] = None,
 ) -> Tuple[Optional[TextJsonPayload], Optional[str]]:
-    path = text_blob_path or _text_blob_path(document_id)
-    try:
-        data = storage.download_bytes(path)
-    except Exception as error:
-        logger.warning(
-            "Failed to load text artifact",
-            extra={"document_upload_id": document_id, "text_blob_path": path, "error": str(error)},
-        )
-        return None, str(error)
+    primary_path = text_blob_path or _text_blob_path(document_id)
+    candidate_paths = [primary_path]
+    if document_id:
+        legacy_path = f"documents/{document_id}/ocr.json"
+        if legacy_path not in candidate_paths:
+            candidate_paths.append(legacy_path)
+
+    data: Optional[bytes] = None
+    last_error: Optional[str] = None
+    used_path = primary_path
+    for path in candidate_paths:
+        try:
+            data = storage.download_bytes(path)
+            used_path = path
+            break
+        except Exception as error:
+            last_error = str(error)
+            logger.warning(
+                "Failed to load text artifact",
+                extra={"document_upload_id": document_id, "text_blob_path": path, "error": last_error},
+            )
+
+    if data is None:
+        return None, last_error
 
     try:
         payload = json.loads(data.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         logger.warning(
             "Failed to parse text artifact",
-            extra={"document_upload_id": document_id, "text_blob_path": path, "error": str(error)},
+            extra={"document_upload_id": document_id, "text_blob_path": used_path, "error": str(error)},
         )
         return None, str(error)
     if not isinstance(payload, dict):

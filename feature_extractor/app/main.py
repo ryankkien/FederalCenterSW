@@ -25,6 +25,7 @@ instrument_fastapi(app)
 
 class SummaryRequest(BaseModel):
     doc_id: str
+    contract_id: str | None = None
 
 
 class ClassificationResult(BaseModel):
@@ -97,7 +98,7 @@ def summarize(req: SummaryRequest):
 
             # 3. Chunking
             try:
-                chunk_list = chunker.chunk_and_store(conn, req.doc_id, pages)
+                chunk_list = chunker.chunk_and_store(conn, req.doc_id, pages, req.contract_id)
                 log_event(conn, req.doc_id, "feature_extractor.chunking", "success")
             except Exception as exc:
                 log_event(conn, req.doc_id, "feature_extractor.chunking", "fail")

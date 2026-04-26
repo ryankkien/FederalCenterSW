@@ -177,6 +177,23 @@ class SimilarContractResponse(BaseModel):
     link_type: str
     summary: str
     score: Optional[float] = None
+
+
+class ContractEvidenceResponse(BaseModel):
+    contract_id: str
+    findings: List[RegressionFindingResponse] = []
+    hypotheses: List[HypothesisResponse] = []
+    external_sources: List[ExternalSourceResponse] = []
+
+
+class ContractAnalysisRunResponse(BaseModel):
+    id: str
+    document_id: Optional[str] = None
+    status: str
+    run_type: str
+    model_name: Optional[str] = None
+    started_at: datetime
+    completed_at: Optional[datetime] = None
     metadata: Dict[str, object] = {}
 
 
@@ -607,12 +624,12 @@ def update_hypothesis_status(
     return _hypothesis_response(db, hypothesis)
 
 
-@router.get("/contracts/{contract_id}/evidence")
+@router.get("/contracts/{contract_id}/evidence", response_model=ContractEvidenceResponse)
 def list_contract_evidence(
     contract_id: str,
     user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> Dict[str, object]:
+) -> ContractEvidenceResponse:
     require_contract_view(user, db, contract_id)
     findings = list(
         db.scalars(
@@ -635,20 +652,23 @@ def list_contract_evidence(
             .order_by(ExternalSourceRef.created_at.desc())
         ).all()
     )
-    return {
-        "contract_id": contract_id,
-        "findings": [_finding_response(row).model_dump() for row in findings],
-        "hypotheses": [_hypothesis_response(db, row).model_dump() for row in hypotheses],
-        "external_sources": [_external_source_response(row).model_dump() for row in external_refs],
-    }
+    return ContractEvidenceResponse(
+        contract_id=contract_id,
+        findings=[_finding_response(row) for row in findings],
+        hypotheses=[_hypothesis_response(db, row) for row in hypotheses],
+        external_sources=[_external_source_response(row) for row in external_refs],
+    )
 
 
-@router.get("/contracts/{contract_id}/analysis-runs")
+@router.get(
+    "/contracts/{contract_id}/analysis-runs",
+    response_model=List[ContractAnalysisRunResponse],
+)
 def list_contract_analysis_runs(
     contract_id: str,
     user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> List[Dict[str, object]]:
+) -> List[ContractAnalysisRunResponse]:
     require_contract_view(user, db, contract_id)
     rows = list(
         db.scalars(
@@ -658,15 +678,15 @@ def list_contract_analysis_runs(
         ).all()
     )
     return [
-        {
-            "id": row.id,
-            "document_id": row.document_upload_id,
-            "status": row.status,
-            "run_type": row.run_type,
-            "model_name": row.model_name,
-            "started_at": row.started_at,
-            "completed_at": row.completed_at,
-        }
+        ContractAnalysisRunResponse(
+            id=row.id,
+            document_id=row.document_upload_id,
+            status=row.status,
+            run_type=row.run_type,
+            model_name=row.model_name,
+            started_at=row.started_at,
+            completed_at=row.completed_at,
+        )
         for row in rows
     ]
 
