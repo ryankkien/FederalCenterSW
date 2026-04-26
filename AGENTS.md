@@ -268,7 +268,9 @@ bun run infra:deploy
   `backend/data/corpus/navy-service-v1/` from the WWR, AGOR, and Natalie fixture
   families. Treat `real_fixture` downloaded anchors separately from
   `synthetic_fixture` reports, CPARS-style narratives, IPMDAR-style JSON, decision
-  logs, and cross-contract lesson notes.
+  logs, and cross-contract lesson notes. Each contract has one CPARS-style
+  `cpars_evaluation` fixture for extraction testing; these generated records are
+  not real CPARS data.
 - Optional knowledge sources use `SAM_API_KEY`, `REGULATIONS_API_KEY`, and
   `CPARS_IMPORT_DIR`; absent optional sources should be logged as unavailable rather
   than failing ingestion. CPARS data must come from authorized exports/imports, not

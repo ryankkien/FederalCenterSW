@@ -131,7 +131,9 @@ Current use with the app:
   `manifest.json`, `extraction_packet.jsonl`, and generated synthetic markdown/JSON
   source documents. The downloaded files under `testdocs/` are labeled
   `real_fixture`; generated reports, CPARS-style narratives, IPMDAR-style JSON, and
-  lesson notes are labeled `synthetic_fixture`.
+  lesson notes are labeled `synthetic_fixture`. Each contract in the generated
+  corpus has one CPARS-style synthetic narrative marked `cpars_evaluation`; these
+  are model-assisted fixture records for extraction testing, not real CPARS data.
 
 Next product step:
 

@@ -218,7 +218,8 @@ bun run corpus:build-synthetic
 The generated corpus lives under ignored `backend/data/corpus/navy-service-v1/` and
 keeps `real_fixture` downloaded anchors separate from `synthetic_fixture` reports,
 CPARS-style narratives, IPMDAR-style JSON, decision logs, and cross-contract lesson
-notes.
+notes. Each contract has one CPARS-style `cpars_evaluation` fixture for extraction
+testing; these generated records are not real CPARS data.
 
 ## Auth Modes
 
