@@ -239,6 +239,52 @@ class CparsRatingResponse(BaseModel):
     source: str
 
 
+class PrimitiveCitationResponse(BaseModel):
+    primitive_id: str
+    primitive_type: str
+    document_id: Optional[str] = None
+    label: Optional[str] = None
+    excerpt: Optional[str] = None
+
+
+class AnalystClaimResponse(BaseModel):
+    title: str
+    finding: str
+    citations: List[PrimitiveCitationResponse] = []
+    confidence: Optional[float] = None
+
+
+class PerformanceAxisResponse(BaseModel):
+    axis: str
+    status: str
+    target_value: Dict[str, object] = {}
+    cohort_distribution: Optional[Dict[str, Optional[float]]] = None
+    target_percentile: Optional[float] = None
+    low_confidence: bool = False
+    rationale: str
+    citations: List[PrimitiveCitationResponse] = []
+
+
+class PredictedCparsFactorResponse(BaseModel):
+    factor: str
+    rating: Optional[str] = None
+    not_extractable: bool = False
+    rationale: str
+    citations: List[PrimitiveCitationResponse] = []
+
+
+class ContractAnalystBriefResponse(BaseModel):
+    problem_statement: str
+    summary: str
+    outcome_context: List[AnalystClaimResponse] = []
+    recurring_vs_one_off: List[AnalystClaimResponse] = []
+    pre_degradation_signals: List[AnalystClaimResponse] = []
+    success_or_recovery_signals: List[AnalystClaimResponse] = []
+    execution_assessment: List[AnalystClaimResponse] = []
+    government_vs_contractor: List[AnalystClaimResponse] = []
+    limitations: List[str] = []
+
+
 class ContractTimelineAnalysisResponse(BaseModel):
     contract_id: str
     contract_title: str
@@ -249,6 +295,9 @@ class ContractTimelineAnalysisResponse(BaseModel):
     positive_signals: List[TimelineSignalResponse]
     execution_patterns: List[TimelineSignalResponse]
     cpars_ratings: List[CparsRatingResponse]
+    analyst_brief: Optional[ContractAnalystBriefResponse] = None
+    axes: List[PerformanceAxisResponse] = []
+    cpars_predicted: Dict[str, PredictedCparsFactorResponse] = {}
     limitations: List[str] = []
 
 
@@ -313,7 +362,7 @@ def get_single_contract_analysis(
 ) -> ContractTimelineAnalysisResponse:
     _require_official_analysis(user)
     require_contract_view(user, db, contract_id)
-    return _contract_timeline_analysis(db, contract_id)
+    return _contract_timeline_analysis(db, contract_id, visible_contract_ids(user, db))
 
 
 @router.get("/analysis/cohort", response_model=CohortAnalysisResponse)
@@ -769,7 +818,11 @@ def get_cohort_analysis_run(
     )
 
 
-def _contract_timeline_analysis(db: Session, contract_id: str) -> ContractTimelineAnalysisResponse:
+def _contract_timeline_analysis(
+    db: Session,
+    contract_id: str,
+    cohort_ids: Optional[Sequence[str]] = None,
+) -> ContractTimelineAnalysisResponse:
     contract = db.get(Contract, contract_id)
     documents = _timeline_documents(db, contract_id)
     signals_by_document = _timeline_signals_by_document(db, contract_id)
@@ -790,6 +843,11 @@ def _contract_timeline_analysis(db: Session, contract_id: str) -> ContractTimeli
     all_signals = [signal for report in timeline for signal in report.signals]
     recurring, one_off = _issue_patterns(timeline)
     cpars_ratings = _cpars_ratings(db, contract_id)
+    cohort_scope = list(dict.fromkeys(cohort_ids or [contract_id]))
+    if contract_id not in cohort_scope:
+        cohort_scope.insert(0, contract_id)
+    axes = _contract_axes(db, contract_id, timeline, cohort_scope)
+    cpars_predicted = _predicted_cpars_from_axes(axes)
     limitations = []
     if not timeline:
         limitations.append("No child reports are linked to this contract yet.")
@@ -808,6 +866,17 @@ def _contract_timeline_analysis(db: Session, contract_id: str) -> ContractTimeli
         positive_signals=[signal for signal in all_signals if signal.polarity == "positive"][:20],
         execution_patterns=[signal for signal in all_signals if signal.category == "execution_pattern"][:20],
         cpars_ratings=cpars_ratings,
+        analyst_brief=_contract_analyst_brief(
+            contract,
+            timeline,
+            recurring,
+            one_off,
+            cpars_ratings,
+            axes,
+            cpars_predicted,
+        ),
+        axes=axes,
+        cpars_predicted=cpars_predicted,
         limitations=limitations,
     )
 
@@ -815,6 +884,478 @@ def _contract_timeline_analysis(db: Session, contract_id: str) -> ContractTimeli
 def _require_official_analysis(user: CurrentUser) -> None:
     if user.role != "official":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Official access required")
+
+
+def _contract_analyst_brief(
+    contract: Optional[Contract],
+    timeline: Sequence[TimelineReportResponse],
+    recurring: Sequence[ContractPatternResponse],
+    one_off: Sequence[ContractPatternResponse],
+    cpars_ratings: Sequence[CparsRatingResponse],
+    axes: Sequence[PerformanceAxisResponse],
+    cpars_predicted: Dict[str, PredictedCparsFactorResponse],
+) -> ContractAnalystBriefResponse:
+    all_signals = [signal for report in timeline for signal in report.signals]
+    weak_cpars = [item for item in cpars_ratings if _is_weak_cpars_rating(item.rating)]
+    negative_signals = [signal for signal in all_signals if signal.polarity == "negative"]
+    positive_signals = [signal for signal in all_signals if signal.polarity == "positive"]
+    title = contract.title if contract is not None else "Selected contract"
+    problem_statement = (
+        "Explain the performance outcome using cited primitive records from the contract timeline and comparable cohort. "
+        "Do not infer contract structure or CPARS outcomes when the required primitives are absent."
+    )
+
+    outcome_context: List[AnalystClaimResponse] = []
+    if weak_cpars:
+        outcome_context.append(
+            AnalystClaimResponse(
+                title="Imported CPARS outcome",
+                finding=(
+                    f"{title} has weak imported CPARS rating(s): "
+                    f"{', '.join(f'{item.label} {item.rating}' for item in weak_cpars[:4])}."
+                ),
+                citations=[
+                    PrimitiveCitationResponse(
+                        primitive_id=f"cpars:{item.label}:{item.period_label or item.source}",
+                        primitive_type="cpars_rating",
+                        label=item.label,
+                        excerpt=item.summary,
+                    )
+                    for item in weak_cpars[:4]
+                ],
+                confidence=0.8,
+            )
+        )
+    else:
+        flagged_axis = next((axis for axis in axes if axis.axis in {"cost_performance", "schedule_performance"} and axis.status == "measured"), None)
+        if flagged_axis is not None:
+            outcome_context.append(
+                AnalystClaimResponse(
+                    title="Performance outcome proxy",
+                    finding=(
+                        f"No actual CPARS rating is imported, so the analyst layer uses measured "
+                        f"{flagged_axis.axis.replace('_', ' ')} primitives as the outcome proxy."
+                    ),
+                    citations=flagged_axis.citations[:4],
+                    confidence=0.62,
+                )
+            )
+
+    recurring_claims = [
+        AnalystClaimResponse(
+            title=f"Recurring issue: {pattern.title}",
+            finding=(
+                f"{pattern.title} appears across {pattern.document_count} report period(s), "
+                f"which makes it more likely to be a timeline pattern than a one-off."
+            ),
+            citations=_citations_for_pattern(timeline, pattern)[:5],
+            confidence=0.7,
+        )
+        for pattern in recurring[:5]
+    ]
+    if one_off:
+        recurring_claims.append(
+            AnalystClaimResponse(
+                title="One-off issues",
+                finding=(
+                    f"{len(one_off)} issue family/families appear in a single report period and should be treated as one-off until repeated."
+                ),
+                citations=_citations_for_pattern(timeline, one_off[0])[:3],
+                confidence=0.58,
+            )
+        )
+
+    early_warnings = _early_warning_signals(timeline, cpars_ratings)
+    pre_degradation_claims = [
+        AnalystClaimResponse(
+            title=f"Pre-degradation signal: {signal.label}",
+            finding=f"{signal.label} was present before the first detected degradation marker: {signal.summary}",
+            citations=[_citation_for_signal(_report_for_signal(timeline, signal), signal)],
+            confidence=signal.confidence,
+        )
+        for signal in early_warnings[:5]
+        if _report_for_signal(timeline, signal) is not None
+    ]
+
+    success_claims = [
+        AnalystClaimResponse(
+            title=f"Positive signal: {signal.label}",
+            finding=f"{signal.label} appears as a positive or recovery signal: {signal.summary}",
+            citations=[_citation_for_signal(_report_for_signal(timeline, signal), signal)],
+            confidence=signal.confidence,
+        )
+        for signal in positive_signals[:5]
+        if _report_for_signal(timeline, signal) is not None
+    ]
+
+    execution_claims = []
+    for label, signals in _signals_by_label([signal for signal in all_signals if signal.category == "execution_pattern"]).items():
+        polarities = Counter(signal.polarity for signal in signals)
+        first = signals[0]
+        report = _report_for_signal(timeline, first)
+        execution_claims.append(
+            AnalystClaimResponse(
+                title=f"Execution pattern: {label}",
+                finding=(
+                    f"{label} appears in {len({signal.document_id for signal in signals if signal.document_id})} report period(s) "
+                    f"with polarity mix {dict(polarities)}. This describes how work was being executed, not just whether outcomes were good or bad."
+                ),
+                citations=[_citation_for_signal(report, signal) for signal in signals[:4] if _report_for_signal(timeline, signal) is not None],
+                confidence=0.64,
+            )
+        )
+
+    responsible_party_counts = Counter(signal.responsible_party or "unclear" for signal in negative_signals)
+    party_claims = []
+    if responsible_party_counts:
+        party, count = responsible_party_counts.most_common(1)[0]
+        party_signals = [signal for signal in negative_signals if (signal.responsible_party or "unclear") == party]
+        party_claims.append(
+            AnalystClaimResponse(
+                title="Responsibility pattern",
+                finding=f"Negative report signals most often point to {party} as the responsible-party bucket ({count} signal(s)).",
+                citations=[
+                    _citation_for_signal(_report_for_signal(timeline, signal), signal)
+                    for signal in party_signals[:5]
+                    if _report_for_signal(timeline, signal) is not None
+                ],
+                confidence=0.6,
+            )
+        )
+
+    measured_axes = [axis for axis in axes if axis.status == "measured"]
+    predicted = [item for item in cpars_predicted.values() if not item.not_extractable and item.rating]
+    summary_parts = []
+    if recurring_claims and recurring_claims[0].citations:
+        summary_parts.append(f"{recurring_claims[0].finding} [{recurring_claims[0].citations[0].primitive_id}]")
+    if measured_axes and measured_axes[0].citations:
+        summary_parts.append(f"{measured_axes[0].rationale} [{measured_axes[0].citations[0].primitive_id}]")
+    if predicted and predicted[0].citations:
+        summary_parts.append(f"Predicted {predicted[0].factor} CPARS is {predicted[0].rating} because {predicted[0].rationale} [{predicted[0].citations[0].primitive_id}]")
+    summary = " ".join(summary_parts) or "No cited analyst summary is available until report primitives are extracted."
+
+    limitations = []
+    if not cpars_ratings:
+        limitations.append("Actual CPARS ratings are absent; predicted CPARS mappings are labeled separately and only use extracted primitives.")
+    if not measured_axes:
+        limitations.append("No measurement axis has enough primitives for a measured finding.")
+    if len(timeline) < 3:
+        limitations.append("Timeline has fewer than three report periods, so recurring-vs-one-off analysis is weak.")
+
+    return ContractAnalystBriefResponse(
+        problem_statement=problem_statement,
+        summary=_trim(summary, 1200),
+        outcome_context=outcome_context,
+        recurring_vs_one_off=recurring_claims,
+        pre_degradation_signals=pre_degradation_claims,
+        success_or_recovery_signals=success_claims,
+        execution_assessment=execution_claims[:6],
+        government_vs_contractor=party_claims,
+        limitations=limitations,
+    )
+
+
+def _contract_axes(
+    db: Session,
+    contract_id: str,
+    timeline: Sequence[TimelineReportResponse],
+    cohort_ids: Sequence[str],
+) -> List[PerformanceAxisResponse]:
+    metrics_by_contract = {item: _axis_metrics_for_contract(db, item) for item in cohort_ids}
+    target_metrics = metrics_by_contract.get(contract_id) or _axis_metrics_for_timeline(timeline)
+    cohort_n = len(metrics_by_contract)
+    low_confidence = cohort_n < 20
+    return [
+        _schedule_axis(target_metrics, metrics_by_contract, low_confidence),
+        _cost_axis(target_metrics, metrics_by_contract, low_confidence),
+        _scope_axis(target_metrics, metrics_by_contract, low_confidence),
+        _execution_risk_axis(target_metrics, metrics_by_contract, low_confidence),
+        _forecasting_axis(target_metrics, metrics_by_contract, low_confidence),
+        _quality_axis(target_metrics, metrics_by_contract, low_confidence),
+        _small_business_axis(),
+        _compliance_axis(target_metrics, metrics_by_contract, low_confidence),
+        _closeout_axis(),
+    ]
+
+
+def _axis_metrics_for_contract(db: Session, contract_id: str) -> Dict[str, object]:
+    documents = _timeline_documents(db, contract_id)
+    signals_by_document = _timeline_signals_by_document(db, contract_id)
+    timeline = [
+        TimelineReportResponse(
+            document_id=document.id,
+            title=document.title,
+            document_kind=_display_document_kind(document),
+            period_label=_period_label(db, document),
+            report_period_start=str(_report_period(db, document)[0]) if _report_period(db, document)[0] else None,
+            report_period_end=str(_report_period(db, document)[1]) if _report_period(db, document)[1] else None,
+            created_at=document.created_at,
+            processing_status=document.processing_status,
+            signals=signals_by_document.get(document.id, []),
+        )
+        for document in documents
+    ]
+    return _axis_metrics_for_timeline(timeline)
+
+
+def _axis_metrics_for_timeline(timeline: Sequence[TimelineReportResponse]) -> Dict[str, object]:
+    signals = [signal for report in timeline for signal in report.signals]
+    negative = [signal for signal in signals if signal.polarity == "negative"]
+    positive = [signal for signal in signals if signal.polarity == "positive"]
+    eac_values = _eac_values(signals)
+    return {
+        "timeline": timeline,
+        "signals": signals,
+        "negative_signals": negative,
+        "positive_signals": positive,
+        "schedule_signals": [
+            signal
+            for signal in negative
+            if signal.category != "execution_pattern"
+            and _contains_any(_signal_text(signal), ("schedule", "slip", "late", "critical path", "on-time", "on time"))
+        ],
+        "cost_signals": [
+            signal
+            for signal in signals
+            if signal.category != "execution_pattern"
+            and _contains_any(_signal_text(signal), ("cost", "eac", "cv ", "variance", "burn", "rea", "unbudgeted"))
+        ],
+        "scope_signals": [signal for signal in signals if _contains_any(_signal_text(signal), ("scope", "modification", "out-of-scope", "unauthorized", "superseded direction"))],
+        "execution_signals": [signal for signal in signals if signal.category == "execution_pattern"],
+        "quality_negative": [signal for signal in negative if _contains_any(_signal_text(signal), ("quality", "qc", "defect", "rework", "rejection"))],
+        "quality_positive": [signal for signal in positive if _contains_any(_signal_text(signal), ("quality", "qc", "accepted", "acceptance", "recovered", "approved"))],
+        "compliance_signals": [signal for signal in signals if _contains_any(_signal_text(signal), ("compliance", "regulatory", "corrective action", "incident"))],
+        "eac_values": eac_values,
+        "citations": [_citation_for_signal(report, signal) for report in timeline for signal in report.signals],
+    }
+
+
+def _schedule_axis(
+    target: Dict[str, object],
+    cohort: Dict[str, Dict[str, object]],
+    low_confidence: bool,
+) -> PerformanceAxisResponse:
+    signals = target["schedule_signals"]
+    if not signals:
+        return _not_extractable_axis("schedule_performance", "No deliverable-level schedule primitive or schedule regression signal is extracted.")
+    values = {contract_id: float(len(metrics["schedule_signals"])) for contract_id, metrics in cohort.items()}
+    return _measured_axis(
+        "schedule_performance",
+        {"schedule_signal_count": len(signals), "time_to_first_schedule_signal": _first_period_for_signals(target["timeline"], signals)},
+        "Schedule performance is measured from extracted schedule-delay/regression signals; total slip and on-time rate are not extractable without deliverable primitives.",
+        [_citation_for_signal(_report_for_signal(target["timeline"], signal), signal) for signal in signals[:6] if _report_for_signal(target["timeline"], signal)],
+        values,
+        float(len(signals)),
+        low_confidence,
+    )
+
+
+def _cost_axis(target: Dict[str, object], cohort: Dict[str, Dict[str, object]], low_confidence: bool) -> PerformanceAxisResponse:
+    signals = target["cost_signals"]
+    eac_values = target["eac_values"]
+    if not signals and not eac_values:
+        return _not_extractable_axis("cost_performance", "No financial primitive, EAC value, or cost regression signal is extracted.")
+    target_value: Dict[str, object] = {"cost_signal_count": len(signals)}
+    if eac_values:
+        target_value["latest_eac"] = eac_values[-1]
+    if len(eac_values) >= 2:
+        target_value["eac_drift"] = eac_values[-1] - eac_values[0]
+    values = {contract_id: float(len(metrics["cost_signals"])) for contract_id, metrics in cohort.items()}
+    return _measured_axis(
+        "cost_performance",
+        target_value,
+        "Cost performance is measured from extracted cost variance, EAC, REA, or unbudgeted-effort primitives.",
+        [_citation_for_signal(_report_for_signal(target["timeline"], signal), signal) for signal in signals[:6] if _report_for_signal(target["timeline"], signal)],
+        values,
+        float(len(signals)),
+        low_confidence,
+    )
+
+
+def _scope_axis(target: Dict[str, object], cohort: Dict[str, Dict[str, object]], low_confidence: bool) -> PerformanceAxisResponse:
+    signals = target["scope_signals"]
+    if not signals:
+        return _not_extractable_axis("scope_stability", "No modification, scope drift, or direction-change primitive is extracted.")
+    values = {contract_id: float(len(metrics["scope_signals"])) for contract_id, metrics in cohort.items()}
+    return _measured_axis(
+        "scope_stability",
+        {"scope_or_mod_signal_count": len(signals), "time_to_first_scope_signal": _first_period_for_signals(target["timeline"], signals)},
+        "Scope stability is measured from extracted scope, modification, unauthorized-work, or superseded-direction primitives.",
+        [_citation_for_signal(_report_for_signal(target["timeline"], signal), signal) for signal in signals[:6] if _report_for_signal(target["timeline"], signal)],
+        values,
+        float(len(signals)),
+        low_confidence,
+    )
+
+
+def _execution_risk_axis(target: Dict[str, object], cohort: Dict[str, Dict[str, object]], low_confidence: bool) -> PerformanceAxisResponse:
+    negative = target["negative_signals"]
+    if not target["signals"]:
+        return _not_extractable_axis("execution_and_risk", "No issue primitive or report signal is extracted.")
+    values = {contract_id: float(len(metrics["negative_signals"])) for contract_id, metrics in cohort.items()}
+    recurrence_count = len(_issue_patterns(target["timeline"])[0])
+    party_counts = Counter(signal.responsible_party or "unclear" for signal in negative)
+    return _measured_axis(
+        "execution_and_risk",
+        {
+            "issue_signal_count": len(negative),
+            "recurring_issue_family_count": recurrence_count,
+            "responsible_party_distribution": dict(party_counts),
+        },
+        "Execution and risk is measured from issue signals, recurrence, and responsible-party labels extracted from report primitives.",
+        [_citation_for_signal(_report_for_signal(target["timeline"], signal), signal) for signal in negative[:6] if _report_for_signal(target["timeline"], signal)],
+        values,
+        float(len(negative)),
+        low_confidence,
+    )
+
+
+def _forecasting_axis(target: Dict[str, object], cohort: Dict[str, Dict[str, object]], low_confidence: bool) -> PerformanceAxisResponse:
+    eac_values = target["eac_values"]
+    if len(eac_values) < 2:
+        return _not_extractable_axis("forecasting_accuracy", "EAC drift requires at least two extracted EAC values; issue-to-impact lag and percent-complete accuracy are not extractable.")
+    values = {
+        contract_id: float(metrics["eac_values"][-1] - metrics["eac_values"][0])
+        for contract_id, metrics in cohort.items()
+        if len(metrics["eac_values"]) >= 2
+    }
+    return _measured_axis(
+        "forecasting_accuracy",
+        {"eac_drift": eac_values[-1] - eac_values[0], "eac_observation_count": len(eac_values)},
+        "Forecasting accuracy is measured only from extracted EAC drift; other forecasting primitives are unavailable.",
+        [_citation_for_signal(_report_for_signal(target["timeline"], signal), signal) for signal in target["cost_signals"][:6] if _report_for_signal(target["timeline"], signal)],
+        values,
+        float(eac_values[-1] - eac_values[0]),
+        low_confidence,
+    )
+
+
+def _quality_axis(target: Dict[str, object], cohort: Dict[str, Dict[str, object]], low_confidence: bool) -> PerformanceAxisResponse:
+    negative = target["quality_negative"]
+    positive = target["quality_positive"]
+    if not negative and not positive:
+        return _not_extractable_axis("quality", "No defect, rework, rejection, acceptance, or quality-control primitive is extracted.")
+    values = {contract_id: float(len(metrics["quality_negative"])) for contract_id, metrics in cohort.items()}
+    citations = [
+        _citation_for_signal(_report_for_signal(target["timeline"], signal), signal)
+        for signal in (negative + positive)[:6]
+        if _report_for_signal(target["timeline"], signal)
+    ]
+    return _measured_axis(
+        "quality",
+        {"defect_or_rework_signal_count": len(negative), "quality_positive_signal_count": len(positive)},
+        "Quality is measured from extracted quality-control, defect, rework, rejection, acceptance, or recovery primitives.",
+        citations,
+        values,
+        float(len(negative)),
+        low_confidence,
+    )
+
+
+def _small_business_axis() -> PerformanceAxisResponse:
+    return PerformanceAxisResponse(
+        axis="small_business_subcontracting",
+        status="not_applicable",
+        rationale="No small-business subcontracting threshold, goal, plan, or attainment primitive is extracted.",
+        low_confidence=True,
+    )
+
+
+def _compliance_axis(target: Dict[str, object], cohort: Dict[str, Dict[str, object]], low_confidence: bool) -> PerformanceAxisResponse:
+    signals = target["compliance_signals"]
+    if not signals:
+        return _not_extractable_axis("regulatory_compliance", "No compliance finding, corrective action, or incident primitive is extracted.")
+    values = {contract_id: float(len(metrics["compliance_signals"])) for contract_id, metrics in cohort.items()}
+    return _measured_axis(
+        "regulatory_compliance",
+        {"compliance_signal_count": len(signals)},
+        "Regulatory compliance is measured from extracted compliance findings, corrective actions, or incidents.",
+        [_citation_for_signal(_report_for_signal(target["timeline"], signal), signal) for signal in signals[:6] if _report_for_signal(target["timeline"], signal)],
+        values,
+        float(len(signals)),
+        low_confidence,
+    )
+
+
+def _closeout_axis() -> PerformanceAxisResponse:
+    return _not_extractable_axis("closeout", "No closeout, delivered-scope, descope, duration, or disputed-amount primitive is extracted.")
+
+
+def _not_extractable_axis(axis: str, rationale: str) -> PerformanceAxisResponse:
+    return PerformanceAxisResponse(axis=axis, status="not_extractable", rationale=rationale, low_confidence=True)
+
+
+def _measured_axis(
+    axis: str,
+    target_value: Dict[str, object],
+    rationale: str,
+    citations: Sequence[PrimitiveCitationResponse],
+    cohort_values: Dict[str, float],
+    target_numeric: float,
+    low_confidence: bool,
+) -> PerformanceAxisResponse:
+    cohort_distribution = _distribution(cohort_values.values()) if cohort_values else None
+    return PerformanceAxisResponse(
+        axis=axis,
+        status="measured",
+        target_value=target_value,
+        cohort_distribution=cohort_distribution,
+        target_percentile=_percentile_rank(cohort_values.values(), target_numeric) if cohort_values else None,
+        low_confidence=low_confidence,
+        rationale=rationale,
+        citations=list(citations),
+    )
+
+
+def _predicted_cpars_from_axes(axes: Sequence[PerformanceAxisResponse]) -> Dict[str, PredictedCparsFactorResponse]:
+    by_axis = {axis.axis: axis for axis in axes}
+    mapping = {
+        "Quality": "quality",
+        "Schedule": "schedule_performance",
+        "Cost Control": "cost_performance",
+        "Management": "execution_and_risk",
+        "Small Business Subcontracting": "small_business_subcontracting",
+        "Regulatory Compliance": "regulatory_compliance",
+    }
+    return {
+        factor: _predicted_factor(factor, by_axis.get(axis_key))
+        for factor, axis_key in mapping.items()
+    }
+
+
+def _predicted_factor(factor: str, axis: Optional[PerformanceAxisResponse]) -> PredictedCparsFactorResponse:
+    if axis is None or axis.status != "measured" or axis.target_percentile is None:
+        return PredictedCparsFactorResponse(
+            factor=factor,
+            not_extractable=True,
+            rationale=f"{factor} prediction is not extractable because the required measured primitive axis is absent.",
+            citations=[],
+        )
+    percentile = axis.target_percentile
+    if factor in {"Schedule", "Cost Control", "Management", "Quality", "Regulatory Compliance"}:
+        if percentile >= 90:
+            rating = "Unsatisfactory"
+        elif percentile >= 75:
+            rating = "Marginal"
+        elif percentile >= 35:
+            rating = "Satisfactory"
+        elif percentile >= 10:
+            rating = "Very Good"
+        else:
+            rating = "Exceptional"
+    else:
+        rating = None
+    return PredictedCparsFactorResponse(
+        factor=factor,
+        rating=rating,
+        not_extractable=rating is None,
+        rationale=(
+            f"Target is at the {percentile:.0f}th percentile for {axis.axis.replace('_', ' ')} "
+            f"within the visible cohort; higher percentile indicates more negative extracted signals. "
+            f"low_confidence={str(axis.low_confidence).lower()}."
+        ),
+        citations=axis.citations[:5],
+    )
 
 
 def _cohort_analysis(analyses: Sequence[ContractTimelineAnalysisResponse]) -> CohortAnalysisResponse:
@@ -855,6 +1396,9 @@ def _timeline_documents(db: Session, contract_id: str) -> List[DocumentUpload]:
             )
         ).all()
     )
+    report_rows = [item for item in rows if _display_document_kind(item) != "source_contract"]
+    if report_rows:
+        rows = report_rows
     return sorted(
         rows,
         key=lambda item: (
@@ -1164,6 +1708,122 @@ def _execution_correlations(analyses: Sequence[ContractTimelineAnalysisResponse]
     ]
 
 
+def _citations_for_pattern(
+    timeline: Sequence[TimelineReportResponse],
+    pattern: ContractPatternResponse,
+) -> List[PrimitiveCitationResponse]:
+    citations = []
+    for report in timeline:
+        for signal in report.signals:
+            if signal.recurrence_key == pattern.key:
+                citations.append(_citation_for_signal(report, signal))
+    return citations
+
+
+def _report_for_signal(
+    timeline: Sequence[TimelineReportResponse],
+    signal: TimelineSignalResponse,
+) -> Optional[TimelineReportResponse]:
+    return next((report for report in timeline if report.document_id == signal.document_id), None)
+
+
+def _citation_for_signal(
+    report: Optional[TimelineReportResponse],
+    signal: TimelineSignalResponse,
+) -> PrimitiveCitationResponse:
+    return PrimitiveCitationResponse(
+        primitive_id=signal.id,
+        primitive_type=signal.category,
+        document_id=signal.document_id,
+        label=f"{report.period_label} · {signal.label}" if report is not None else signal.label,
+        excerpt=_trim(signal.quote or signal.summary, 500),
+    )
+
+
+def _signals_by_label(signals: Sequence[TimelineSignalResponse]) -> Dict[str, List[TimelineSignalResponse]]:
+    grouped: Dict[str, List[TimelineSignalResponse]] = defaultdict(list)
+    for signal in signals:
+        grouped[signal.label].append(signal)
+    return dict(sorted(grouped.items(), key=lambda item: (-len(item[1]), item[0])))
+
+
+def _first_period_for_signals(
+    timeline: object,
+    signals: Sequence[TimelineSignalResponse],
+) -> Optional[str]:
+    if not isinstance(timeline, list):
+        return None
+    signal_ids = {signal.id for signal in signals}
+    for report in timeline:
+        if not isinstance(report, TimelineReportResponse):
+            continue
+        if any(signal.id in signal_ids for signal in report.signals):
+            return report.period_label
+    return None
+
+
+def _signal_text(signal: TimelineSignalResponse) -> str:
+    return " ".join(
+        item
+        for item in (signal.label, signal.summary, signal.quote or "", signal.category)
+        if item
+    ).lower()
+
+
+def _eac_values(signals: Sequence[TimelineSignalResponse]) -> List[float]:
+    values = []
+    for signal in signals:
+        text = " ".join(item for item in (signal.summary, signal.quote or "") if item)
+        for match in re.finditer(r"\bEAC\b[^0-9$-]{0,20}\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*([KkMm])?", text):
+            value = _number_with_suffix(match.group(1), match.group(2))
+            if value is not None:
+                values.append(value)
+    return values
+
+
+def _number_with_suffix(value: str, suffix: Optional[str]) -> Optional[float]:
+    try:
+        number = float(value.replace(",", ""))
+    except ValueError:
+        return None
+    if suffix and suffix.lower() == "k":
+        return number * 1_000
+    if suffix and suffix.lower() == "m":
+        return number * 1_000_000
+    return number
+
+
+def _distribution(values: Sequence[float]) -> Dict[str, Optional[float]]:
+    ordered = sorted(values)
+    if not ordered:
+        return {"p10": None, "p25": None, "p50": None, "p75": None, "p90": None}
+    return {
+        "p10": _percentile_value(ordered, 10),
+        "p25": _percentile_value(ordered, 25),
+        "p50": _percentile_value(ordered, 50),
+        "p75": _percentile_value(ordered, 75),
+        "p90": _percentile_value(ordered, 90),
+    }
+
+
+def _percentile_value(ordered: Sequence[float], percentile: float) -> float:
+    if len(ordered) == 1:
+        return ordered[0]
+    position = (len(ordered) - 1) * (percentile / 100)
+    lower = int(position)
+    upper = min(lower + 1, len(ordered) - 1)
+    weight = position - lower
+    return ordered[lower] + ((ordered[upper] - ordered[lower]) * weight)
+
+
+def _percentile_rank(values: Sequence[float], target: float) -> float:
+    ordered = sorted(values)
+    if not ordered:
+        return 0.0
+    below_or_equal = sum(1 for value in ordered if value <= target)
+    return (below_or_equal / len(ordered)) * 100
+
+
 def _period_label(db: Session, document: DocumentUpload) -> str:
     start, end = _report_period(db, document)
     if start and end:
@@ -1185,8 +1845,46 @@ def _report_period(db: Session, document: DocumentUpload) -> Tuple[Optional[date
         re.IGNORECASE,
     )
     if not match:
-        return None, None
+        return _report_period_from_title(document)
     return _parse_day_month_year(match.group(1)), _parse_day_month_year(match.group(2))
+
+
+def _report_period_from_title(document: DocumentUpload) -> Tuple[Optional[date], Optional[date]]:
+    haystack = f"{document.title} {document.original_filename}"
+    match = re.search(
+        r"\b(January|February|March|April|May|June|July|August|September|October|November|December)\s*([0-9]{4})\b",
+        haystack,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None, None
+    month = _month_number(match.group(1))
+    year = int(match.group(2))
+    start = date(year, month, 1)
+    if month == 12:
+        end = date(year, 12, 31)
+    else:
+        end = date(year, month + 1, 1)
+        end = date.fromordinal(end.toordinal() - 1)
+    return start, end
+
+
+def _month_number(value: str) -> int:
+    months = {
+        "january": 1,
+        "february": 2,
+        "march": 3,
+        "april": 4,
+        "may": 5,
+        "june": 6,
+        "july": 7,
+        "august": 8,
+        "september": 9,
+        "october": 10,
+        "november": 11,
+        "december": 12,
+    }
+    return months[value.lower()]
 
 
 def _document_text_sample(db: Session, document_id: str) -> str:

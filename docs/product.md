@@ -112,6 +112,14 @@ management, quality control, staffing, and adherence to the project management p
 Across comparable contracts, compare the single-contract outputs to surface specific
 qualitative causes behind schedule, cost, quality, or management outcomes.
 
+Current implementation note: the official analysis workspace now exposes a cited
+analyst layer over extracted primitives. It produces a contract-level performance
+explanation, measured/not-extractable axis outputs, and predicted CPARS mappings that
+remain separate from imported actual CPARS ratings. Predictions and percentiles are
+low-confidence when the visible cohort has fewer than 20 contracts, and missing
+deliverable, financial, decision, personnel, compliance, or closeout primitives are
+reported as `not_extractable` rather than estimated.
+
 Contract structure analysis is a separate high-value input. CLIN structure, contract
 type, incentive fees, government-furnished equipment obligations, period of
 performance, approval workflows, and option structure require ingested contract

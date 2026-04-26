@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Build cohort definitions for contract performance analysis.
 
 Given a target contract, finds comparable contracts using NAICS prefix, contract type,

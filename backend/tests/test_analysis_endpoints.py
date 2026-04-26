@@ -146,6 +146,10 @@ def test_single_contract_analysis_is_official_only_and_combines_timeline_signals
     assert "Expedited recovery plan" in {item["label"] for item in body["positive_signals"]}
     assert "Quality control or rework" in {item["label"] for item in body["execution_patterns"]}
     assert {"Schedule", "Quality"} <= {item["label"] for item in body["cpars_ratings"]}
+    assert body["analyst_brief"]["recurring_vs_one_off"][0]["citations"]
+    assert body["axes"]
+    assert {axis["axis"] for axis in body["axes"]} >= {"schedule_performance", "cost_performance", "execution_and_risk"}
+    assert body["cpars_predicted"]["Schedule"]["rating"]
 
 
 def test_cohort_analysis_is_official_only_and_compares_visible_contract_outputs(tmp_path) -> None:

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Orchestrate per-contract and cohort contract performance analysis.
 
 Loads five primitive tables (deliverable, financial, decisions, issue, personnel)
@@ -7,16 +9,15 @@ stores the JSON result in analysis_runs.
 
 import uuid
 from datetime import datetime, timezone
+import os
 from typing import Any
 
-from anthropic import Anthropic
 from sqlalchemy.orm import Session
 
 from app.cohort_builder import CohortDefinition, build_cohort
-from app.config import get_anthropic_api_key
 from app.models import Contract
 
-_CLAUDE_MODEL = "claude-sonnet-4-6"
+_CLAUDE_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 
 _PER_CONTRACT_SYSTEM = """ROLE You are a contract performance analyst. You evaluate a target federal \
 contract against a cohort of comparable contracts using structured primitive records. You never \
@@ -103,7 +104,7 @@ def run_per_contract_analysis(
     run_id = str(uuid.uuid4())
     _insert_analysis_run(db, run_id, "per_contract", contract_id, cohort)
 
-    client = Anthropic(api_key=get_anthropic_api_key())
+    client = _anthropic_client()
     message = client.messages.create(
         model=_CLAUDE_MODEL,
         max_tokens=4096,
@@ -142,7 +143,7 @@ def run_cohort_analysis(
         cohort_contract_ids=contract_ids,
     )
 
-    client = Anthropic(api_key=get_anthropic_api_key())
+    client = _anthropic_client()
     message = client.messages.create(
         model=_CLAUDE_MODEL,
         max_tokens=6000,
@@ -305,3 +306,14 @@ def _parse_json(text: str) -> dict:
         return json.loads(cleaned)
     except json.JSONDecodeError:
         return {"raw": text}
+
+
+def _anthropic_client():
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise RuntimeError("ANTHROPIC_API_KEY is required for orchestrated performance analysis")
+    try:
+        from anthropic import Anthropic
+    except ImportError as error:
+        raise RuntimeError("anthropic package is required for orchestrated performance analysis") from error
+    return Anthropic(api_key=api_key)

@@ -109,6 +109,52 @@ type CparsRating = {
   source: string;
 };
 
+type PrimitiveCitation = {
+  primitive_id: string;
+  primitive_type: string;
+  document_id?: string | null;
+  label?: string | null;
+  excerpt?: string | null;
+};
+
+type AnalystClaim = {
+  title: string;
+  finding: string;
+  citations: PrimitiveCitation[];
+  confidence?: number | null;
+};
+
+type PerformanceAxis = {
+  axis: string;
+  status: string;
+  target_value: Record<string, unknown>;
+  cohort_distribution?: Record<string, number | null> | null;
+  target_percentile?: number | null;
+  low_confidence: boolean;
+  rationale: string;
+  citations: PrimitiveCitation[];
+};
+
+type PredictedCparsFactor = {
+  factor: string;
+  rating?: string | null;
+  not_extractable: boolean;
+  rationale: string;
+  citations: PrimitiveCitation[];
+};
+
+type ContractAnalystBrief = {
+  problem_statement: string;
+  summary: string;
+  outcome_context: AnalystClaim[];
+  recurring_vs_one_off: AnalystClaim[];
+  pre_degradation_signals: AnalystClaim[];
+  success_or_recovery_signals: AnalystClaim[];
+  execution_assessment: AnalystClaim[];
+  government_vs_contractor: AnalystClaim[];
+  limitations: string[];
+};
+
 type ContractTimelineAnalysis = {
   contract_id: string;
   contract_title: string;
@@ -119,6 +165,9 @@ type ContractTimelineAnalysis = {
   positive_signals: TimelineSignal[];
   execution_patterns: TimelineSignal[];
   cpars_ratings: CparsRating[];
+  analyst_brief?: ContractAnalystBrief | null;
+  axes: PerformanceAxis[];
+  cpars_predicted: Record<string, PredictedCparsFactor>;
   limitations: string[];
 };
 
@@ -426,6 +475,7 @@ function OfficialAnalysisWorkspace({ token, setError }: { token: string; setErro
           </article>
         </div>
       </section>
+      {analysis?.analyst_brief ? <AnalystBrief brief={analysis.analyst_brief} /> : null}
       <div className="metric-grid">
         <MetricCard label="Reports" value={analysis?.timeline.length ?? 0} icon={<FileText size={17} />} />
         <MetricCard label="Recurring Issues" value={analysis?.recurring_issues.length ?? 0} icon={<TrendingDown size={17} />} />
@@ -466,7 +516,12 @@ function OfficialAnalysisWorkspace({ token, setError }: { token: string; setErro
         <AnalysisPanel title="CPARS Outcome Context" icon={<TrendingDown size={16} />}>
           <CparsList ratings={analysis?.cpars_ratings ?? []} />
           <div className="rail-divider" />
+          <PredictedCparsList factors={Object.values(analysis?.cpars_predicted ?? {})} />
+          <div className="rail-divider" />
           <CohortBriefList contracts={cohort?.contracts ?? []} />
+        </AnalysisPanel>
+        <AnalysisPanel title="Measurement Axes" icon={<BarChart3 size={16} />}>
+          <AxisList axes={analysis?.axes ?? []} />
         </AnalysisPanel>
         <AnalysisPanel title="Cohort Lessons" icon={<BookOpen size={16} />}>
           <TextList items={cohort?.delta_lessons ?? []} empty="No cohort deltas are available yet." />
@@ -509,6 +564,70 @@ function AnalysisPanel({ title, icon, children }: { title: string; icon: ReactNo
       </div>
       {children}
     </section>
+  );
+}
+
+function AnalystBrief({ brief }: { brief: ContractAnalystBrief }) {
+  return (
+    <section className="analyst-brief">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">Analyst Layer</p>
+          <h3>Cited Performance Explanation</h3>
+        </div>
+        <ShieldCheck size={16} />
+      </div>
+      <p className="analyst-summary">{brief.summary}</p>
+      <div className="analyst-claim-grid">
+        <ClaimGroup title="Outcome To Explain" claims={brief.outcome_context} empty="No CPARS/EVM outcome primitive is imported yet." />
+        <ClaimGroup title="Recurring Vs One-Off" claims={brief.recurring_vs_one_off} empty="No recurring issue explanation is available yet." />
+        <ClaimGroup title="Before Degradation" claims={brief.pre_degradation_signals} empty="No cited pre-degradation warning signal has been found yet." />
+        <ClaimGroup title="What Worked" claims={brief.success_or_recovery_signals} empty="No cited positive or recovery signal has been found yet." />
+        <ClaimGroup title="Execution Pattern" claims={brief.execution_assessment} empty="No cited sequencing, subcontractor, QC, staffing, or PMP execution pattern is available yet." />
+        <ClaimGroup title="Cause Bucket" claims={brief.government_vs_contractor} empty="No responsible-party pattern is strong enough yet." />
+      </div>
+      {brief.limitations.length ? (
+        <div className="limitations-row">
+          {brief.limitations.map((item) => (
+            <span key={item}>{item}</span>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function ClaimGroup({ title, claims, empty }: { title: string; claims: AnalystClaim[]; empty: string }) {
+  return (
+    <article className="claim-group">
+      <strong>{title}</strong>
+      {claims.length ? (
+        claims.slice(0, 2).map((claim) => (
+          <div className="claim-row" key={`${title}-${claim.title}`}>
+            <span>{claim.title}</span>
+            <p>{claim.finding}</p>
+            <CitationChips citations={claim.citations} />
+          </div>
+        ))
+      ) : (
+        <p className="empty">{empty}</p>
+      )}
+    </article>
+  );
+}
+
+function CitationChips({ citations }: { citations: PrimitiveCitation[] }) {
+  if (!citations.length) {
+    return null;
+  }
+  return (
+    <div className="citation-chips">
+      {citations.slice(0, 3).map((citation) => (
+        <span title={citation.excerpt ?? citation.label ?? citation.primitive_id} key={`${citation.primitive_type}-${citation.primitive_id}`}>
+          {citation.primitive_type}: {citation.primitive_id.slice(0, 8)}
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -575,6 +694,71 @@ function CparsList({ ratings }: { ratings: CparsRating[] }) {
       ))}
     </div>
   );
+}
+
+function PredictedCparsList({ factors }: { factors: PredictedCparsFactor[] }) {
+  const extractable = factors.filter((factor) => !factor.not_extractable && factor.rating);
+  if (!extractable.length) {
+    return <p className="empty">No predicted CPARS factor is extractable from measured primitives yet.</p>;
+  }
+  return (
+    <div className="pattern-list">
+      {extractable.slice(0, 6).map((factor) => (
+        <article className="pattern-row" key={factor.factor}>
+          <strong>Predicted {factor.factor}: {factor.rating}</strong>
+          <span>{factor.rationale}</span>
+          <CitationChips citations={factor.citations} />
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function AxisList({ axes }: { axes: PerformanceAxis[] }) {
+  if (!axes.length) {
+    return <p className="empty">No measured axes are available yet.</p>;
+  }
+  return (
+    <div className="axis-list">
+      {axes.slice(0, 9).map((axis) => (
+        <article className="axis-row" key={axis.axis}>
+          <div>
+            <strong>{toTitle(axis.axis)}</strong>
+            <span className={`status ${axis.status === 'measured' ? 'positive' : 'neutral'}`}>{axis.status}</span>
+          </div>
+          <p>{axis.rationale}</p>
+          {axis.status === 'measured' ? (
+            <small>
+              Target: {formatAxisValue(axis.target_value)}
+              {axis.target_percentile !== null && axis.target_percentile !== undefined ? ` · Cohort percentile ${Math.round(axis.target_percentile)}` : ''}
+              {axis.low_confidence ? ' · low confidence' : ''}
+            </small>
+          ) : null}
+          <CitationChips citations={axis.citations} />
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function formatAxisValue(value: Record<string, unknown>) {
+  const entries = Object.entries(value).slice(0, 3);
+  if (!entries.length) {
+    return 'not recorded';
+  }
+  return entries
+    .map(([key, currentValue]) => `${toTitle(key)} ${formatPrimitiveValue(currentValue)}`)
+    .join(', ');
+}
+
+function formatPrimitiveValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return 'not recorded';
+  }
+  if (typeof value === 'object') {
+    return JSON.stringify(value);
+  }
+  return String(value);
 }
 
 function CohortBriefList({ contracts }: { contracts: CohortContractBrief[] }) {
