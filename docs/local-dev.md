@@ -17,7 +17,7 @@ bun run local:up
 ```
 
 This requires Docker Desktop and Azure CLI. The Azure CLI is used only to initialize the
-local Azurite blob container.
+local Azurite blob container after the Postgres and Azurite health checks are ready.
 
 Stop local dependencies:
 
@@ -94,8 +94,9 @@ must remain local-only and should not be copied into Bicep or Azure app settings
 
 ## Azurite Notes
 
-`bun run local:up` creates the local `app-assets` container in Azurite. The email intake
-worker can then write blob stub records when these local env values are active:
+`bun run local:up` waits for the Azurite health check, creates the local `app-assets`
+container in Azurite, and prints container logs if startup does not complete. The email
+intake worker can then write blob stub records when these local env values are active:
 
 ```env
 EMAIL_INTAKE_STUB_BLOB_ENABLED=true
