@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Generator
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import Base, get_db
@@ -25,6 +25,7 @@ from app.models import (
     PerformanceSignal,
     RegressionFinding,
 )
+from app.portfolio import run_portfolio_lessons_analysis
 from app.primitive_backfill import backfill_contract_primitives
 
 
@@ -185,9 +186,10 @@ def test_official_can_create_contract_record_for_portal(tmp_path) -> None:
     assert contractor_response.status_code == 403
 
 
-def test_portfolio_themes_are_built_from_backend_evidence(tmp_path) -> None:
+def test_portfolio_themes_are_built_from_backend_evidence(tmp_path, monkeypatch) -> None:
     client = _client_with_test_db(tmp_path)
     official_token = _token(client, "official")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     with next(_test_db_session(tmp_path)) as db:
         db.add_all(
@@ -198,6 +200,7 @@ def test_portfolio_themes_are_built_from_backend_evidence(tmp_path) -> None:
                     title="Logistics Support East",
                     psc_code="R706",
                     office_name="PMS 325",
+                    vendor_name="Atlantic Logistics LLC",
                     metadata_json={"obligated_value": "1000000"},
                 ),
                 Contract(
@@ -206,6 +209,7 @@ def test_portfolio_themes_are_built_from_backend_evidence(tmp_path) -> None:
                     title="Admin Support West",
                     psc_code="R408",
                     office_name="PMS 325",
+                    vendor_name="Atlantic Logistics LLC",
                     metadata_json={"obligated_value": "2500000"},
                 ),
                 Contract(
@@ -263,6 +267,31 @@ def test_portfolio_themes_are_built_from_backend_evidence(tmp_path) -> None:
     assert schedule_theme["total"] == 2
     assert schedule_theme["value_flagged"] == "3500000"
     assert {contract["id"] for contract in schedule_theme["contracts"]} == {"theme-c1", "theme-c2"}
+
+    lessons = client.get(
+        "/api/portfolio/lessons",
+        headers={"Authorization": f"Bearer {official_token}"},
+    )
+    assert lessons.status_code == 200
+    lesson_body = lessons.json()
+    assert lesson_body["source"] == "deterministic_from_backend_evidence"
+    assert lesson_body["lessons"]
+    assert any("Atlantic Logistics LLC" in lesson["subject_label"] for lesson in lesson_body["lessons"])
+    assert all(lesson["evidence"] for lesson in lesson_body["lessons"])
+
+    with next(_test_db_session(tmp_path)) as db:
+        _create_analysis_runs_table(db)
+        run = run_portfolio_lessons_analysis(db, period="last_30_days", use_ai=False)
+        assert run["status"] == "complete"
+
+    stored_lessons = client.get(
+        "/api/portfolio/lessons",
+        headers={"Authorization": f"Bearer {official_token}"},
+    )
+    assert stored_lessons.status_code == 200
+    stored_body = stored_lessons.json()
+    assert stored_body["source"] == "deterministic_from_backend_evidence"
+    assert stored_body["lessons"]
 
 
 def test_deliverables_endpoint_reports_source_absence(tmp_path) -> None:
@@ -585,6 +614,28 @@ def _test_db_session(tmp_path) -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
+
+
+def _create_analysis_runs_table(db: Session) -> None:
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS analysis_runs (
+                id TEXT PRIMARY KEY,
+                run_type TEXT NOT NULL,
+                target_contract_id TEXT,
+                cohort_definition JSON,
+                cohort_contract_ids JSON,
+                status TEXT NOT NULL,
+                created_at DATETIME NOT NULL,
+                completed_at DATETIME,
+                model TEXT,
+                result JSON
+            )
+            """
+        )
+    )
+    db.commit()
 
 
 def _token(client: TestClient, role: str) -> str:

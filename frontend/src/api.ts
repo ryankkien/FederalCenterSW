@@ -145,6 +145,13 @@ export async function getPortfolioThemes(period?: string) {
   return request(`/api/portfolio/themes${suffix}`);
 }
 
+export async function getPortfolioLessons(period?: string) {
+  const params = new URLSearchParams();
+  if (period) params.set('period', period);
+  const suffix = params.toString() ? `?${params}` : '';
+  return request(`/api/portfolio/lessons${suffix}`);
+}
+
 export function normalizeContract(row: any) {
   const start = row.period_start || row.start || '2026-01-01';
   const end = row.period_end || row.end || '2027-12-31';

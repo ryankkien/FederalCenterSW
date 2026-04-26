@@ -16,6 +16,7 @@ import {
   getContractLifecycle,
   getContractSimilarityInsights,
   getDocument,
+  getPortfolioLessons,
   getPortfolioThemes,
   listAllDocuments,
   listContractDocuments,
@@ -1569,7 +1570,7 @@ function inferSetupDocumentType(path) {
 // ─── CONTRACT DETAIL PAGE ───────────────────────────────────────────────────
 const DETAIL_TABS = ['Overview', 'Lifecycle', 'Insights', 'Benchmarks', 'Documents'];
 
-function ContractDetailPage({ contract, onBack, onSelectContract }) {
+function ContractDetailPage({ contract, onBack }) {
   const [tab, setTab] = useState('Overview');
   const [docs, setDocs] = useState([]);
   const [findings, setFindings] = useState([]);
@@ -2711,19 +2712,40 @@ function InsightsTab({ psc, naics, embedded, onSelectContract, customInsights = 
 
 function InsightsPage({ onSelectContract }) {
   const [portfolio, setPortfolio] = useState(null);
+  const [portfolioLessons, setPortfolioLessons] = useState(null);
   const [error, setError] = useState(false);
+  const [lessonError, setLessonError] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    getPortfolioThemes('fy26')
-      .then(data => { if (!cancelled) { setPortfolio(data); setError(false); } })
-      .catch(() => { if (!cancelled) setError(true); });
+    Promise.allSettled([getPortfolioThemes('fy26'), getPortfolioLessons('fy26')])
+      .then(results => {
+        if (cancelled) return;
+        const [themesResult, lessonsResult] = results;
+        if (themesResult.status === 'fulfilled') {
+          setPortfolio(themesResult.value);
+          setError(false);
+        } else {
+          setError(true);
+        }
+        if (lessonsResult.status === 'fulfilled') {
+          setPortfolioLessons(lessonsResult.value);
+          setLessonError(false);
+        } else {
+          setLessonError(true);
+        }
+      });
     return () => { cancelled = true; };
   }, []);
   const themes = portfolio?.themes || [];
+  const lessons = portfolioLessons?.lessons || [];
   const kpis = portfolio?.kpis || {};
   const priorityThemes = themes.slice(0, 4);
   const contractRows = portfolioContractRows(themes).slice(0, 8);
-  const controls = portfolioControlPrompts(themes).slice(0, 6);
+  const contractLookup = new Map(contractRows.map(row => [row.id, row.contract]));
+  const controls = (lessons.length
+    ? lessonControlRows(lessons)
+    : portfolioControlPrompts(themes)
+  ).slice(0, 6);
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
       <TopBar crumbs={['Insights']} />
@@ -2750,6 +2772,25 @@ function InsightsPage({ onSelectContract }) {
               <MetricCard label="Evidence Items" value={String(kpis.evidence_count ?? 0)} sub="findings, signals, facts" mono />
               <MetricCard label="Value Flagged" value={compactCurrency(kpis.aggregate_value_flagged || 0)} sub="visible portfolio" mono />
             </div>
+
+            <SectionHeader
+              title="AI Portfolio Lessons"
+              subtitle={portfolioLessons?.source === 'ai_from_backend_evidence'
+                ? 'AI-authored semantic lessons grounded in backend evidence IDs'
+                : 'Semantic lessons assembled from backend evidence themes; AI synthesis is unavailable'}
+            />
+            {!portfolioLessons && !lessonError && <Spinner label="Loading portfolio lessons…" />}
+            {lessonError && <EmptyState title="Portfolio lessons unavailable" sub="The backend portfolio lessons endpoint could not be loaded." />}
+            {portfolioLessons && lessons.length === 0 && (
+              <EmptyState title="No portfolio lessons yet" sub={(portfolioLessons.limitations || [])[0] || 'Process more visible contract evidence to synthesize semantic lessons.'} />
+            )}
+            {lessons.length > 0 && (
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(2, minmax(0, 1fr))', gap:12, marginBottom:22 }}>
+                {lessons.slice(0, 4).map(lesson => (
+                  <PortfolioLessonCard key={lesson.id} lesson={lesson} contractLookup={contractLookup} onSelectContract={onSelectContract} />
+                ))}
+              </div>
+            )}
 
             <div style={{ display:'grid', gridTemplateColumns:'1.15fr 0.85fr', gap:16, alignItems:'start', marginBottom:22 }}>
               <InsightPanel title="Recurring Failure Points">
@@ -2802,6 +2843,45 @@ function InsightsPage({ onSelectContract }) {
   );
 }
 
+function PortfolioLessonCard({ lesson, contractLookup, onSelectContract }) {
+  const confidenceTone = lesson.confidence === 'high' ? 'good' : lesson.confidence === 'medium' ? 'warn' : 'default';
+  const contracts = lesson.affected_contract_ids || [];
+  const evidence = lesson.evidence || [];
+  const controls = lesson.recommended_controls || [];
+  const firstContract = contractLookup.get(contracts[0]);
+  return (
+    <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderLeft:'3px solid var(--accent)', borderRadius:4, padding:'16px 18px' }}>
+      <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', marginBottom:8 }}>
+        <Tag tone={confidenceTone}>{lesson.confidence || 'low'} confidence</Tag>
+        <Tag>{lesson.subject_type}</Tag>
+        <Tag>{contracts.length} contract{contracts.length === 1 ? '' : 's'}</Tag>
+      </div>
+      <div style={{ fontSize:14, color:'var(--ink)', fontWeight:700, lineHeight:1.35 }}>{lesson.title}</div>
+      <div style={{ fontSize:11.5, color:'var(--accent)', fontFamily:'var(--mono)', marginTop:5 }}>{lesson.subject_label} · {lesson.semantic_pattern}</div>
+      <div style={{ fontSize:12, color:'var(--ink-mute)', lineHeight:1.55, marginTop:9 }}>{lesson.summary}</div>
+      {controls.length > 0 && (
+        <div style={{ marginTop:12, background:'var(--surface-alt)', borderLeft:'2px solid var(--accent)', padding:'9px 11px' }}>
+          <div style={{ fontSize:10, color:'var(--ink-faint)', fontFamily:'var(--mono)', letterSpacing:'0.08em', textTransform:'uppercase', marginBottom:5 }}>Recommended controls</div>
+          {controls.slice(0, 2).map((control, i) => (
+            <div key={`${control}-${i}`} style={{ fontSize:11.5, color:'var(--ink-soft)', lineHeight:1.45, padding:'2px 0' }}>{control}</div>
+          ))}
+        </div>
+      )}
+      <div style={{ display:'flex', justifyContent:'space-between', gap:12, marginTop:12, alignItems:'center' }}>
+        <div style={{ fontSize:10.5, color:'var(--ink-faint)', fontFamily:'var(--mono)' }}>{evidence.length} cited evidence item{evidence.length === 1 ? '' : 's'}</div>
+        {firstContract && (
+          <button type="button" onClick={() => onSelectContract(firstContract)} style={{ border:'1px solid var(--border-md)', background:'var(--surface-alt)', color:'var(--accent)', borderRadius:3, padding:'4px 7px', fontSize:11, fontFamily:'var(--mono)', cursor:'pointer' }}>
+            Open {contracts[0]}
+          </button>
+        )}
+      </div>
+      {(lesson.limitations || []).length > 0 && (
+        <div style={{ fontSize:10.5, color:'var(--ink-faint)', lineHeight:1.45, marginTop:8 }}>{lesson.limitations[0]}</div>
+      )}
+    </div>
+  );
+}
+
 function PortfolioThemeSummary({ theme, onSelectContract }) {
   const sev = SEVERITY_META[theme.severity] || SEVERITY_META.watch;
   const contracts = (theme.contracts || []).map(normalizeThemeContract).filter(Boolean).slice(0, 3);
@@ -2825,6 +2905,22 @@ function PortfolioThemeSummary({ theme, onSelectContract }) {
       )}
     </div>
   );
+}
+
+function lessonControlRows(lessons) {
+  const rows = [];
+  const seen = new Set();
+  for (const lesson of lessons || []) {
+    for (const control of lesson.recommended_controls || []) {
+      if (!control || seen.has(control)) continue;
+      seen.add(control);
+      rows.push({
+        control,
+        basis: `${lesson.title} · ${lesson.confidence || 'low'} confidence`,
+      });
+    }
+  }
+  return rows;
 }
 
 function portfolioContractRows(themes) {

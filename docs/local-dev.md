@@ -64,6 +64,9 @@ evidence by default. Optional keyed/import sources are controlled with local-onl
 vars and should be used only for deliberate research runs:
 
 ```env
+OFFICIAL_ENRICHMENT_ENABLED=false
+OFFICIAL_ENRICHMENT_SOURCES=usaspending
+OFFICIAL_ENRICHMENT_LIMIT=5
 SAM_API_KEY=
 REGULATIONS_API_KEY=
 CPARS_IMPORT_DIR=
@@ -71,6 +74,11 @@ CPARS_IMPORT_DIR=
 
 When optional sources are not configured, deliberate optional-source runs persist
 `source_unavailable` records so the wiki can show the limitation without failing.
+When `OFFICIAL_ENRICHMENT_ENABLED=true`, completed document processing for a
+contract-linked upload runs a bounded official-source enrichment step. The step writes
+official source records and external references, and only fills empty contract metadata
+from high-confidence exact API matches. Uploaded contract-file evidence remains
+authoritative for contract-specific findings.
 
 ## Mirroring Rules
 
@@ -142,7 +150,12 @@ The official home page reads `/api/portfolio/themes` for cross-contract themes a
 portfolio KPIs. Those themes are computed from backend evidence already produced by
 processing, including regression findings, hypotheses, report facts, and performance
 signals. If no processed evidence exists, the portal shows an empty backend-evidence
-state instead of treating the prototype theme fixtures as real data.
+state instead of treating the prototype theme fixtures as real data. The global
+Insights page also reads `/api/portfolio/lessons` for semantic portfolio lessons and
+recommended controls. With `OPENAI_API_KEY` configured, lessons are AI-authored from
+the backend evidence packet by the portfolio lessons worker and stored in
+`analysis_runs` with `run_type="portfolio_lessons"`; without it, the backend returns
+deterministic lessons from the same themes and marks the limitation.
 
 Contract and contractor deliverable schedules are loaded from
 `/api/contracts/{contract_id}/deliverables`. The response includes an availability

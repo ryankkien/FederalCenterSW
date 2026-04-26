@@ -284,6 +284,8 @@ resource functionAppSettings 'Microsoft.Web/sites/config@2024-04-01' = {
     DOCUMENT_OCR_LANGUAGE: 'eng'
     DOCUMENT_OCR_MAX_PAGES: '25'
     DOCUMENT_OCR_TESSERACT_CMD: 'tesseract'
+    PORTFOLIO_LESSONS_TIMER_SCHEDULE: '0 15 */6 * * *'
+    PORTFOLIO_LESSONS_PERIOD: 'fy26'
     EMAIL_INTAKE_AUTO_REPLY_ENABLED: 'false'
     EMAIL_INTAKE_DEFAULT_DOCUMENT_TYPE: 'Email Attachment'
     EMAIL_INTAKE_DEFAULT_UPLOADER_ID: 'contractor-demo'

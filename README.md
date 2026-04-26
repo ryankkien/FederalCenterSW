@@ -219,6 +219,21 @@ Contractor profiles use evidence labels such as schedule variance, funding varia
 unresolved issues, and contradiction counts; they do not make unsupported honesty or
 responsibility judgments.
 
+Official-source enrichment can also run as an opt-in processing step after a
+contract-linked document finishes processing:
+
+```env
+OFFICIAL_ENRICHMENT_ENABLED=true
+OFFICIAL_ENRICHMENT_SOURCES=usaspending
+OFFICIAL_ENRICHMENT_LIMIT=5
+```
+
+The enrichment step writes official source records and external references, then fills
+empty contract metadata only from high-confidence exact matches. Keep API keys such as
+`SAM_API_KEY` and `REGULATIONS_API_KEY` in ignored local env files, Azure app settings,
+or Key Vault references. Uploaded contract files remain authoritative for
+contract-specific findings.
+
 Local analyst endpoints include:
 
 ```text
@@ -319,7 +334,12 @@ The official home page consumes `/api/portfolio/themes` for portfolio KPIs and
 cross-contract themes. The endpoint aggregates backend evidence from processed
 contracts rather than the prototype UI fixtures: regression findings, hypotheses,
 report facts, and performance signals drive the displayed theme counts and linked
-contract rows.
+contract rows. The global Insights page also reads `/api/portfolio/lessons` for
+semantic portfolio lessons and recommended controls. When OpenAI is configured, those
+lessons are AI-authored from backend evidence IDs by the Azure Function portfolio
+lessons timer and stored in `analysis_runs` with `run_type="portfolio_lessons"`;
+otherwise the backend returns a deterministic lesson layer from the same evidence
+themes with limitations.
 
 Contract detail and contractor upload views read `/api/contracts/{contract_id}/deliverables`
 for schedule evidence. The endpoint returns an explicit availability state such as
