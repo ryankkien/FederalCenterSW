@@ -133,6 +133,10 @@ bun run infra:deploy
 
 See [docs/infra.md](docs/infra.md) for the Bicep/GitHub Actions workflow and drift policy.
 
+The optional feature extractor cloud service is deployed by
+`.github/workflows/feature-extractor-deploy.yml` from the `feature_extractor/` image
+into the dev Container App `fcsw-feature-extractor-dev`.
+
 ## Pull Request Notifications
 
 Pull request notifications can post to a Discord `#pull-requests` channel through

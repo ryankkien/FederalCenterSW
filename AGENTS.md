@@ -79,6 +79,8 @@ logic in separate modules under `backend/app/` and cover it with pytest tests.
 - Use `bun run infra:whatif` before changing Azure resources.
 - Use `bun run infra:deploy` only when the what-if output is understood.
 - GitHub Actions workflows for infrastructure live in `.github/workflows/`.
+- `.github/workflows/feature-extractor-deploy.yml` builds `feature_extractor/` and
+  deploys the `fcsw-feature-extractor-dev` Container App image.
 - Pull request Discord notifications live in
   `.github/workflows/discord-pr-notifications.yml` and require the GitHub repository
   secret `DISCORD_PULL_REQUEST_WEBHOOK_URL`.

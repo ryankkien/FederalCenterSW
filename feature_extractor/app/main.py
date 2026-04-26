@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from app import classifier, chunker, embedder, primitive_extractor, summarizer
+from app import classifier, chunker, embedder, primitive_extractor, summary_pipeline
 from app.blob import get_blob_storage
 from app.db import get_connection, log_event
 from app.models import get_llm_client
@@ -12,7 +12,7 @@ from app.models import get_llm_client
 app = FastAPI(title="Feature Extractor")
 
 
-class SummarizeRequest(BaseModel):
+class SummaryRequest(BaseModel):
     doc_id: str
 
 
@@ -24,7 +24,7 @@ class ClassificationResult(BaseModel):
     rationale: str | None
 
 
-class SummarizeResponse(BaseModel):
+class SummaryResponse(BaseModel):
     doc_id: str
     blob_path: str
     model: str
@@ -49,8 +49,8 @@ def health():
     return {"status": "ok"}
 
 
-@app.post("/summarize", response_model=SummarizeResponse)
-def summarize(req: SummarizeRequest):
+@app.post("/summarize", response_model=SummaryResponse)
+def summarize(req: SummaryRequest):
     blob = get_blob_storage()
     llm = get_llm_client()
 
@@ -69,7 +69,7 @@ def summarize(req: SummarizeRequest):
     with get_connection() as conn:
         # 1. Hierarchical summarization
         try:
-            result = summarizer.run(pages, llm)
+            result = summary_pipeline.run(pages, llm)
             log_event(conn, req.doc_id, "feature_extractor.summary", "success")
         except Exception as exc:
             log_event(conn, req.doc_id, "feature_extractor.summary", "fail")
@@ -110,7 +110,7 @@ def summarize(req: SummarizeRequest):
         "application/json",
     )
 
-    return SummarizeResponse(
+    return SummaryResponse(
         doc_id=req.doc_id,
         blob_path=summary_path,
         model=llm.model_name,

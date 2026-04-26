@@ -39,23 +39,19 @@ param acrName string
 @description('ACA managed environment name.')
 param acaEnvironmentName string
 
-@description('Container App name for the Summarizer service.')
-param summarizerAppName string
+@description('Container App name for the Feature Extractor service.')
+param featureExtractorAppName string
 
-@description('Summarizer Docker image tag to deploy.')
-param summarizerImageTag string = 'latest'
+@description('Feature Extractor Docker image tag to deploy.')
+param featureExtractorImageTag string = 'latest'
 
-@description('Anthropic API key secret for the Summarizer.')
+@description('OpenAI API key secret for the Feature Extractor.')
 @secure()
-param anthropicApiKey string = ''
+param featureExtractorOpenAiApiKey string = ''
 
-@description('OpenAI API key secret for the Summarizer (used if Anthropic key is empty).')
+@description('PostgreSQL connection string for the Feature Extractor.')
 @secure()
-param openaiApiKey string = ''
-
-@description('PostgreSQL connection string for the Summarizer.')
-@secure()
-param summarizerDatabaseUrl string = ''
+param featureExtractorDatabaseUrl string = ''
 
 resource appStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: appStorageAccountName
@@ -280,10 +276,10 @@ resource acaEnvironment 'Microsoft.App/managedEnvironments@2024-03-01' = {
   }
 }
 
-// --- Summarizer Container App ---
+// --- Feature Extractor Container App ---
 
-resource summarizerApp 'Microsoft.App/containerApps@2024-03-01' = {
-  name: summarizerAppName
+resource featureExtractorApp 'Microsoft.App/containerApps@2024-03-01' = {
+  name: featureExtractorAppName
   location: appLocation
   properties: {
     managedEnvironmentId: acaEnvironment.id
@@ -311,24 +307,20 @@ resource summarizerApp 'Microsoft.App/containerApps@2024-03-01' = {
           value: 'DefaultEndpointsProtocol=https;AccountName=${appStorage.name};AccountKey=${appStorage.listKeys().keys[0].value};EndpointSuffix=${environment().suffixes.storage}'
         }
         {
-          name: 'anthropic-api-key'
-          value: anthropicApiKey
-        }
-        {
           name: 'openai-api-key'
-          value: openaiApiKey
+          value: featureExtractorOpenAiApiKey
         }
         {
           name: 'database-url'
-          value: summarizerDatabaseUrl
+          value: featureExtractorDatabaseUrl
         }
       ]
     }
     template: {
       containers: [
         {
-          name: 'summarizer'
-          image: '${acr.properties.loginServer}/summarizer:${summarizerImageTag}'
+          name: 'feature-extractor'
+          image: '${acr.properties.loginServer}/feature-extractor:${featureExtractorImageTag}'
           resources: {
             cpu: json('0.5')
             memory: '1Gi'
@@ -343,16 +335,12 @@ resource summarizerApp 'Microsoft.App/containerApps@2024-03-01' = {
               value: appAssetsContainerName
             }
             {
-              name: 'ANTHROPIC_API_KEY'
-              secretRef: 'anthropic-api-key'
-            }
-            {
               name: 'OPENAI_API_KEY'
               secretRef: 'openai-api-key'
             }
             {
               name: 'MODEL_PREFERENCE'
-              value: 'claude'
+              value: 'openai'
             }
             {
               name: 'DATABASE_URL'
@@ -377,4 +365,4 @@ output functionAppHostName string = functionApp.properties.defaultHostName
 output postgresFullyQualifiedDomainName string = postgresServer.properties.fullyQualifiedDomainName
 output appStorageBlobEndpoint string = appStorage.properties.primaryEndpoints.blob
 output acrLoginServer string = acr.properties.loginServer
-output summarizerUrl string = 'https://${summarizerApp.properties.configuration.ingress.fqdn}'
+output featureExtractorUrl string = 'https://${featureExtractorApp.properties.configuration.ingress.fqdn}'

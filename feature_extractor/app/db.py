@@ -16,7 +16,7 @@ def get_connection():
 
 
 def log_event(conn: psycopg.Connection, doc_id: str, event_type: str, status: str) -> None:
-    """Write a summarizer pipeline event to audit_events.
+    """Write a feature extraction pipeline event to audit_events.
 
     event_type examples: 'feature_extractor.summary', 'feature_extractor.chunking', 'feature_extractor.index'
     status: 'success' or 'fail'

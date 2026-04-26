@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-SUMMARIZER_DIR = Path(__file__).resolve().parents[1]
+FEATURE_EXTRACTOR_DIR = Path(__file__).resolve().parents[1]
 
 
 def get_azure_storage_connection_string() -> str | None:
@@ -13,7 +13,7 @@ def get_azure_storage_container() -> str:
 
 
 def get_local_blob_dir() -> Path:
-    return Path(os.getenv("LOCAL_BLOB_DIR", str(SUMMARIZER_DIR / "data" / "blobs")))
+    return Path(os.getenv("LOCAL_BLOB_DIR", str(FEATURE_EXTRACTOR_DIR / "data" / "blobs")))
 
 
 def get_anthropic_api_key() -> str | None:

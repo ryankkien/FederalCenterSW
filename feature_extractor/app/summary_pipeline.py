@@ -1,14 +1,14 @@
 from app.models import LLMClient
 
 _CHUNK_SYSTEM = (
-    "You are a precise summarizer for federal government acquisition documents. "
+    "You are a precise acquisition analyst for federal government acquisition documents. "
     "Summarize the provided document excerpt clearly and concisely, capturing key "
     "requirements, deliverables, parties, dates, and dollar amounts if present. "
     "Output only the summary text with no preamble."
 )
 
 _ROLLUP_SYSTEM = (
-    "You are a precise summarizer for federal government acquisition documents. "
+    "You are a precise acquisition analyst for federal government acquisition documents. "
     "You are given a set of summaries from consecutive sections of a document. "
     "Synthesize them into a single coherent summary preserving the most important "
     "requirements, deliverables, parties, dates, and dollar amounts. "
@@ -16,7 +16,7 @@ _ROLLUP_SYSTEM = (
 )
 
 _FINAL_SYSTEM = (
-    "You are a precise summarizer for federal government acquisition documents. "
+    "You are a precise acquisition analyst for federal government acquisition documents. "
     "You are given a set of section summaries covering an entire document. "
     "Write a comprehensive final summary of the full document, highlighting the "
     "overall purpose, scope, key requirements, deliverables, parties, and any "
