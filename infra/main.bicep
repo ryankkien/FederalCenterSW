@@ -140,7 +140,6 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
     enabledForDeployment: false
     enabledForDiskEncryption: false
     enabledForTemplateDeployment: false
-    enablePurgeProtection: false
     enableRbacAuthorization: true
     enableSoftDelete: true
     publicNetworkAccess: 'Enabled'
@@ -302,7 +301,6 @@ resource functionAppSettings 'Microsoft.Web/sites/config@2024-04-01' = {
     EMAIL_INTAKE_TIMER_SCHEDULE: '0 */5 * * * *'
     EMAIL_INTAKE_USERNAME: keyVaultReferences.emailIntakeUsername
     FUNCTIONS_EXTENSION_VERSION: '~4'
-    FUNCTIONS_WORKER_RUNTIME: 'python'
     OPENAI_API_KEY: keyVaultReferences.openaiApiKey
     OPENAI_EMBEDDING_DIMENSIONS: '3072'
     OPENAI_EMBEDDING_MODEL: 'text-embedding-3-large'
