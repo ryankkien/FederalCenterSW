@@ -271,8 +271,9 @@ ids to `contract_access_grants.principal_id` for contract-scoped RBAC.
 
 ## Document Ingest
 
-In mock local mode, choose `Contractor` to upload documents or `Government official`
-to inspect the contract analyst workspace. Uploaded files are stored
+In mock local mode, choose `Contractor` or `Government official` to upload documents.
+Government officials can also log a new contract record from the portal before
+attaching the source contract file. Uploaded files are stored
 through the backend blob storage adapter and document metadata is stored in Postgres.
 Each upload gets an immutable document artifact folder:
 
@@ -288,16 +289,19 @@ processing.
 For PDFs with embedded text, extraction uses the PDF text layer. For scanned PDFs and
 uploaded images, extraction falls back to OCR when Tesseract is installed.
 
-Contractor uploads include a visible contract selector. The selected contract is stored
-as `document_uploads.contract_id`, so new reports immediately become child documents of
-the contract while semantic cross-document and cross-contract relationships remain
-separate.
+Portal uploads include contract hard-linking when a contract is selected. The selected
+contract is stored as `document_uploads.contract_id`, so new reports immediately become
+child documents of the contract while semantic cross-document and cross-contract
+relationships remain separate.
 
 Portal uploads run inline intake before the async processor. When inline AI is enabled
 and extracted text is available, the LLM classifies the document and suggests contract
 matches immediately; otherwise filename, title, notes, and type cues provide fallback
-decisions. The upload response includes `detected_kind` and `matched_contract_id`; the
-queued processor still runs the full AI-first analysis path later.
+decisions. The upload response includes `detected_kind` and `matched_contract_id`.
+The portal can request `process_inline=true` for source-contract/logging workflows so
+the backend immediately runs the same AI-first processor that extracts pages, facts,
+baselines, regressions, hypotheses, and auto-scaffolded contracts where supported.
+Otherwise, the queued processor still runs the full analysis path later.
 
 Email or portal uploads that cannot match an existing contract remain unmatched unless
 processing can safely scaffold a new parent. Auto-scaffolding only runs for high

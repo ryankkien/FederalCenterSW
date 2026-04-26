@@ -126,6 +126,47 @@ def test_contract_grants_limit_official_visibility_when_grants_exist(tmp_path) -
     assert "ungranted-upload" not in contracts
 
 
+def test_official_can_create_contract_record_for_portal(tmp_path) -> None:
+    client = _client_with_test_db(tmp_path)
+    official_token = _token(client, "official")
+    contractor_token = _token(client, "contractor")
+
+    response = client.post(
+        "/api/contracts",
+        headers={"Authorization": f"Bearer {official_token}"},
+        json={
+            "contract_number": "N00024-26-C-9001",
+            "title": "Portal Logged Support Contract",
+            "vendor_name": "Atlantic Logistics LLC",
+            "psc_code": "R706",
+            "naics_code": "541614",
+            "office_name": "PMS 325",
+            "period_start": "2026-01-01",
+            "period_end": "2027-12-31",
+            "obligated_value": "4210440",
+            "contracting_officer": "LCDR Nicole Jacobs",
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["contract_number"] == "N00024-26-C-9001"
+    assert body["vendor_name"] == "Atlantic Logistics LLC"
+    assert body["psc_code"] == "R706"
+    assert body["obligated_value"] == "4210440"
+    assert body["contracting_officer"] == "LCDR Nicole Jacobs"
+
+    contracts = client.get("/api/contracts", headers={"Authorization": f"Bearer {official_token}"})
+    assert body["id"] in {contract["id"] for contract in contracts.json()}
+
+    contractor_response = client.post(
+        "/api/contracts",
+        headers={"Authorization": f"Bearer {contractor_token}"},
+        json={"contract_number": "N00024-26-C-9002", "title": "Unauthorized"},
+    )
+    assert contractor_response.status_code == 403
+
+
 def test_processing_jobs_and_unmatched_admin_access(tmp_path) -> None:
     client = _client_with_test_db(tmp_path)
     contractor_token = _token(client, "contractor")
