@@ -244,11 +244,12 @@ bun run infra:deploy
   immutable document artifact folders:
   `contracts/{document_id}/main.{ext}` and `contracts/{document_id}/text.json`.
   The hard parent contract is stored in Postgres on `document_uploads.contract_id`.
-- Portal uploads and committed email attachments run inline deterministic intake
-  classification and contract matching against filename/title/notes/type cues before
-  async processing. The decisions are recorded in
-  `document_classification_decisions` and `document_match_decisions`; OCR, full text
-  classification, and AI fallback matching remain processing-job work.
+- Portal uploads and committed email attachments run AI-first inline intake
+  classification and contract matching when inline AI and extracted text are available,
+  with filename/title/notes/type cue matching retained as fallback before async
+  processing. The decisions are recorded in
+  `document_classification_decisions` and `document_match_decisions`; queued processing
+  still runs the full AI-first analysis path.
 - Contract hard-link parentage lives on `document_uploads.contract_id`. Cross-contract
   and cross-document pattern relationships live in semantic link tables and must not
   rewrite the hard parent contract.
@@ -310,10 +311,11 @@ bun run infra:deploy
   processing run steps, pages, chunks, embeddings, signals, entities, facts,
   agent-curated topics, evidence links, topic revisions, and audit events. Blob Storage
   stores source artifacts and extracted text artifacts.
-- AI processing defaults on when `OPENAI_API_KEY` is set and
-  `AI_PROCESSING_ENABLED`/`AI_INLINE_PROCESSING_ENABLED` are omitted. Set either flag
-  to `false` to force-disable that path. Keep OpenAI and future provider keys out of
-  git.
+- AI processing and inline AI intake default on when
+  `AI_PROCESSING_ENABLED`/`AI_INLINE_PROCESSING_ENABLED` are omitted. If
+  `OPENAI_API_KEY` is unset, the provider is enabled but unavailable and the app falls
+  back where possible. Set either flag to `false` to force-disable that path. Keep
+  OpenAI and future provider keys out of git.
 - Backend API, feature extractor, and email intake Function logs use structured JSON
   with `request_id`, `contract_id`, `document_upload_id`, and `processing_run_id` when
   available. Set `APPINSIGHTS_CONNECTION_STRING` to export telemetry to Application

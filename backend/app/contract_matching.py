@@ -53,20 +53,29 @@ def match_contract(
         normalize_contract_number(candidate.contract_number): candidate for candidate in candidates
     }
 
+    ai_result = _ai_match(context, candidates, normalized_to_candidate, ai_provider)
+    if ai_result is not None:
+        return ai_result
+
     deterministic_result = _deterministic_match(context, normalized_to_candidate)
     if deterministic_result.status == "matched":
         return deterministic_result
     if deterministic_result.status == "ambiguous":
         return deterministic_result
 
+    return deterministic_result
+
+
+def _ai_match(
+    context: ContractMatchContext,
+    candidates: Sequence[ContractCandidate],
+    normalized_to_candidate: Dict[str, ContractCandidate],
+    ai_provider: Optional[AIProvider],
+) -> Optional[ContractMatchResult]:
     provider = ai_provider or NullAIProvider()
     if not provider.status.available:
-        return deterministic_result
-
-    ai_hints = provider.suggest_contract_matches(
-        context=_context_text(context),
-        candidate_contract_numbers=[candidate.contract_number for candidate in candidates],
-    )
+        return None
+    ai_hints = _safe_ai_hints(provider, context, candidates)
     matched_ai_hints = [
         hint
         for hint in ai_hints
@@ -74,11 +83,11 @@ def match_contract(
         and normalize_contract_number(hint.contract_number) in normalized_to_candidate
     ]
     if not matched_ai_hints:
-        deterministic_result.ai_hints = ai_hints
-        return deterministic_result
-
+        return None
     matched_ai_hints.sort(key=lambda hint: hint.confidence, reverse=True)
     best = matched_ai_hints[0]
+    if best.confidence < 0.65:
+        return None
     candidate = normalized_to_candidate[normalize_contract_number(best.contract_number or "")]
     return ContractMatchResult(
         status="matched",
@@ -86,9 +95,23 @@ def match_contract(
         matched_contract_id=candidate.contract_id,
         matched_contract_number=candidate.contract_number,
         confidence=best.confidence,
-        hints=deterministic_result.hints,
+        hints=contract_number_hints_from_context(context),
         ai_hints=ai_hints,
     )
+
+
+def _safe_ai_hints(
+    provider: AIProvider,
+    context: ContractMatchContext,
+    candidates: Sequence[ContractCandidate],
+) -> List[AIContractHint]:
+    try:
+        return provider.suggest_contract_matches(
+            context=_context_text(context),
+            candidate_contract_numbers=[candidate.contract_number for candidate in candidates],
+        )
+    except Exception:
+        return []
 
 
 def candidate_contracts(contracts: Sequence[object]) -> List[ContractCandidate]:

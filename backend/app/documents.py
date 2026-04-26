@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import hashlib
+import json
 from typing import Dict, List, Optional
 from uuid import uuid4
 
@@ -11,7 +12,9 @@ from sqlalchemy.orm import Session
 
 from app.auth import CurrentUser, get_current_user, require_contractor
 from app.authz import can_upload_to_contract, require_unmatched_admin
+from app.ai.providers import get_ai_provider
 from app.blob_storage import BlobStorage, get_blob_storage
+from app.config import get_ai_inline_processing_enabled
 from app.database import get_db
 from app.document_assets import store_contract_document
 from app.document_files import ALLOWED_CONTENT_TYPES, ALLOWED_EXTENSIONS, clean_filename, file_extension
@@ -137,7 +140,9 @@ async def upload_document(
         created_at=datetime.now(timezone.utc),
     )
     db.add(document)
-    apply_inline_intake_decisions(db, document)
+    inline_text = _inline_extracted_text(storage, stored.text_blob_path) if get_ai_inline_processing_enabled() else ""
+    inline_provider = get_ai_provider() if inline_text else None
+    apply_inline_intake_decisions(db, document, text=inline_text, ai_provider=inline_provider)
     db.add(_processing_job(document_id))
     db.commit()
     db.refresh(document)
@@ -354,6 +359,20 @@ def _validate_file(filename: str, content_type: str) -> None:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Unsupported file type",
         )
+
+
+def _inline_extracted_text(storage: BlobStorage, text_blob_path: str) -> str:
+    try:
+        payload = json.loads(storage.download_bytes(text_blob_path).decode("utf-8"))
+    except Exception:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    status = str(payload.get("extraction_status") or "").strip().lower()
+    text = str(payload.get("text") or "").strip()
+    if status in {"pending_ocr", "ocr_pending", "pending", "failed"}:
+        return ""
+    return text
 
 
 def _get_authorized_document(document_id: str, user: CurrentUser, db: Session) -> DocumentUpload:

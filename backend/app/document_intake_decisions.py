@@ -18,10 +18,12 @@ def apply_inline_intake_decisions(
     db: Session,
     document: DocumentUpload,
     contracts: Optional[Sequence[Contract]] = None,
+    text: str = "",
+    ai_provider: Optional[object] = None,
 ) -> ContractMatchResult:
     """Run cheap deterministic intake decisions before the async processor."""
 
-    document_kind, modification_kind = classify_document(document, text="")
+    document_kind, modification_kind = classify_document(document, text=text, ai_provider=ai_provider)
     _persist_classification_decision(db, document, document_kind, modification_kind)
 
     available_contracts = list(contracts if contracts is not None else _available_contracts(db))
@@ -32,7 +34,9 @@ def apply_inline_intake_decisions(
             filename=document.original_filename,
             title=document.title,
             notes=document.notes,
+            text=text,
         ),
+        ai_provider=ai_provider,
     )
     if contract_match.matched_contract_id:
         document.contract_id = contract_match.matched_contract_id

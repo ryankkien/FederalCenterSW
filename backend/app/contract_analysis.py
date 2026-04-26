@@ -30,7 +30,7 @@ from app.models import (
 
 
 BASELINE_DOCUMENT_KINDS = {"source_contract", "task_order", "modification", "email_context"}
-REPORT_DOCUMENT_KINDS = {"weekly_report", "monthly_report", "status_report"}
+REPORT_DOCUMENT_KINDS = {"weekly_report", "monthly_report", "status_report", "ipmdar_pnr"}
 CPARS_DOCUMENT_KINDS = {"cpars", "cpars_evaluation"}
 OFFICIAL_DOMAIN_SUFFIXES = (".gov", ".mil")
 OFFICIAL_DOMAINS = {
@@ -71,10 +71,10 @@ def apply_contract_analysis_pipeline(
     """Run deterministic v1 contract analysis against already-extracted text."""
 
     if not contract_id:
-        classify_document(document, text)
+        classify_document(document, text, ai_provider=ai_provider)
         return
 
-    document_kind, modification_kind = classify_document(document, text)
+    document_kind, modification_kind = classify_document(document, text, ai_provider=ai_provider)
     if document_kind in BASELINE_DOCUMENT_KINDS:
         update_contract_baseline_from_document(
             session,
@@ -83,6 +83,7 @@ def apply_contract_analysis_pipeline(
             text,
             chunk_rows,
             processing_run_id=processing_run_id,
+            ai_provider=ai_provider,
         )
     if document_kind in REPORT_DOCUMENT_KINDS or document_kind == "modification":
         findings = detect_regression_findings(
@@ -94,6 +95,7 @@ def apply_contract_analysis_pipeline(
             document_kind=document_kind,
             modification_kind=modification_kind,
             processing_run_id=processing_run_id,
+            ai_provider=ai_provider,
         )
         for finding in findings:
             upsert_hypothesis_from_finding(session, finding)
@@ -116,7 +118,31 @@ def apply_contract_analysis_pipeline(
         handle_gao_oig_report_document(session, contract_id, document, text, ai_provider=ai_provider)
 
 
-def classify_document(document: object, text: str = "") -> Tuple[str, Optional[str]]:
+def classify_document(
+    document: object,
+    text: str = "",
+    ai_provider: Optional[object] = None,
+) -> Tuple[str, Optional[str]]:
+    existing_ai_classification = _existing_ai_classification(document)
+    if existing_ai_classification is not None:
+        return existing_ai_classification
+
+    ai_classification = _classify_document_with_provider(document, text, ai_provider)
+    if ai_classification is not None:
+        document_kind, modification_kind, confidence, rationale = ai_classification
+        _set_attr(document, "document_kind", document_kind)
+        metadata = _metadata(document)
+        metadata["classification"] = {
+            "document_kind": document_kind,
+            "modification_kind": modification_kind,
+            "confidence": confidence,
+            "classifier": _provider_model_name(ai_provider) or "ai",
+            "rationale": rationale,
+            "source": "ai",
+        }
+        _set_attr(document, "metadata_json", metadata)
+        return document_kind, modification_kind
+
     existing_kind = (_string_attr(document, "document_kind") or "").strip().lower()
     haystack = " ".join(
         value
@@ -137,6 +163,9 @@ def classify_document(document: object, text: str = "") -> Tuple[str, Optional[s
         ("cpars", "contractor performance assessment", "performance assessment reporting system"),
     ) or existing_kind in CPARS_DOCUMENT_KINDS:
         document_kind = "cpars"
+        confidence = 0.9
+    elif _contains_any(haystack, ("ipmdar", "integrated program management data and analysis report")):
+        document_kind = "ipmdar_pnr"
         confidence = 0.9
     elif _contains_any(haystack, ("source contract", "request for proposal")):
         document_kind = "source_contract"
@@ -175,6 +204,9 @@ def classify_document(document: object, text: str = "") -> Tuple[str, Optional[s
         "weekly_report",
         "monthly_report",
         "status_report",
+        "ipmdar_pnr",
+        "ipmdar_cpd_json",
+        "ipmdar_spd_json",
         "cpars",
         "cpars_evaluation",
         "gao_oig_report",
@@ -196,6 +228,27 @@ def classify_document(document: object, text: str = "") -> Tuple[str, Optional[s
         "classifier": "deterministic_v1",
     }
     _set_attr(document, "metadata_json", metadata)
+    return document_kind, modification_kind
+
+
+def _existing_ai_classification(document: object) -> Optional[Tuple[str, Optional[str]]]:
+    metadata = _metadata(document)
+    classification = metadata.get("classification") if isinstance(metadata, dict) else None
+    if not isinstance(classification, dict) or classification.get("source") != "ai":
+        return None
+    document_kind = str(classification.get("document_kind") or "").strip().lower()
+    if not document_kind:
+        return None
+    try:
+        confidence = float(classification.get("confidence") or 0.0)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    if confidence < 0.5:
+        return None
+    modification_kind = classification.get("modification_kind")
+    if modification_kind is not None:
+        modification_kind = str(modification_kind).strip().lower() or None
+    _set_attr(document, "document_kind", document_kind)
     return document_kind, modification_kind
 
 
@@ -227,6 +280,7 @@ def update_contract_baseline_from_document(
     text: str,
     chunk_rows: Sequence[object],
     processing_run_id: Optional[str] = None,
+    ai_provider: Optional[object] = None,
 ) -> ContractBaseline:
     baseline = session.scalars(
         select(ContractBaseline).where(ContractBaseline.contract_id == contract_id)
@@ -249,7 +303,7 @@ def update_contract_baseline_from_document(
         if source_document_id and baseline.source_document_upload_id is None:
             baseline.source_document_upload_id = source_document_id
 
-    obligations = extract_baseline_obligations(text)
+    obligations = _provider_baseline_obligations(ai_provider, text) or extract_baseline_obligations(text)
     created_count = 0
     for obligation in obligations:
         if _baseline_obligation_exists(session, baseline.id, source_document_id, obligation):
@@ -272,7 +326,10 @@ def update_contract_baseline_from_document(
                 reference_text=quote,
                 confidence=obligation.get("confidence", 0.55),
                 evidence_hash=evidence_hash,
-                metadata_json={"extractor": "deterministic_v1"},
+                metadata_json={
+                    "extractor": "ai" if _provider_available(ai_provider) else "deterministic_v1",
+                    "model": _provider_model_name(ai_provider) if _provider_available(ai_provider) else None,
+                },
             )
         )
         created_count += 1
@@ -331,6 +388,25 @@ def extract_baseline_obligations(text: str) -> List[Dict[str, Any]]:
     return _dedupe_obligations(obligations)
 
 
+def _provider_baseline_obligations(ai_provider: Optional[object], text: str) -> List[Dict[str, Any]]:
+    items = _provider_results(ai_provider, "extract_baseline", text)
+    obligations: List[Dict[str, Any]] = []
+    for item in items:
+        description = str(item.get("description") or item.get("summary") or item.get("reference_text") or "").strip()
+        if not description:
+            continue
+        obligations.append(
+            {
+                "obligation_type": str(item.get("obligation_type") or "contract_obligation").strip()[:80],
+                "title": str(item.get("title") or "Contract obligation").strip()[:220],
+                "description": description,
+                "reference_text": str(item.get("reference_text") or item.get("quote") or description).strip(),
+                "confidence": _bounded_float(item.get("confidence"), default=0.65),
+            }
+        )
+    return _dedupe_obligations(obligations)
+
+
 def detect_regression_findings(
     session: Session,
     contract_id: str,
@@ -340,12 +416,25 @@ def detect_regression_findings(
     document_kind: Optional[str] = None,
     modification_kind: Optional[str] = None,
     processing_run_id: Optional[str] = None,
+    ai_provider: Optional[object] = None,
 ) -> List[RegressionFinding]:
     lower = text.lower()
     if document_kind is None:
-        document_kind, modification_kind = classify_document(document, text)
+        document_kind, modification_kind = classify_document(document, text, ai_provider=ai_provider)
     if document_kind == "modification" and modification_kind == "funding_only":
         return []
+
+    ai_findings = _provider_regression_findings(
+        session,
+        contract_id,
+        document,
+        text,
+        chunk_rows,
+        processing_run_id=processing_run_id,
+        ai_provider=ai_provider,
+    )
+    if ai_findings:
+        return ai_findings
 
     findings: List[RegressionFinding] = []
     if _scope_drift_detected(lower):
@@ -485,6 +574,67 @@ def detect_regression_findings(
     return [finding for finding in findings if finding is not None]
 
 
+def _provider_regression_findings(
+    session: Session,
+    contract_id: str,
+    document: object,
+    text: str,
+    chunk_rows: Sequence[object],
+    processing_run_id: Optional[str],
+    ai_provider: Optional[object],
+) -> List[RegressionFinding]:
+    baseline_text = _baseline_text_for_contract(session, contract_id)
+    items = _provider_results(ai_provider, "compare_regressions", baseline_text, text)
+    findings: List[RegressionFinding] = []
+    for item in items:
+        finding_type = str(item.get("finding_type") or item.get("type") or "").strip().lower()
+        title = str(item.get("title") or "").strip()
+        summary = str(item.get("summary") or "").strip()
+        quote = str(item.get("quote") or item.get("evidence") or "").strip()
+        if not finding_type or not title or not summary:
+            continue
+        finding = _create_regression_finding(
+            session,
+            contract_id,
+            document,
+            chunk_rows,
+            finding_type=finding_type[:80],
+            title=title[:220],
+            summary=summary,
+            severity=str(item.get("severity") or "medium").strip().lower()[:40],
+            confidence=_bounded_float(item.get("confidence"), default=0.65),
+            quote=quote[:1600] if quote else None,
+            processing_run_id=processing_run_id,
+        )
+        if finding is not None:
+            metadata = finding.metadata_json or {}
+            metadata["extractor"] = "ai"
+            metadata["model"] = _provider_model_name(ai_provider)
+            finding.metadata_json = metadata
+            findings.append(finding)
+    return findings
+
+
+def _baseline_text_for_contract(session: Session, contract_id: str) -> str:
+    baseline = session.scalars(
+        select(ContractBaseline).where(ContractBaseline.contract_id == contract_id)
+    ).first()
+    if baseline is None:
+        return ""
+    obligations = list(
+        session.scalars(
+            select(BaselineObligation).where(BaselineObligation.baseline_id == baseline.id)
+        ).all()
+    )
+    parts = [baseline.summary or ""]
+    parts.extend(
+        f"{item.title}: {item.description}"
+        for item in obligations[:80]
+        if item.title or item.description
+    )
+    return "\n".join(part for part in parts if part.strip())
+
+
 def handle_cpars_document(
     session: Session,
     contract_id: Optional[str],
@@ -572,7 +722,15 @@ def handle_modification_document(
     session.flush()
 
     rows: List[ContractPrimitiveDecision] = []
-    baseline = _ensure_contract_baseline(session, contract_id, document, text, chunk_rows, processing_run_id)
+    baseline = _ensure_contract_baseline(
+        session,
+        contract_id,
+        document,
+        text,
+        chunk_rows,
+        processing_run_id,
+        ai_provider=ai_provider,
+    )
     for normalized in new_items:
         row = ContractPrimitiveDecision(
             id=str(uuid4()),
@@ -851,22 +1009,8 @@ def create_investigation_run(
     return run
 
 
-def _provider_results(ai_provider: Optional[object], method_name: str, text: str) -> List[Dict[str, Any]]:
-    if ai_provider is None:
-        return []
-    status = getattr(ai_provider, "status", None)
-    if not bool(getattr(status, "available", False)):
-        return []
-    method = getattr(ai_provider, method_name, None)
-    if method is None:
-        return []
-    try:
-        result = method(text)
-    except Exception:
-        return []
-    data = getattr(result, "data", None)
-    if data is None and isinstance(result, dict):
-        data = result
+def _provider_results(ai_provider: Optional[object], method_name: str, *args: object) -> List[Dict[str, Any]]:
+    data = _provider_data(ai_provider, method_name, *args)
     if not isinstance(data, dict):
         return []
     raw_items = data.get("results", [])
@@ -875,10 +1019,80 @@ def _provider_results(ai_provider: Optional[object], method_name: str, text: str
     return [item for item in raw_items if isinstance(item, dict)]
 
 
+def _provider_data(ai_provider: Optional[object], method_name: str, *args: object) -> Dict[str, Any]:
+    if ai_provider is None:
+        return {}
+    status = getattr(ai_provider, "status", None)
+    if not bool(getattr(status, "available", False)):
+        return {}
+    method = getattr(ai_provider, method_name, None)
+    if method is None:
+        return {}
+    try:
+        result = method(*args)
+    except Exception:
+        return {}
+    data = getattr(result, "data", None)
+    if data is None and isinstance(result, dict):
+        data = result
+    return data if isinstance(data, dict) else {}
+
+
+def _classify_document_with_provider(
+    document: object,
+    text: str,
+    ai_provider: Optional[object],
+) -> Optional[Tuple[str, Optional[str], float, Optional[str]]]:
+    payload = {
+        "filename": _string_attr(document, "original_filename"),
+        "title": _string_attr(document, "title"),
+        "document_type": _string_attr(document, "document_type"),
+        "notes": _string_attr(document, "notes", "description"),
+        "existing_kind": _string_attr(document, "document_kind"),
+        "text": text,
+    }
+    data = _provider_data(ai_provider, "classify_document", payload)
+    kind = str(data.get("document_kind") or "").strip().lower()
+    allowed_kinds = {
+        "source_contract",
+        "task_order",
+        "modification",
+        "weekly_report",
+        "monthly_report",
+        "status_report",
+        "ipmdar_pnr",
+        "ipmdar_cpd_json",
+        "ipmdar_spd_json",
+        "cpars",
+        "cpars_evaluation",
+        "gao_oig_report",
+        "policy_or_regulation",
+        "email_context",
+        "other",
+    }
+    if kind == "cpars_evaluation":
+        kind = "cpars"
+    if kind not in allowed_kinds:
+        return None
+    modification_kind = data.get("modification_kind")
+    if modification_kind is not None:
+        modification_kind = str(modification_kind).strip().lower() or None
+    confidence = _bounded_float(data.get("confidence"), default=0.0)
+    if confidence < 0.5:
+        return None
+    rationale = str(data.get("rationale") or "").strip()[:1000] or None
+    return kind, modification_kind, confidence, rationale
+
+
 def _provider_model_name(ai_provider: Optional[object]) -> Optional[str]:
     status = getattr(ai_provider, "status", None)
     name = getattr(status, "name", None)
     return str(name) if name else None
+
+
+def _provider_available(ai_provider: Optional[object]) -> bool:
+    status = getattr(ai_provider, "status", None)
+    return bool(getattr(status, "available", False))
 
 
 def _extract_cpars_ratings_deterministic(text: str) -> List[Dict[str, Any]]:
@@ -975,6 +1189,7 @@ def _ensure_contract_baseline(
     text: str,
     chunk_rows: Sequence[object],
     processing_run_id: Optional[str],
+    ai_provider: Optional[object] = None,
 ) -> ContractBaseline:
     baseline = session.scalars(
         select(ContractBaseline).where(ContractBaseline.contract_id == contract_id)
@@ -988,6 +1203,7 @@ def _ensure_contract_baseline(
         text,
         chunk_rows,
         processing_run_id=processing_run_id,
+        ai_provider=ai_provider,
     )
 
 
@@ -1791,6 +2007,9 @@ def _contains_any(value: str, needles: Sequence[str]) -> bool:
 
 
 def _metadata(item: object) -> Dict[str, Any]:
+    if isinstance(item, dict):
+        metadata = item.get("metadata_json")
+        return dict(metadata) if isinstance(metadata, dict) else {}
     metadata = getattr(item, "metadata_json", None)
     if isinstance(metadata, dict):
         return dict(metadata)
@@ -1798,6 +2017,9 @@ def _metadata(item: object) -> Dict[str, Any]:
 
 
 def _set_attr(item: object, name: str, value: object) -> None:
+    if isinstance(item, dict):
+        item[name] = value
+        return
     if hasattr(item, name):
         setattr(item, name, value)
 

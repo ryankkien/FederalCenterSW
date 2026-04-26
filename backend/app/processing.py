@@ -442,7 +442,7 @@ def _persist_processing_outputs(
     job: Optional[object] = None,
 ) -> Optional[object]:
     if result.text_gate.text:
-        document_kind, _modification_kind = classify_document(document, result.text_gate.text)
+        document_kind, _modification_kind = classify_document(document, result.text_gate.text, ai_provider=provider)
         _auto_scaffold_contract_for_unmatched_upload(session, models, document, result, document_kind)
     run = _create_processing_run(session, models, document, result, provider, job=job)
     _add_run_step(session, models, run, document, "extraction", result.text_gate.status)
@@ -466,7 +466,7 @@ def _persist_processing_outputs(
         ai_provider=provider,
     )
     _persist_classification_decision(session, models, document, run)
-    _persist_entities_and_facts(session, models, document, result, page_rows, analysis_chunks, run)
+    _persist_entities_and_facts(session, models, document, result, page_rows, analysis_chunks, run, provider)
     _add_run_step(session, models, run, document, "analysis", result.status)
     return run
 
@@ -653,6 +653,7 @@ def _persist_entities_and_facts(
     page_rows: Sequence[object],
     chunk_rows: Sequence[object],
     run: Optional[object],
+    provider: Optional[AIProvider] = None,
 ) -> None:
     entity_model = _first_model(models, "DocumentEntity")
     fact_model = _first_model(models, "DocumentReportFact")
@@ -663,10 +664,21 @@ def _persist_entities_and_facts(
 
     first_page = page_rows[0] if page_rows else None
     first_chunk = chunk_rows[0] if chunk_rows else None
+    ai_payload = _provider_report_extraction(provider, result.text_gate.text)
+    entities = ai_payload.get("entities") or _extract_entities(result.text_gate.text)
+    facts = ai_payload.get("facts") or _extract_report_facts(result.text_gate.text)
+    extractor = "ai" if ai_payload else "deterministic_v1"
+    model_name = getattr(getattr(provider, "status", None), "name", None) if ai_payload else None
+
     if entity_model is not None and _model_table_exists(session, entity_model):
-        for entity in _extract_entities(result.text_gate.text):
+        for entity in entities:
+            entity_type = str(entity.get("entity_type") or "").strip()[:80]
+            value = str(entity.get("value") or "").strip()
+            normalized = str(entity.get("normalized_value") or value).strip().upper()
+            if not entity_type or not value:
+                continue
             evidence_hash = hashlib.sha256(
-                f"{document_id}:{entity['entity_type']}:{entity['normalized_value']}".encode("utf-8")
+                f"{document_id}:{entity_type}:{normalized}".encode("utf-8")
             ).hexdigest()
             if _row_with_evidence_hash_exists(session, entity_model, document_id, evidence_hash):
                 continue
@@ -678,20 +690,25 @@ def _persist_entities_and_facts(
                     page_id=_string_attr(first_page, "id"),
                     chunk_id=_string_attr(first_chunk, "id"),
                     processing_run_id=_string_attr(run, "id"),
-                    entity_type=entity["entity_type"],
-                    value=entity["value"],
-                    normalized_value=entity["normalized_value"],
-                    quote=entity["quote"],
-                    confidence=entity["confidence"],
+                    entity_type=entity_type,
+                    value=value[:500],
+                    normalized_value=normalized[:500],
+                    quote=str(entity.get("quote") or "")[:1600] or None,
+                    confidence=_bounded_float(entity.get("confidence"), default=0.65),
                     evidence_hash=evidence_hash,
-                    metadata_json={"extractor": "deterministic_v1"},
+                    metadata_json={"extractor": extractor, "model": model_name},
                 )
             )
 
     if fact_model is not None and _model_table_exists(session, fact_model):
-        for fact in _extract_report_facts(result.text_gate.text):
+        for fact in facts:
+            fact_type = str(fact.get("fact_type") or "").strip()[:80]
+            value_text = str(fact.get("value_text") or "").strip()
+            label = str(fact.get("label") or fact_type or "Fact").strip()[:220]
+            if not fact_type or not value_text:
+                continue
             evidence_hash = hashlib.sha256(
-                f"{document_id}:{fact['fact_type']}:{fact['value_text']}".encode("utf-8")
+                f"{document_id}:{fact_type}:{value_text}".encode("utf-8")
             ).hexdigest()
             if _row_with_evidence_hash_exists(session, fact_model, document_id, evidence_hash):
                 continue
@@ -703,14 +720,14 @@ def _persist_entities_and_facts(
                     page_id=_string_attr(first_page, "id"),
                     chunk_id=_string_attr(first_chunk, "id"),
                     processing_run_id=_string_attr(run, "id"),
-                    fact_type=fact["fact_type"],
-                    label=fact["label"],
-                    value_text=fact["value_text"],
+                    fact_type=fact_type,
+                    label=label,
+                    value_text=value_text[:1200],
                     value_json=fact.get("value_json"),
-                    quote=fact["quote"],
-                    confidence=fact["confidence"],
+                    quote=str(fact.get("quote") or "")[:1600] or None,
+                    confidence=_bounded_float(fact.get("confidence"), default=0.65),
                     evidence_hash=evidence_hash,
-                    metadata_json={"extractor": "deterministic_v1"},
+                    metadata_json={"extractor": extractor, "model": model_name},
                 )
             )
 
@@ -736,6 +753,33 @@ def _payload_pages(payload: Optional[TextJsonPayload], text: str) -> List[PageTe
     if pages:
         return pages
     return [PageText(page_number=1, text=text, start_char=0, end_char=len(text))] if text else []
+
+
+def _provider_report_extraction(
+    provider: Optional[AIProvider],
+    text: str,
+) -> Dict[str, List[Dict[str, object]]]:
+    status = getattr(provider, "status", None)
+    if not bool(getattr(status, "available", False)):
+        return {}
+    method = getattr(provider, "extract_report_facts", None)
+    if method is None:
+        return {}
+    try:
+        result = method(text)
+    except Exception:
+        return {}
+    data = getattr(result, "data", None)
+    if not isinstance(data, dict):
+        return {}
+    entities = data.get("entities", [])
+    facts = data.get("facts", [])
+    payload: Dict[str, List[Dict[str, object]]] = {}
+    if isinstance(entities, list):
+        payload["entities"] = [item for item in entities if isinstance(item, dict)]
+    if isinstance(facts, list):
+        payload["facts"] = [item for item in facts if isinstance(item, dict)]
+    return payload if payload.get("entities") or payload.get("facts") else {}
 
 
 def _extract_entities(text: str) -> List[Dict[str, object]]:
@@ -816,6 +860,14 @@ def _extract_report_facts(text: str) -> List[Dict[str, object]]:
             }
         )
     return facts[:80]
+
+
+def _bounded_float(value: object, default: float = 0.0) -> float:
+    try:
+        number = float(str(value).replace("$", "").replace(",", "").strip())
+    except (TypeError, ValueError):
+        number = default
+    return min(1.0, max(0.0, number))
 
 
 def _auto_scaffold_contract_for_unmatched_upload(

@@ -82,11 +82,11 @@ def get_ai_provider_name() -> str:
 
 
 def get_ai_processing_enabled() -> bool:
-    return _env_bool("AI_PROCESSING_ENABLED", default=_has_openai_api_key())
+    return _env_bool("AI_PROCESSING_ENABLED", default=True)
 
 
 def get_ai_inline_processing_enabled() -> bool:
-    return _env_bool("AI_INLINE_PROCESSING_ENABLED", default=_has_openai_api_key())
+    return _env_bool("AI_INLINE_PROCESSING_ENABLED", default=True)
 
 
 def get_openai_api_key() -> Optional[str]:

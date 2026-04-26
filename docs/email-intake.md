@@ -1,6 +1,6 @@
 # Email Intake
 
-The email intake worker fetches unread messages from an IMAP mailbox and parses them into a normalized audit record. Locally, the audit record can be written as newline-delimited JSON; in Azure Functions, it can write durable JSON records to Blob Storage. In commit mode, supported attachments are also uploaded through the backend blob storage adapter, run deterministic intake classification and contract matching, and are inserted into the same document table used by the contractor and official portals.
+The email intake worker fetches unread messages from an IMAP mailbox and parses them into a normalized audit record. Locally, the audit record can be written as newline-delimited JSON; in Azure Functions, it can write durable JSON records to Blob Storage. In commit mode, supported attachments are also uploaded through the backend blob storage adapter, run AI-first inline intake when enabled, and are inserted into the same document table used by the contractor and official portals.
 
 ## Local Run
 
@@ -36,13 +36,13 @@ Commit mode writes the JSON audit record, stores supported attachments as portal
 
 Until real contractor accounts are added, emailed attachments are assigned to `EMAIL_INTAKE_DEFAULT_UPLOADER_ID`, which defaults to the mock contractor `contractor-demo`. That means they appear on the mock contractor portal and on the official analyst workspace. Unsupported attachment types are skipped; the accepted types match the web upload form: PDF, DOC, DOCX, TXT, CSV, XLSX, PNG, JPG, and JPEG.
 
-Each committed attachment runs the same inline deterministic intake step as portal
-uploads. Filename, email-subject-derived title, notes, and configured document type
-can set the initial `document_kind`; filename, title, and notes can also match a known
-contract number and hard-link `document_uploads.contract_id`. The decisions are
-persisted to `document_classification_decisions` and `document_match_decisions` with
-deterministic source metadata. OCR, full text classification, and AI fallback matching
-remain processing-job work.
+Each committed attachment runs the same inline intake step as portal uploads. When
+inline AI is enabled and extracted text is available, the LLM classifies the document
+and suggests contract matches immediately; otherwise filename, email-subject-derived
+title, notes, and configured document type provide fallback decisions before async
+processing. The decisions are persisted to `document_classification_decisions` and
+`document_match_decisions`; queued processing still runs the full AI-first analysis
+path.
 
 ## Auto Reply
 

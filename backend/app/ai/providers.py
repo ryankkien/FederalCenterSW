@@ -78,6 +78,9 @@ class AIProvider(Protocol):
     ) -> AIProcessingResult:
         ...
 
+    def classify_document(self, payload: Dict[str, object]) -> StructuredAnalysisResult:
+        ...
+
     def extract_baseline(self, text: str) -> StructuredAnalysisResult:
         ...
 
@@ -140,6 +143,9 @@ class NullAIProvider:
         request: ProcessingSignalRequest,
     ) -> AIProcessingResult:
         return AIProcessingResult(provider=self.status.name, signals=[])
+
+    def classify_document(self, payload: Dict[str, object]) -> StructuredAnalysisResult:
+        return StructuredAnalysisResult(provider=self.status.name, data={})
 
     def embed_texts(self, texts: Sequence[str]) -> List[List[float]]:
         return []
@@ -276,6 +282,32 @@ class OpenAIProvider:
             raw=data,
         )
 
+    def classify_document(self, payload: Dict[str, object]) -> StructuredAnalysisResult:
+        return self._structured_json(
+            "document_classification_v2",
+            (
+                "You are a federal contract document analyst. Classify the uploaded document. "
+                "Return JSON with document_kind, confidence from 0 to 1, rationale, and optional "
+                "modification_kind. document_kind must be one of: source_contract, task_order, "
+                "modification, weekly_report, monthly_report, status_report, ipmdar_pnr, "
+                "ipmdar_cpd_json, ipmdar_spd_json, cpars, gao_oig_report, policy_or_regulation, "
+                "email_context, or other. modification_kind, when relevant, must be one of: "
+                "funding_only, pop_change, scope_change, labor_change, cdrl_change, clause_update, "
+                "equitable_adjustment, administrative, or unclear. Prefer IPMDAR kinds for "
+                "Integrated Program Management Data and Analysis Report documents, CPARS for "
+                "Contractor Performance Assessment Report documents, and source_contract for "
+                "solicitations, RFPs, PWS, SOW, or awarded contract text."
+            ),
+            {
+                "filename": payload.get("filename"),
+                "title": payload.get("title"),
+                "document_type": payload.get("document_type"),
+                "notes": payload.get("notes"),
+                "existing_kind": payload.get("existing_kind"),
+                "text": str(payload.get("text") or "")[:12000],
+            },
+        )
+
     def embed_texts(self, texts: Sequence[str]) -> List[List[float]]:
         inputs = [text for text in texts if text.strip()]
         if not inputs:
@@ -293,21 +325,37 @@ class OpenAIProvider:
     def extract_baseline(self, text: str) -> StructuredAnalysisResult:
         return self._structured_json(
             "baseline_extraction_v1",
-            "Extract contract baseline obligations as JSON.",
+            (
+                "Extract contract baseline obligations as JSON with a 'results' array. "
+                "Each item should include obligation_type, title, description, reference_text, "
+                "and confidence. Use only obligations grounded in the supplied contract text."
+            ),
             {"text": text[:12000]},
         )
 
     def extract_report_facts(self, text: str) -> StructuredAnalysisResult:
         return self._structured_json(
             "report_fact_extraction_v1",
-            "Extract report facts, entities, metrics, and citations as JSON.",
+            (
+                "Extract report facts and entities as JSON. Return 'entities' and 'facts' arrays. "
+                "Entities should include entity_type, value, normalized_value, quote, confidence. "
+                "Facts should include fact_type, label, value_text, value_json, quote, confidence. "
+                "Focus on contract numbers, RFIs, dates, dollar values, clauses, schedule signals, "
+                "cost signals, government action items, deliverables, staffing, risks, decisions, "
+                "and earned value or schedule metrics. Use only supplied text."
+            ),
             {"text": text[:12000]},
         )
 
     def compare_regressions(self, baseline: str, report: str) -> StructuredAnalysisResult:
         return self._structured_json(
             "regression_compare_v1",
-            "Compare report text against the baseline and return cited regressions as JSON.",
+            (
+                "Compare report text against the contract baseline and return cited regressions "
+                "as JSON with a 'results' array. Each item should include finding_type, title, "
+                "summary, severity, confidence, and quote. Use only supplied text and keep "
+                "unsupported possibilities out of the results."
+            ),
             {"baseline": baseline[:8000], "report": report[:12000]},
         )
 
