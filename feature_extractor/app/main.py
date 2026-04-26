@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from app import classifier, chunker, embedder, primitive_extractor, summarizer
+from app import analysis_trigger, classifier, chunker, embedder, primitive_extractor, summarizer
 from app.blob import get_blob_storage
 from app.db import get_connection, log_event
 from app.models import get_llm_client
@@ -42,6 +42,7 @@ class ExtractPrimitivesResponse(BaseModel):
     doc_id: str
     extraction_run_id: str | None
     primitives_extracted: dict[str, int]
+    analysis_trigger: dict | None = None
 
 
 @app.get("/health")
@@ -153,10 +154,28 @@ def extract_primitives(req: ExtractPrimitivesRequest):
             log_event(conn, req.doc_id, "feature_extractor.primitives", "fail")
             raise HTTPException(status_code=500, detail=f"Primitive extraction failed: {exc}")
 
+        trigger_result = analysis_trigger.trigger_per_contract_analysis(
+            req.doc_id,
+            req.contract_id,
+            run_id,
+        )
+        log_event(
+            conn,
+            req.doc_id,
+            "feature_extractor.analysis_trigger",
+            trigger_result.get("status", "unknown"),
+            {
+                key: value
+                for key, value in trigger_result.items()
+                if key not in {"status"}
+            },
+        )
+
     return ExtractPrimitivesResponse(
         doc_id=req.doc_id,
         extraction_run_id=run_id,
         primitives_extracted=counts,
+        analysis_trigger=trigger_result,
     )
 
 

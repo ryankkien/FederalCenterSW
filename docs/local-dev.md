@@ -215,6 +215,11 @@ docker compose up -d feature_extractor
 
 The service reads `contracts/{document_id}/text.json`, falls back to legacy
 `documents/{doc_id}/ocr.json`, and writes `contracts/{document_id}/summary.json`.
+After primitive extraction succeeds for a document with a known `contract_id`, the
+service calls the backend internal analysis trigger. The backend debounces the request:
+it skips the run when an `analysis_runs` row for that contract is newer than the latest
+successful or partial primitive extraction. Low-N cohorts still run and are tagged
+`low_confidence`.
 Configure `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `MODEL_PREFERENCE` only in ignored
 local env files or shell exports.
 

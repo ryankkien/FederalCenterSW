@@ -112,8 +112,11 @@ new or reset documents.
 An optional local feature extractor service lives in `feature_extractor/`. It can read
 `contracts/{document_id}/text.json`, generate a layered summary, classify PSC/NAICS,
 extract structured primitives (deliverable, financial, decisions, issue, personnel) into
-the DB, and write `contracts/{document_id}/summary.json`. The main analyst pipeline does not
-require it; it is supplemental to the DB-backed processing store.
+the DB, and write `contracts/{document_id}/summary.json`. When `BACKEND_API_URL` and
+`INTERNAL_SERVICE_TOKEN` are configured, successful primitive extraction asks the backend
+to enqueue a debounced per-contract analysis run for the document's `contract_id`.
+The main analyst pipeline does not require it; it is supplemental to the DB-backed
+processing store.
 
 ## Infrastructure
 

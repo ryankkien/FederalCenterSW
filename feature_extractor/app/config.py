@@ -34,3 +34,11 @@ def get_database_url() -> str:
 
 def get_embedding_model() -> str:
     return os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+
+
+def get_backend_api_url() -> str:
+    return os.getenv("BACKEND_API_URL", "").rstrip("/")
+
+
+def get_internal_service_token() -> str:
+    return os.getenv("INTERNAL_SERVICE_TOKEN", "")

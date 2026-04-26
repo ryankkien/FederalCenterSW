@@ -17,6 +17,10 @@ def get_auth_mode() -> str:
     return os.getenv("AUTH_MODE", "mock").strip().lower()
 
 
+def get_internal_service_token() -> Optional[str]:
+    return os.getenv("INTERNAL_SERVICE_TOKEN")
+
+
 def get_entra_tenant_id() -> Optional[str]:
     return os.getenv("ENTRA_TENANT_ID") or os.getenv("AZURE_TENANT_ID")
 

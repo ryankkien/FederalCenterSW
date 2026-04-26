@@ -1,21 +1,29 @@
 from collections import Counter, defaultdict
 from datetime import date, datetime
 import re
+import secrets
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.ai.providers import get_ai_provider
-from app.analysis_orchestrator import get_analysis_run, run_cohort_analysis, run_per_contract_analysis
+from app.analysis_orchestrator import (
+    enqueue_per_contract_analysis_after_extraction,
+    execute_enqueued_per_contract_analysis,
+    get_analysis_run,
+    run_cohort_analysis,
+    run_per_contract_analysis,
+)
 from app.auth import CurrentUser, get_current_user
 from app.authz import require_contract_view, visible_contract_ids
 from app.blob_storage import BlobStorage, get_blob_storage
 from app.cohort_builder import build_cohort
+from app.config import get_internal_service_token
 from app.contract_analysis import create_investigation_run
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.models import (
     BaselineObligation,
     BaselineRevision,
@@ -689,6 +697,19 @@ class AnalysisRunResponse(BaseModel):
     completed_at: Optional[datetime] = None
 
 
+class AutoAnalysisTriggerRequest(BaseModel):
+    document_upload_id: Optional[str] = None
+    extraction_run_id: Optional[str] = None
+
+
+class AutoAnalysisTriggerResponse(BaseModel):
+    status: str
+    run_id: Optional[str] = None
+    reason: Optional[str] = None
+    cohort_N: Optional[int] = None
+    low_confidence: Optional[bool] = None
+
+
 class CohortAnalysisRequest(BaseModel):
     contract_ids: List[str]
     cohort_definition: Optional[Dict[str, object]] = None
@@ -763,6 +784,66 @@ def get_per_contract_analysis(
         created_at=run.get("created_at"),
         completed_at=run.get("completed_at"),
     )
+
+
+@router.post(
+    "/internal/contracts/{contract_id}/performance-analysis",
+    response_model=AutoAnalysisTriggerResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def auto_trigger_per_contract_analysis(
+    contract_id: str,
+    payload: AutoAnalysisTriggerRequest,
+    background_tasks: BackgroundTasks,
+    x_internal_service_token: str = Header(default=""),
+    db: Session = Depends(get_db),
+) -> AutoAnalysisTriggerResponse:
+    expected = get_internal_service_token()
+    if not expected or not secrets.compare_digest(x_internal_service_token, expected):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal token")
+    try:
+        queued = enqueue_per_contract_analysis_after_extraction(
+            db,
+            contract_id,
+            document_upload_id=payload.document_upload_id,
+            extraction_run_id=payload.extraction_run_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    if queued["status"] == "queued":
+        background_tasks.add_task(
+            _execute_auto_per_contract_analysis_task,
+            queued["run_id"],
+            contract_id,
+            payload.document_upload_id,
+            payload.extraction_run_id,
+        )
+    return AutoAnalysisTriggerResponse(
+        status=queued["status"],
+        run_id=queued.get("run_id"),
+        reason=queued.get("reason"),
+        cohort_N=queued.get("cohort_N"),
+        low_confidence=queued.get("low_confidence"),
+    )
+
+
+def _execute_auto_per_contract_analysis_task(
+    run_id: str,
+    contract_id: str,
+    document_upload_id: Optional[str],
+    extraction_run_id: Optional[str],
+) -> None:
+    db = SessionLocal()
+    try:
+        execute_enqueued_per_contract_analysis(
+            db,
+            run_id,
+            contract_id,
+            document_upload_id=document_upload_id,
+            extraction_run_id=extraction_run_id,
+        )
+    finally:
+        db.close()
 
 
 @router.post(

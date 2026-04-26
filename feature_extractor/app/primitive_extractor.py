@@ -209,8 +209,8 @@ def run(
     final_status = "success" if all_succeeded else "partial"
     with conn.cursor() as cur:
         cur.execute(
-            "UPDATE primitive_extraction_runs SET status = %s WHERE id = %s",
-            (final_status, run_id),
+            "UPDATE primitive_extraction_runs SET status = %s, extracted_at = %s WHERE id = %s",
+            (final_status, datetime.now(timezone.utc), run_id),
         )
     conn.commit()
 

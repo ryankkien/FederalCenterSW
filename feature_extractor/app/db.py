@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+import json
 import uuid
 
 import psycopg
@@ -15,12 +16,19 @@ def get_connection():
         yield conn
 
 
-def log_event(conn: psycopg.Connection, doc_id: str, event_type: str, status: str) -> None:
+def log_event(
+    conn: psycopg.Connection,
+    doc_id: str,
+    event_type: str,
+    status: str,
+    metadata: dict | None = None,
+) -> None:
     """Write a summarizer pipeline event to audit_events.
 
     event_type examples: 'feature_extractor.summary', 'feature_extractor.chunking', 'feature_extractor.index'
     status: 'success' or 'fail'
     """
+    event_metadata = {"status": status, **(metadata or {})}
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -34,7 +42,7 @@ def log_event(conn: psycopg.Connection, doc_id: str, event_type: str, status: st
                 "document_upload",
                 doc_id,
                 doc_id,
-                f'{{"status": "{status}"}}',
+                json.dumps(event_metadata),
             ),
         )
     conn.commit()

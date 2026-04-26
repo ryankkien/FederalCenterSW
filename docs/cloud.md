@@ -237,6 +237,7 @@ Current env variables used by the backend:
 | `AZURE_STORAGE_ACCOUNT` | Blob Storage account name. |
 | `AZURE_STORAGE_CONTAINER` | Blob container name. |
 | `AZURE_STORAGE_CONNECTION_STRING` | Blob Storage connection string for backend code or local scripts. |
+| `INTERNAL_SERVICE_TOKEN` | Shared service token accepted by backend internal routes, including the feature-extractor analysis trigger. |
 | `EMAIL_INTAKE_HOST` | IMAP host for email intake. |
 | `EMAIL_INTAKE_PORT` | IMAP port, usually `993`. |
 | `EMAIL_INTAKE_USERNAME` | IMAP username. |
