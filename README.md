@@ -129,20 +129,6 @@ bun run email:intake -- --limit 5
 
 Use `--commit` only after dry-run output looks correct; commit mode moves processed messages to a `Processed` mailbox. See [docs/email-intake.md](docs/email-intake.md).
 
-## Discord HTML Renderer
-
-The backend includes a Discord bot worker that watches a configured channel for HTML
-snippets, renders them to PNG with Playwright/Chromium, and posts the image back through
-a Discord webhook. Configure `DISCORD_HTML_RENDERER_*` variables, install Chromium with
-Playwright, then run:
-
-```sh
-bun run discord:html-renderer
-```
-
-Discord webhooks are send-only, so the renderer also needs a Discord bot token with
-Message Content Intent enabled. See [docs/discord-html-renderer.md](docs/discord-html-renderer.md).
-
 ## Cloud
 
 Azure resource inventory, access steps, PostgreSQL commands, and Blob Storage commands are documented in [docs/cloud.md](docs/cloud.md).

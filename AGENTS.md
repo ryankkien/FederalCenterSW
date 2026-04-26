@@ -58,9 +58,6 @@ same-origin routing can both work.
 - `backend/app/main.py` creates the FastAPI app, configures CORS, and defines API routes.
 - `backend/app/email_intake.py` contains the IMAP email intake worker, message parsing,
   JSONL/Azure Blob stub persistence, and auto-reply logic.
-- `backend/app/discord_html_renderer.py` contains the Discord bot worker that renders
-  posted HTML snippets to PNG through Playwright and posts them back through a Discord
-  webhook.
 - `backend/function_app.py` is the Azure Functions timer-trigger entry point for
   running email intake in Azure.
 - `backend/host.json` contains Azure Functions host configuration.
@@ -172,12 +169,6 @@ bun run email:intake -- --limit 5
 
 Use `--commit` only after dry-run output has been checked.
 
-Run the Discord HTML renderer worker:
-
-```sh
-bun run discord:html-renderer
-```
-
 Preview or apply infrastructure:
 
 ```sh
@@ -230,16 +221,11 @@ bun run infra:deploy
 - Email intake is currently a worker-style module, not a FastAPI route.
 - Email intake persistence is intentionally stubbed: it writes JSONL locally by default
   and can write JSON records to Azure Blob Storage when configured.
-- Discord HTML rendering is a worker-style bot, not a FastAPI route or GitHub Actions
-  workflow. It requires `DISCORD_HTML_RENDERER_BOT_TOKEN` to read messages and
-  `DISCORD_HTML_RENDERER_WEBHOOK_URL` to post rendered PNGs.
 - In Azure Functions, email intake should use Blob Storage for durable stub output
   because local function storage is ephemeral.
 - Cloud setup and Azure resource notes belong in `docs/cloud.md`.
 - Infrastructure workflow and drift policy belong in `docs/infra.md`.
 - Local development mirror instructions belong in `docs/local-dev.md`.
 - Email intake configuration and operating notes belong in `docs/email-intake.md`.
-- Discord HTML renderer configuration and operating notes belong in
-  `docs/discord-html-renderer.md`.
 - Product direction, users, contract records, intake sources, processing signals, and
   deliverables belong in `docs/product.md`.
