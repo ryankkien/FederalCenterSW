@@ -73,9 +73,33 @@ contract. The SQL mirror is maintained for review and local psql reference.
 
 - `contractor_profiles`: contractor evidence summaries, award counts, and issue/contradiction counts.
 
-### Summarizer Service (`summarizer/`)
+### Primitive Extraction Tables (`feature_extractor/` service, migration 0006)
 
-The optional `summarizer/` ACA reads a text artifact from blob, runs hierarchical summarization, classifies the document with a PSC and NAICS code, splits the full text into 256-word chunks written to `document_chunks`, and generates per-chunk embeddings written to `chunk_embeddings`. Pipeline events are logged to `audit_events` with `entity_type = 'document_upload'`.
+These tables store structured records extracted from documents by the `feature_extractor` service. They feed the per-contract and cohort analysis pipelines.
+
+**New columns on `contracts`:**
+- `contract_type VARCHAR(40)` — e.g. FFP, CPFF, T&M, IDIQ
+- `competition_type VARCHAR(40)` — e.g. full_and_open, set_aside, sole_source
+
+**New tables:**
+- `primitive_extraction_runs`: audit trail per document extraction run. `contract_id` and `doc_upload_id` are nullable until matched.
+- `contract_primitives_deliverable`: CDRL items, planned/actual dates, status, days late.
+- `contract_primitives_financial`: EVM metrics (BCWS/BCWP/ACWP), BAC/EAC/ETC, CPI/SPI, per period.
+- `contract_primitives_decisions`: contract mods and decisions — mod number, reason, value/POP/scope changes.
+- `contract_primitives_issues`: issues and risks — category, severity, responsible party, open/resolved dates.
+- `contract_primitives_personnel`: key persons, labor categories, FTE planned vs. actual, staffing gaps.
+- `cpars_ratings`: per-factor adjectival CPARS ratings ingested from CPARS documents.
+- `analysis_runs`: stores JSON outputs of per-contract and cohort analyses.
+
+### Feature Extractor Service (`feature_extractor/`)
+
+The optional `feature_extractor/` service replaces the old `summarizer/`. It reads a text artifact from blob, runs hierarchical summarization, classifies the document (PSC/NAICS), chunks and embeds the text, and extracts structured primitives into the DB. The `/extract-primitives` endpoint is called by the backend with `doc_id`, `contract_id`, and `doc_classification`.
+
+**New endpoints:**
+- `POST /summarize` — unchanged, runs summarization + chunking + embedding (pipeline steps 1-4)
+- `POST /extract-primitives` — extracts primitives for a document given its classification
+
+**Audit events** use `event_type` values: `feature_extractor.summary`, `feature_extractor.chunking`, `feature_extractor.index`, `feature_extractor.primitives`
 
 **Blob paths** (container: `app-assets`, env: `AZURE_STORAGE_CONTAINER`):
 
@@ -83,7 +107,7 @@ The optional `summarizer/` ACA reads a text artifact from blob, runs hierarchica
 |------|-------|--------|
 | `contracts/{document_upload_id}/text.json` | Primary text input | `{"pages": ["page 1 text", ...]}` |
 | `documents/{document_upload_id}/ocr.json` | Legacy text input (fallback) | `{"doc_id": "...", "pages": [...]}` |
-| `contracts/{document_upload_id}/summary.json` | Summarizer output | See schema below |
+| `contracts/{document_upload_id}/summary.json` | Feature extractor output | See schema below |
 
 **`summary.json` schema:**
 ```json
@@ -109,10 +133,18 @@ The optional `summarizer/` ACA reads a text artifact from blob, runs hierarchica
 }
 ```
 
-- `layers[0]` chunks reference `page_range` (0-indexed page numbers from input)
-- Subsequent layers reference `summary_range` (indices into previous layer summaries)
-- `classification.psc_code` / `naics_code` are written to `contracts.psc_code` / `contracts.naics_code` by the orchestrator
-- Audit events use `event_type` values: `summarizer.summary`, `summarizer.chunking`, `summarizer.index`
+### Analysis Pipeline (Backend)
+
+**`backend/app/cohort_builder.py`**: Given a `contract_id`, finds comparable contracts using NAICS 4-digit prefix, `contract_type`, agency, `competition_type`, POP length (±25%), and obligated value band (±50%). Flags `low_confidence: true` when N < 20.
+
+**`backend/app/analysis_orchestrator.py`**: Loads primitives + CPARS for target + cohort, assembles the analysis prompt, calls Claude, stores result in `analysis_runs`.
+
+**New API endpoints:**
+- `GET /api/contracts/{id}/cohort` → cohort definition + contract IDs
+- `POST /api/contracts/{id}/performance-analysis` → trigger per-contract analysis
+- `GET /api/contracts/{id}/performance-analysis/{run_id}` → get result
+- `POST /api/analysis/cohort-runs` → trigger cohort analysis
+- `GET /api/analysis/cohort-runs/{run_id}` → get result
 
 ### Relationships
 
@@ -132,5 +164,12 @@ contracts
   ├─< contract_hypotheses ──< hypothesis_evidence
   ├─< investigation_runs ──< external_source_refs
   ├─< contract_similarity_links
-  └─< contract_topics ──< topic_evidence/topic_links/contract_topic_revisions
+  ├─< contract_topics ──< topic_evidence/topic_links/contract_topic_revisions
+  ├─< primitive_extraction_runs ──< contract_primitives_deliverable
+  │                               ──< contract_primitives_financial
+  │                               ──< contract_primitives_decisions
+  │                               ──< contract_primitives_issues
+  │                               ──< contract_primitives_personnel
+  ├─< cpars_ratings
+  └─< analysis_runs (target) / analysis_runs (cohort, no direct FK)
 ```

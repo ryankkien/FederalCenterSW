@@ -1,4 +1,6 @@
-from typing import Protocol
+import json
+import re
+from typing import Any, Protocol
 
 import anthropic
 import openai
@@ -14,6 +16,13 @@ class LLMClient(Protocol):
     def model_name(self) -> str: ...
 
     def complete(self, system: str, user: str, max_tokens: int) -> str: ...
+
+    def complete_json(self, system: str, user: str, max_tokens: int) -> Any: ...
+
+
+def _parse_json_response(raw: str) -> Any:
+    text = re.sub(r"^```[a-z]*\n?|```$", "", raw.strip(), flags=re.MULTILINE).strip()
+    return json.loads(text)
 
 
 class ClaudeClient:
@@ -32,6 +41,15 @@ class ClaudeClient:
             messages=[{"role": "user", "content": user}],
         )
         return message.content[0].text
+
+    def complete_json(self, system: str, user: str, max_tokens: int) -> Any:
+        message = self._client.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=max_tokens,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+        )
+        return _parse_json_response(message.content[0].text)
 
 
 class OpenAIClient:
@@ -52,6 +70,19 @@ class OpenAIClient:
             ],
         )
         return response.choices[0].message.content
+
+    def complete_json(self, system: str, user: str, max_tokens: int) -> Any:
+        response = self._client.chat.completions.create(
+            model=OPENAI_MODEL,
+            max_tokens=max_tokens,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        )
+        raw = response.choices[0].message.content
+        return _parse_json_response(raw)
 
 
 def get_llm_client() -> LLMClient:

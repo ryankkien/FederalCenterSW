@@ -259,8 +259,9 @@ bun run infra:deploy
 - Default knowledge ingestion should use local fixture documents and the generated
   synthetic fixture corpus only. Do not make bulk downloads or live official-source
   calls part of the default local ingest path.
-- The optional `summarizer/` service reads canonical `contracts/{document_id}/text.json`
-  artifacts, writes `contracts/{document_id}/summary.json`, and may provide
+- The optional `feature_extractor/` service reads canonical `contracts/{document_id}/text.json`
+  artifacts, writes `contracts/{document_id}/summary.json`, extracts structured primitives
+  (deliverable, financial, decisions, issue, personnel) into the DB, and may provide
   supplemental PSC/NAICS classification evidence. It is not the canonical analyst
   store.
 - `bun run corpus:build-synthetic` creates an ignored file corpus under

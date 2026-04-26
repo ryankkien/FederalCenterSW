@@ -203,14 +203,14 @@ failure, or falls back to embedded PDF text with a warning when usable embedded 
 available. Long PDFs are limited by `DOCUMENT_OCR_MAX_PAGES` so synchronous uploads do
 not spend unbounded time in OCR.
 
-## Optional Summarizer Notes
+## Optional Feature Extractor Notes
 
-The local Compose file includes an optional `summarizer` service on port `8001`. It is
-not started by `bun run local:up`; start it explicitly when you want layered summary
-and PSC/NAICS classification output:
+The local Compose file includes an optional `feature_extractor` service on port `8001`. It is
+not started by `bun run local:up`; start it explicitly when you want layered summary,
+PSC/NAICS classification, and primitive extraction output:
 
 ```sh
-docker compose up -d summarizer
+docker compose up -d feature_extractor
 ```
 
 The service reads `contracts/{document_id}/text.json`, falls back to legacy

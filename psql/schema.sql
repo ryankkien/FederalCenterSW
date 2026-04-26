@@ -14,6 +14,8 @@ CREATE TABLE contracts (
     vendor_uei VARCHAR(32),
     naics_code VARCHAR(20),
     psc_code VARCHAR(20),
+    contract_type VARCHAR(40),
+    competition_type VARCHAR(40),
     period_start DATE,
     period_end DATE,
     status VARCHAR(40) NOT NULL DEFAULT 'active',
@@ -648,3 +650,154 @@ CREATE INDEX ix_document_semantic_links_target_document_upload_id ON document_se
 
 CREATE INDEX ix_contractor_profiles_vendor_name ON contractor_profiles (vendor_name);
 CREATE INDEX ix_contractor_profiles_vendor_uei ON contractor_profiles (vendor_uei);
+
+-- Primitive extraction tables (migration 0006)
+
+CREATE TABLE primitive_extraction_runs (
+    id VARCHAR(36) PRIMARY KEY,
+    contract_id VARCHAR(36) REFERENCES contracts(id) ON DELETE CASCADE,
+    doc_upload_id VARCHAR(36) REFERENCES document_uploads(id) ON DELETE SET NULL,
+    period_label VARCHAR(20),
+    extracted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    model VARCHAR(160),
+    status VARCHAR(20) NOT NULL DEFAULT 'success'
+);
+
+CREATE INDEX ix_primitive_extraction_runs_contract_id ON primitive_extraction_runs (contract_id);
+CREATE INDEX ix_primitive_extraction_runs_doc_upload_id ON primitive_extraction_runs (doc_upload_id);
+CREATE INDEX ix_primitive_extraction_runs_status ON primitive_extraction_runs (status);
+
+CREATE TABLE contract_primitives_deliverable (
+    id VARCHAR(36) PRIMARY KEY,
+    extraction_run_id VARCHAR(36) NOT NULL REFERENCES primitive_extraction_runs(id) ON DELETE CASCADE,
+    contract_id VARCHAR(36) REFERENCES contracts(id) ON DELETE CASCADE,
+    source_doc_ids JSON,
+    period_label VARCHAR(20),
+    deliverable_name TEXT,
+    cdrl_item VARCHAR(40),
+    planned_due_date DATE,
+    actual_delivery_date DATE,
+    status VARCHAR(20),
+    acceptance_status VARCHAR(40),
+    days_late INTEGER
+);
+
+CREATE INDEX ix_cpd_contract_id ON contract_primitives_deliverable (contract_id);
+CREATE INDEX ix_cpd_period_label ON contract_primitives_deliverable (period_label);
+
+CREATE TABLE contract_primitives_financial (
+    id VARCHAR(36) PRIMARY KEY,
+    extraction_run_id VARCHAR(36) NOT NULL REFERENCES primitive_extraction_runs(id) ON DELETE CASCADE,
+    contract_id VARCHAR(36) REFERENCES contracts(id) ON DELETE CASCADE,
+    source_doc_ids JSON,
+    period_label VARCHAR(20),
+    period_end_date DATE,
+    planned_value NUMERIC,
+    earned_value NUMERIC,
+    actual_cost NUMERIC,
+    budget_at_completion NUMERIC,
+    estimate_at_completion NUMERIC,
+    estimate_to_complete NUMERIC,
+    cost_variance NUMERIC,
+    schedule_variance NUMERIC,
+    cpi NUMERIC,
+    spi NUMERIC,
+    percent_complete NUMERIC,
+    cumulative_obligations NUMERIC
+);
+
+CREATE INDEX ix_cpf_contract_id ON contract_primitives_financial (contract_id);
+CREATE INDEX ix_cpf_period_label ON contract_primitives_financial (period_label);
+
+CREATE TABLE contract_primitives_decisions (
+    id VARCHAR(36) PRIMARY KEY,
+    extraction_run_id VARCHAR(36) NOT NULL REFERENCES primitive_extraction_runs(id) ON DELETE CASCADE,
+    contract_id VARCHAR(36) REFERENCES contracts(id) ON DELETE CASCADE,
+    source_doc_ids JSON,
+    period_label VARCHAR(20),
+    decision_type VARCHAR(40),
+    mod_number VARCHAR(40),
+    mod_reason TEXT,
+    value_change NUMERIC,
+    pop_change_days INTEGER,
+    scope_change_description TEXT,
+    decision_date DATE,
+    deciding_party VARCHAR(200)
+);
+
+CREATE INDEX ix_cpdec_contract_id ON contract_primitives_decisions (contract_id);
+CREATE INDEX ix_cpdec_period_label ON contract_primitives_decisions (period_label);
+
+CREATE TABLE contract_primitives_issues (
+    id VARCHAR(36) PRIMARY KEY,
+    extraction_run_id VARCHAR(36) NOT NULL REFERENCES primitive_extraction_runs(id) ON DELETE CASCADE,
+    contract_id VARCHAR(36) REFERENCES contracts(id) ON DELETE CASCADE,
+    source_doc_ids JSON,
+    period_label VARCHAR(20),
+    issue_id VARCHAR(80),
+    category VARCHAR(60),
+    description TEXT,
+    severity VARCHAR(20),
+    responsible_party VARCHAR(40),
+    date_opened DATE,
+    date_resolved DATE,
+    status VARCHAR(20),
+    recurrence_flag BOOLEAN NOT NULL DEFAULT false
+);
+
+CREATE INDEX ix_cpi_contract_id ON contract_primitives_issues (contract_id);
+CREATE INDEX ix_cpi_category ON contract_primitives_issues (category);
+CREATE INDEX ix_cpi_period_label ON contract_primitives_issues (period_label);
+
+CREATE TABLE contract_primitives_personnel (
+    id VARCHAR(36) PRIMARY KEY,
+    extraction_run_id VARCHAR(36) NOT NULL REFERENCES primitive_extraction_runs(id) ON DELETE CASCADE,
+    contract_id VARCHAR(36) REFERENCES contracts(id) ON DELETE CASCADE,
+    source_doc_ids JSON,
+    period_label VARCHAR(20),
+    role VARCHAR(100),
+    name VARCHAR(200),
+    labor_category VARCHAR(200),
+    fte_planned NUMERIC,
+    fte_actual NUMERIC,
+    staffing_gap_flag BOOLEAN NOT NULL DEFAULT false
+);
+
+CREATE INDEX ix_cpp_contract_id ON contract_primitives_personnel (contract_id);
+CREATE INDEX ix_cpp_period_label ON contract_primitives_personnel (period_label);
+
+CREATE TABLE cpars_ratings (
+    id VARCHAR(36) PRIMARY KEY,
+    contract_id VARCHAR(36) REFERENCES contracts(id) ON DELETE CASCADE,
+    doc_upload_id VARCHAR(36) REFERENCES document_uploads(id) ON DELETE SET NULL,
+    evaluation_period VARCHAR(40),
+    evaluation_date DATE,
+    quality_rating VARCHAR(40),
+    schedule_rating VARCHAR(40),
+    cost_control_rating VARCHAR(40),
+    management_rating VARCHAR(40),
+    small_business_rating VARCHAR(40),
+    regulatory_compliance_rating VARCHAR(40),
+    overall_rating VARCHAR(40),
+    narrative TEXT
+);
+
+CREATE INDEX ix_cpars_ratings_contract_id ON cpars_ratings (contract_id);
+CREATE INDEX ix_cpars_ratings_evaluation_period ON cpars_ratings (evaluation_period);
+
+CREATE TABLE analysis_runs (
+    id VARCHAR(36) PRIMARY KEY,
+    run_type VARCHAR(20) NOT NULL,
+    target_contract_id VARCHAR(36) REFERENCES contracts(id) ON DELETE SET NULL,
+    cohort_definition JSON,
+    cohort_contract_ids JSON,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    completed_at TIMESTAMPTZ,
+    model VARCHAR(160),
+    result JSON
+);
+
+CREATE INDEX ix_analysis_runs_run_type ON analysis_runs (run_type);
+CREATE INDEX ix_analysis_runs_status ON analysis_runs (status);
+CREATE INDEX ix_analysis_runs_target_contract_id ON analysis_runs (target_contract_id);
