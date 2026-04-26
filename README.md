@@ -335,6 +335,12 @@ signals, and a `not_proven` list for evidence the packet cannot support. The
 contract detail UI uses this lifecycle packet as its evidence spine for the Overview,
 Lifecycle, and contract-specific Insights tabs.
 
+Officials can stage a new production contract packet from the Admin page. The setup
+flow creates the contract record, uploads the source contract, CDRL exhibit,
+modification/baseline evidence, and first recurring report, then reads the lifecycle
+endpoint to show readiness and evidence gaps before analysts move into the contract
+workspace.
+
 Email or portal uploads that cannot match an existing contract remain unmatched unless
 processing can safely scaffold a new parent. Auto-scaffolding only runs for high
 confidence `source_contract` or `task_order` classifications with one regex-extracted
