@@ -250,6 +250,10 @@ bun run infra:deploy
   processing. The decisions are recorded in
   `document_classification_decisions` and `document_match_decisions`; queued processing
   still runs the full AI-first analysis path.
+- Portal uploads are allowed for authorized contractor and official users. Officials
+  can create contract records through `POST /api/contracts` and may request
+  `process_inline=true` on upload when the portal needs immediate extraction-backed
+  behavior for source contract logging or report review.
 - Contract hard-link parentage lives on `document_uploads.contract_id`. Cross-contract
   and cross-document pattern relationships live in semantic link tables and must not
   rewrite the hard parent contract.

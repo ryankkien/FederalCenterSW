@@ -236,7 +236,7 @@ def test_scanned_pdf_upload_records_ocr_failure(tmp_path, monkeypatch) -> None:
     assert "PDF text extraction produced no usable text and OCR failed" in text_json["extraction_error"]
 
 
-def test_official_cannot_upload_documents(tmp_path) -> None:
+def test_official_can_upload_documents_for_portal_intake(tmp_path) -> None:
     client = _client_with_test_dependencies(tmp_path, FakeBlobStorage())
     official_token = _token(client, "official")
 
@@ -247,7 +247,8 @@ def test_official_cannot_upload_documents(tmp_path) -> None:
         files={"file": ("memo.pdf", b"memo", "application/pdf")},
     )
 
-    assert response.status_code == 403
+    assert response.status_code == 201
+    assert response.json()["uploader_role"] == "official"
 
 
 def test_upload_rejects_unsupported_file_type(tmp_path) -> None:

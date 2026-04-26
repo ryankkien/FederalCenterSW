@@ -8,6 +8,19 @@ import {
   IcoArrow, IcoChevron, IcoClose, IcoSearch, IcoUpload, IcoStar,
   fmtBytes, fmtDate, fmtDateMil,
 } from './portal-shell';
+import {
+  createContract,
+  getContractAnalysis,
+  listAllDocuments,
+  listContractDocuments,
+  listContracts,
+  listRegressions,
+  mockLogin,
+  normalizeContract,
+  normalizeDocument,
+  normalizeFinding,
+  uploadDocument,
+} from './api';
 
 // ─── MOCK DATA ────────────────────────────────────────────────────────────────
 const MOCK_CONTRACTS = [
@@ -437,12 +450,12 @@ function LoginPage({ onLogin }) {
   async function submit(e) {
     e.preventDefault();
     setLoading(true);
-    await new Promise(r => setTimeout(r, 400));
-    const mockUser = role === 'contractor'
-      ? { id:'u1', email:'daniel.kim@atlanticlogistics.com', name:'Daniel Kim',     role:'contractor' }
-      : { id:'u2', email:'n.jacobs@navy.mil',                name:'LCDR Nicole Jacobs', role:'official'   };
-    onLogin('mock-token-' + role, mockUser);
-    setLoading(false);
+    try {
+      const session = await mockLogin(role);
+      onLogin(session.access_token, session.user);
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -738,9 +751,23 @@ function ContractsPage({ onSelectContract }) {
   const [pscFilter, setPscFilter] = useState('all');
   const [componentFilter, setComponentFilter] = useState('all');
   const [userContracts, setUserContracts] = useState([]);
+  const [backendContracts, setBackendContracts] = useState(null);
   const [showLog, setShowLog] = useState(false);
 
-  const allContracts = [...userContracts, ...MOCK_CONTRACTS];
+  useEffect(() => {
+    let cancelled = false;
+    listContracts()
+      .then(rows => {
+        if (!cancelled) setBackendContracts(rows.map(normalizeContract));
+      })
+      .catch(() => {
+        if (!cancelled) setBackendContracts([]);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const baseContracts = backendContracts && backendContracts.length > 0 ? backendContracts : MOCK_CONTRACTS;
+  const allContracts = [...userContracts, ...baseContracts];
   const presentPscs = new Set(allContracts.map(c => c.psc));
   const pscOptions = PSC_CODES.map(p => ({
     id: p.code, label: p.code, desc: p.desc,
@@ -896,9 +923,33 @@ const DETAIL_TABS = ['Overview', 'Insights', 'Benchmarks', 'Documents'];
 function ContractDetailPage({ contract, onBack, onSelectContract }) {
   const [tab, setTab] = useState('Overview');
   const [docs, setDocs] = useState(() => buildDocs(contract));
+  const [findings, setFindings] = useState(() => FINDINGS[contract.id] || FINDINGS.c1);
+  const [analysis, setAnalysis] = useState(null);
   const [showUpload, setShowUpload] = useState(false);
 
   const c = contract;
+
+  useEffect(() => {
+    setDocs(buildDocs(c));
+    setFindings(FINDINGS[c.id] || FINDINGS.c1);
+    let cancelled = false;
+    listContractDocuments(c.id)
+      .then(rows => {
+        if (!cancelled && rows.length > 0) setDocs(rows.map(row => normalizeDocument(row, c)));
+      })
+      .catch(() => {});
+    listRegressions(c.id)
+      .then(rows => {
+        if (!cancelled && rows.length > 0) setFindings(rows.map(normalizeFinding));
+      })
+      .catch(() => {});
+    getContractAnalysis(c.id)
+      .then(row => {
+        if (!cancelled) setAnalysis(row);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [c.id]);
 
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
@@ -944,8 +995,8 @@ function ContractDetailPage({ contract, onBack, onSelectContract }) {
       {/* Body */}
       <div style={{ flex:1, overflowY:'auto' }}>
         {tab === 'Overview'   && <OverviewTab contract={c} docs={docs} />}
-        {tab === 'Insights'   && <ContractInsightsTab contract={c} onSelectContract={onSelectContract} />}
-        {tab === 'Benchmarks' && <BenchmarksTab contract={c} />}
+        {tab === 'Insights'   && <ContractInsightsTab contract={c} findings={findings} onSelectContract={onSelectContract} />}
+        {tab === 'Benchmarks' && <BenchmarksTab contract={c} analysis={analysis} />}
         {tab === 'Documents'  && <DocumentsTab docs={docs} contract={c} onUpload={() => setShowUpload(true)} />}
       </div>
 
@@ -1345,8 +1396,7 @@ function DocumentsTab({ docs, contract, onUpload }) {
 }
 
 // ─── CONTRACT INSIGHTS TAB — findings → patterns → similar contracts ────────
-function ContractInsightsTab({ contract: c, onSelectContract }) {
-  const findings = FINDINGS[c.id] || FINDINGS.c1; // fall back to demo set
+function ContractInsightsTab({ contract: c, findings, onSelectContract }) {
   const [pinnedSet, setPinnedSet] = useState(() => new Set(loadCustomInsights().map(i => i.id)));
 
   function togglePin(finding) {
@@ -1717,7 +1767,29 @@ function BenchmarksTab({ contract: c }) {
 
 // ─── DOCUMENTS PAGE (cross-contract) ────────────────────────────────────────
 function DocumentsPage({ onSelectContract }) {
-  const docsByContract = MOCK_CONTRACTS.map(c => ({
+  const [backendGroups, setBackendGroups] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([listContracts(), listAllDocuments()])
+      .then(([contractRows, documentRows]) => {
+        if (cancelled) return;
+        const contracts = contractRows.map(normalizeContract);
+        const byId = new Map(contracts.map(c => [c.id, { contract: c, docs: [] }]));
+        for (const row of documentRows) {
+          const contractId = row.contract_id || row.matched_contract_id || row.id;
+          const group = byId.get(contractId);
+          if (group) group.docs.push(normalizeDocument(row, group.contract));
+        }
+        setBackendGroups([...byId.values()].filter(g => g.docs.length > 0));
+      })
+      .catch(() => {
+        if (!cancelled) setBackendGroups([]);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const docsByContract = backendGroups && backendGroups.length > 0 ? backendGroups : MOCK_CONTRACTS.map(c => ({
     contract: c,
     docs: buildDocs(c).slice(0, 5),
   }));
@@ -2088,9 +2160,9 @@ function DocumentViewerModal({ doc, onClose }) {
 }
 
 // ─── UPLOAD MODAL ───────────────────────────────────────────────────────────
-function UploadModal({ contract, onClose, onUploaded }) {
-  const [title, setTitle] = useState('');
-  const [docType, setDocType] = useState('');
+function UploadModal({ contract, onClose, onUploaded, presetTitle = '', presetType = '' }) {
+  const [title, setTitle] = useState(presetTitle);
+  const [docType, setDocType] = useState(presetType);
   const [notes, setNotes] = useState('');
   const [file, setFile] = useState(null);
   const [dragging, setDragging] = useState(false);
@@ -2101,14 +2173,18 @@ function UploadModal({ contract, onClose, onUploaded }) {
     e.preventDefault();
     if (!title || !docType || !file) return;
     setLoading(true);
-    await new Promise(r => setTimeout(r, 600));
-    onUploaded({
-      id:'new-' + Date.now(), title, doc_type:docType, source:'Contractor',
-      filename: file.name, content_type: file.type, size_bytes: file.size,
-      uploader: 'Contractor', created_at: new Date().toISOString(),
-      period: notes || '—',
-    });
-    setLoading(false);
+    try {
+      const uploaded = await uploadDocument({
+        contractId: contract?.id,
+        title,
+        documentType: docType,
+        notes,
+        file,
+      });
+      onUploaded(normalizeDocument(uploaded, contract));
+    } finally {
+      setLoading(false);
+    }
   }
 
   const fieldSt = { display:'grid', gap:6, marginBottom:16 };
@@ -2223,7 +2299,19 @@ const STATUS_META = {
 };
 
 function ContractorHome({ user, onSelectContract }) {
-  const myContracts = contractsForContractor(user);
+  const [backendContracts, setBackendContracts] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    listContracts()
+      .then(rows => {
+        if (!cancelled) setBackendContracts(rows.map(normalizeContract));
+      })
+      .catch(() => {
+        if (!cancelled) setBackendContracts([]);
+      });
+    return () => { cancelled = true; };
+  }, []);
+  const myContracts = backendContracts && backendContracts.length > 0 ? backendContracts : contractsForContractor(user);
   const today = new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' });
   const firstName = (user?.name || 'Contractor').split(' ')[0];
   const [filedHere, setFiledHere] = useState(() => new Set());
@@ -2381,6 +2469,17 @@ function ContractorContractPage({ contract, user, onBack }) {
   const [deliverables, setDeliverables] = useState(() => buildDeliverables(c));
   const [uploadTarget, setUploadTarget] = useState(null);
   const [freeUpload, setFreeUpload] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setDocs(buildDocs(c));
+    listContractDocuments(c.id)
+      .then(rows => {
+        if (!cancelled && rows.length > 0) setDocs(rows.map(row => normalizeDocument(row, c)));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [c.id]);
 
   function handleFiled(groupId, itemId, doc) {
     setDeliverables(ds => ds.map(g => g.id === groupId
@@ -2884,6 +2983,7 @@ function NewContractModal({ onClose, onCreated }) {
   const [stage, setStage] = useState('drop'); // drop → extracting → review
   const [file, setFile] = useState(null);
   const [dragging, setDragging] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const fileRef = useRef(null);
   const [fields, setFields] = useState({
     number:'', title:'', psc:'', naics:'', component:'', value:'',
@@ -2900,29 +3000,37 @@ function NewContractModal({ onClose, onCreated }) {
     }, 900);
   }
 
-  function commit(e) {
+  async function commit(e) {
     e.preventDefault();
     if (!fields.number || !fields.title) return;
-    const start = fields.start || '2026-01-01';
-    const end = fields.end || '2027-12-31';
-    const elapsed = Math.max(0, Math.min(100, Math.round(
-      ((Date.now() - new Date(start).getTime()) / (new Date(end).getTime() - new Date(start).getTime())) * 100
-    )));
-    onCreated({
-      id: 'usr-' + Date.now(),
-      number: fields.number,
-      title: fields.title,
-      psc: fields.psc || 'R499',
-      naics: fields.naics || '541611',
-      component: fields.component || 'PMS 325',
-      value: fields.value || '$0',
-      period: `${fmtDateMil(start)} — ${fmtDateMil(end)}`,
-      start, end, elapsed,
-      lastActivity: new Date().toISOString().slice(0,10),
-      docsCount: 0,
-      contractor: fields.contractor || 'TBD',
-      co: fields.co || 'TBD',
-    });
+    try {
+      setSubmitting(true);
+      const created = await createContract({
+        contract_number: fields.number,
+        title: fields.title,
+        vendor_name: fields.contractor || null,
+        contracting_officer: fields.co || null,
+        psc_code: fields.psc || 'R499',
+        naics_code: fields.naics || '541611',
+        office_name: fields.component || 'PMS 325',
+        obligated_value: parseMoney(fields.value),
+        period_start: fields.start || null,
+        period_end: fields.end || null,
+      });
+      if (file) {
+        await uploadDocument({
+          contractId: created.id,
+          title: `${fields.number} base contract`,
+          documentType: 'Source Contract',
+          notes: 'Uploaded during portal contract logging.',
+          file,
+          processInline: true,
+        });
+      }
+      onCreated(normalizeContract(created));
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -3008,13 +3116,20 @@ function NewContractModal({ onClose, onCreated }) {
             </div>
             <div style={{ padding:'12px 22px', borderTop:'1px solid var(--border)', display:'flex', justifyContent:'flex-end', gap:10 }}>
               <BtnSecondary type="button" onClick={onClose}>Cancel</BtnSecondary>
-              <BtnPrimary type="submit">Add to portfolio</BtnPrimary>
+              <BtnPrimary type="submit" disabled={submitting}>{submitting ? 'Adding…' : 'Add to portfolio'}</BtnPrimary>
             </div>
           </form>
         )}
       </div>
     </div>
   );
+}
+
+function parseMoney(value) {
+  const clean = String(value || '').replace(/[$,]/g, '').trim();
+  if (!clean) return null;
+  const parsed = Number(clean);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function extractFromFilename(name) {
