@@ -14,6 +14,9 @@ from app.contract_analysis import (
     classify_document,
     create_external_source_ref,
     detect_regression_findings,
+    handle_cpars_document,
+    handle_gao_oig_report_document,
+    handle_modification_document,
     refresh_hypothesis_status,
     seed_contract_from_markdown,
     update_contract_baseline_from_document,
@@ -25,11 +28,14 @@ from app.database import Base, get_db
 from app.main import app
 from app.models import (
     BaselineObligation,
+    BaselineRevision,
     Contract,
     ContractAccessGrant,
     AuditEvent,
     ContractHypothesis,
+    ContractPrimitiveDecision,
     ContractSimilarityLink,
+    CparsRating,
     DocumentClassificationDecision,
     DocumentEntity,
     DocumentProcessingJob,
@@ -42,6 +48,7 @@ from app.models import (
     ProcessingRunStep,
 )
 from app.feature_extractor_client import FeatureExtractorStepResult
+from app.synthetic_corpus import SYNTHETIC_DOCUMENTS
 
 
 class FakeBlobStorage:
@@ -185,6 +192,93 @@ def test_regression_detection_finds_scope_rfi_schedule_and_skips_funding_only_mo
         "cost_regression",
     }
     assert skipped == []
+
+
+def test_cpars_handler_extracts_factor_ratings_from_synthetic_narrative(tmp_path) -> None:
+    synthetic = next(item for item in SYNTHETIC_DOCUMENTS if item.document_kind == "cpars_evaluation")
+    with next(_test_db_session(tmp_path)) as db:
+        db.add(_contract(id="wwr", number="M0026426R0001", title="WWR Support"))
+        document = _document(
+            id="cpars-1",
+            contract_id="wwr",
+            filename=synthetic.filename,
+            title=synthetic.title,
+            kind=synthetic.document_kind,
+        )
+        db.add(document)
+        db.flush()
+
+        kind, _ = classify_document(document, synthetic.text)
+        rows = handle_cpars_document(db, "wwr", document, synthetic.text)
+
+        persisted = db.scalars(select(CparsRating).where(CparsRating.doc_upload_id == "cpars-1")).all()
+
+    assert kind == "cpars"
+    assert len(rows) == 1
+    assert len(persisted) == 1
+    assert persisted[0].quality_rating == "Very Good"
+    assert persisted[0].schedule_rating == "Satisfactory"
+    assert persisted[0].management_rating == "Very Good"
+    assert persisted[0].evaluation_period == "01 August 2027 - 31 January 2028"
+
+
+def test_modification_handler_persists_decision_and_baseline_revision(tmp_path) -> None:
+    text = (
+        "Modification P00001 executed 18 July 2027 and effective 28 July 2027. "
+        "The Contracting Officer added one NMCM labor position to address caseload surge. "
+        "The action increases contract value by $125,000 and extends the period of performance by 30 days."
+    )
+    with next(_test_db_session(tmp_path)) as db:
+        db.add(_contract(id="wwr", number="M0026426R0001", title="WWR Support"))
+        document = _document(
+            id="mod-doc",
+            contract_id="wwr",
+            filename="M0026426R0001_P00001.pdf",
+            title="Modification P00001",
+            kind="modification",
+        )
+        db.add(document)
+        db.flush()
+
+        rows = handle_modification_document(db, "wwr", document, text, [])
+        decisions = db.scalars(select(ContractPrimitiveDecision)).all()
+        revisions = db.scalars(
+            select(BaselineRevision).where(BaselineRevision.change_type == "modification")
+        ).all()
+
+    assert len(rows) == 1
+    assert decisions[0].mod_number == "P00001"
+    assert float(decisions[0].value_change) == 125000.0
+    assert decisions[0].pop_change_days == 30
+    assert decisions[0].decision_date.isoformat() == "2027-07-28"
+    assert len(revisions) == 1
+    assert revisions[0].metadata_json["mod_number"] == "P00001"
+
+
+def test_gao_oig_handler_stores_official_external_refs(tmp_path) -> None:
+    text = (
+        "GAO report GAO-26-100 found recurring schedule oversight weaknesses on the contract. "
+        "Recommendation: Navy should document corrective action ownership. "
+        "Source: https://www.gao.gov/products/gao-26-100"
+    )
+    with next(_test_db_session(tmp_path)) as db:
+        db.add(_contract(id="atlantic", number="N40080-24-D-1042"))
+        document = _document(
+            id="gao-doc",
+            contract_id="atlantic",
+            filename="GAO-26-100.pdf",
+            title="GAO Contract Oversight Report",
+            kind="gao_oig_report",
+        )
+        db.add(document)
+        db.flush()
+
+        rows = handle_gao_oig_report_document(db, "atlantic", document, text)
+
+    assert rows
+    assert {row.source_type for row in rows} == {"gao_oig_report"}
+    assert all(row.source_domain == "www.gao.gov" for row in rows)
+    assert all(row.metadata_json["source_document_upload_id"] == "gao-doc" for row in rows)
 
 
 def test_hypotheses_are_deduped_evidence_linked_and_can_be_contradicted(tmp_path) -> None:

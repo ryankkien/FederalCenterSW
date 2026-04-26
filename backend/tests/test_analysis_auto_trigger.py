@@ -158,7 +158,7 @@ def _create_analysis_tables(db) -> None:
     db.execute(
         text(
             """
-            CREATE TABLE primitive_extraction_runs (
+            CREATE TABLE IF NOT EXISTS primitive_extraction_runs (
                 id TEXT PRIMARY KEY,
                 contract_id TEXT,
                 doc_upload_id TEXT,
@@ -198,7 +198,7 @@ def _create_analysis_tables(db) -> None:
         db.execute(
             text(
                 f"""
-                CREATE TABLE {table_name} (
+                CREATE TABLE IF NOT EXISTS {table_name} (
                     id TEXT PRIMARY KEY,
                     extraction_run_id TEXT,
                     contract_id TEXT,
@@ -210,7 +210,7 @@ def _create_analysis_tables(db) -> None:
     db.execute(
         text(
             """
-            CREATE TABLE cpars_ratings (
+            CREATE TABLE IF NOT EXISTS cpars_ratings (
                 id TEXT PRIMARY KEY,
                 contract_id TEXT,
                 evaluation_date DATE

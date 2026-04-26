@@ -457,6 +457,7 @@ def _persist_processing_outputs(
         result.text_gate.text,
         analysis_chunks,
         processing_run_id=_string_attr(run, "id"),
+        ai_provider=provider,
     )
     _persist_classification_decision(session, models, document, run)
     _persist_entities_and_facts(session, models, document, result, page_rows, analysis_chunks, run)

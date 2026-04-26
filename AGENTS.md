@@ -257,6 +257,10 @@ bun run infra:deploy
   revisions, regression findings, hypotheses, hypothesis evidence, investigation
   runs, official external-source references, processing run logs, and semantic
   similarity links.
+- Kind-specific routing runs after generic extraction: CPARS-style documents populate
+  `cpars_ratings`, modifications populate `contract_primitives_decisions` and append
+  `baseline_revisions`, and GAO/OIG reports are linked as official
+  `external_source_refs` rather than treated as contract artifacts.
 - The knowledge wiki index stores local fixture/synthetic ingestion runs, source
   records, wiki nodes, edges, citations, and contractor evidence profiles. The
   frontend uses `/api/wiki/*` for the Grokipedia workspace; it should not rebuild the

@@ -190,6 +190,11 @@ step-level run logs. Hard parentage stays on `document_uploads.contract_id`;
 cross-contract and cross-document pattern relationships are stored separately as
 semantic links.
 
+Kind-specific routing runs after the generic extraction pass. CPARS-style documents
+populate `cpars_ratings`, modifications populate `contract_primitives_decisions` and
+append `baseline_revisions`, and GAO/OIG reports are stored as official
+`external_source_refs` for the linked contract instead of becoming baseline evidence.
+
 The knowledge wiki index is a server-backed Grokipedia-style layer for officials. It
 mines seeded local fixture contracts, processed report evidence, and the generated
 synthetic fixture corpus by default. Optional official-source clients remain available
