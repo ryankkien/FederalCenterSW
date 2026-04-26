@@ -93,7 +93,7 @@ These tables store structured records extracted from documents by the `feature_e
 
 ### Feature Extractor Service (`feature_extractor/`)
 
-The optional `feature_extractor/` service replaces the old `summarizer/`. It reads a text artifact from blob, runs hierarchical summarization, classifies the document (PSC/NAICS), chunks and embeds the text, and extracts structured primitives into the DB. When `FEATURE_EXTRACTOR_URL` is configured, completed backend processing runs call `/summarize` and then call `/extract-primitives` with `doc_id`, `contract_id`, and `doc_classification`.
+The optional `feature_extractor/` service reads a text artifact from blob, runs hierarchical summarization, classifies the document (PSC/NAICS), chunks and embeds the text, and extracts structured primitives into the DB. When `FEATURE_EXTRACTOR_URL` is configured, completed backend processing runs call `/summarize` and then call `/extract-primitives` with `doc_id`, `contract_id`, and `doc_classification`.
 
 **New endpoints:**
 - `POST /summarize` — unchanged, runs summarization + chunking + embedding (pipeline steps 1-4)
