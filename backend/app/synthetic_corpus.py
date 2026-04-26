@@ -285,6 +285,42 @@ Shipyard support contracts need a single visible aging list for trial cards, ven
         + "\n",
     ),
     SyntheticDocument(
+        contract_number="N00014-12-C-0305",
+        title="Synthetic Interim CPARS-Style Narrative - AGOR 28",
+        filename="synthetic_cpars_interim_2016-06.md",
+        document_kind="cpars_evaluation",
+        content_type="text/markdown",
+        purpose="Provides qualitative evaluation-style text for CPARS extraction without using protected CPARS data.",
+        expected_signal_types=("rating_trend", "quality", "schedule", "cost_control", "management", "lesson_learned"),
+        text="""# Synthetic Interim CPARS-Style Narrative
+
+**Contract:** N00014-12-C-0305
+**Evaluation Type:** Interim
+**Evaluation Period:** 01 January 2016 - 30 June 2016
+**Source Type:** Synthetic fixture for product testing. Not CPARS data.
+
+## Quality
+
+Rating: Satisfactory. Shipyard representative reporting captured material progress, technical issues, trial-card status, and vendor-spares concerns with enough detail for government review. Minor quality weaknesses involved inconsistent linkage between open issues and the affected work packages.
+
+## Schedule
+
+Rating: Marginal. Trial-card closure and technical manual updates slipped when government review queues and long-lead vendor responses aged beyond planned turnaround. The contractor improved visibility through exception lists, but the schedule impact was not fully recovered by the end of the period.
+
+## Cost Control
+
+Rating: Satisfactory. Earned-value style indicators showed unfavorable variance in shipyard technical support and trial-card closure. The contractor identified rework and late vendor responses as drivers and supported corrective tracking, but variance explanations arrived after the trend was already visible.
+
+## Management
+
+Rating: Satisfactory. The team remained responsive to program-office direction and escalated aging spares and trial-card issues. Management would be stronger with a single integrated government-action aging list shared across reviews.
+
+## Reusable Lesson
+
+Shipyard support contracts should track trial cards, vendor spares, and government review actions in one visible queue because separate lists hide the combined schedule risk.
+""",
+    ),
+    SyntheticDocument(
         contract_number="N40080-24-D-1042",
         title="Synthetic Environmental Compliance Decision Memo",
         filename="synthetic_decision_memo_2026-02-06.md",
@@ -309,6 +345,78 @@ Atlantic Environmental avoided unplanned weekend labor and updated the risk regi
 ## Reusable Lesson
 
 Environmental service contracts need a visible boundary between recurring compliance support and event-driven operational response.
+""",
+    ),
+    SyntheticDocument(
+        contract_number="N40080-24-D-1042",
+        title="Synthetic Interim CPARS-Style Narrative - Environmental Compliance",
+        filename="synthetic_cpars_interim_2026-02.md",
+        document_kind="cpars_evaluation",
+        content_type="text/markdown",
+        purpose="Provides qualitative evaluation-style text for CPARS extraction without using protected CPARS data.",
+        expected_signal_types=("rating_trend", "quality", "schedule", "cost_control", "management", "lesson_learned"),
+        text="""# Synthetic Interim CPARS-Style Narrative
+
+**Contract:** N40080-24-D-1042
+**Evaluation Type:** Interim
+**Evaluation Period:** 05 January 2026 - 06 February 2026
+**Source Type:** Synthetic fixture for product testing. Not CPARS data.
+
+## Quality
+
+Rating: Very Good. Environmental compliance work products were technically sound, used the required weekly reporting format, and identified scope-boundary questions before the contractor performed potentially unauthorized tenant-command support.
+
+## Schedule
+
+Rating: Satisfactory. The stormwater permit renewal task order remained executable, but RFI-004 on permit pathway selection created a five-day schedule slip against the original baseline. The contractor clearly flagged the critical-path impact and updated the projected submittal date.
+
+## Cost Control
+
+Rating: Satisfactory. No material cost overrun is shown in the fixture period. Cost exposure was limited because the contractor waited for written direction before accepting emergency exercise support outside the approved compliance calendar.
+
+## Management
+
+Rating: Very Good. Management disciplined informal stakeholder requests, documented COR decisions on RFIs, and separated recurring compliance support from event-driven response work.
+
+## Reusable Lesson
+
+Environmental service contracts should make scope boundaries and RFI aging visible on the contract page so tenant requests, permit-path decisions, and schedule impacts are reviewed together.
+""",
+    ),
+    SyntheticDocument(
+        contract_number="N40080-25-D-2087",
+        title="Synthetic Interim CPARS-Style Narrative - Family Outreach",
+        filename="synthetic_cpars_interim_2026-02.md",
+        document_kind="cpars_evaluation",
+        content_type="text/markdown",
+        purpose="Provides qualitative evaluation-style text for CPARS extraction without using protected CPARS data.",
+        expected_signal_types=("rating_trend", "quality", "schedule", "cost_control", "management", "lesson_learned"),
+        text="""# Synthetic Interim CPARS-Style Narrative
+
+**Contract:** N40080-25-D-2087
+**Evaluation Type:** Interim
+**Evaluation Period:** 05 January 2026 - 06 February 2026
+**Source Type:** Synthetic fixture for product testing. Not CPARS data.
+
+## Quality
+
+Rating: Satisfactory. Outreach interactions and weekly reports were complete and appropriate for a family-support services contract. The contractor maintained respectful communication and documented referrals without including sensitive personal details in the fixture record.
+
+## Schedule
+
+Rating: Satisfactory. Routine outreach events and weekly reports stayed on cadence, but referral follow-up timeliness showed early risk as workload increased. The contractor identified aging referrals and began separating urgent family-resource requests from routine outreach work.
+
+## Cost Control
+
+Rating: Satisfactory. The fixture period does not show a cost overrun. Future cost pressure could emerge if referral volume requires additional staffing or more frequent outreach events than the baseline assumed.
+
+## Management
+
+Rating: Satisfactory. Program management was transparent about workload risk and kept the COR informed when stakeholder requests could affect staffing or referral priorities.
+
+## Reusable Lesson
+
+Family outreach contracts should track referral aging, outreach volume, and staffing capacity together. Early warning thresholds help distinguish normal demand variation from a service-level risk that needs government action.
 """,
     ),
     SyntheticDocument(
@@ -345,6 +453,42 @@ Help desk service levels degrade when tenant-specific requests are accepted with
 """,
     ),
     SyntheticDocument(
+        contract_number="N40080-23-D-3155",
+        title="Synthetic Interim CPARS-Style Narrative - IT Help Desk",
+        filename="synthetic_cpars_interim_2026-02.md",
+        document_kind="cpars_evaluation",
+        content_type="text/markdown",
+        purpose="Provides qualitative evaluation-style text for CPARS extraction without using protected CPARS data.",
+        expected_signal_types=("rating_trend", "quality", "schedule", "cost_control", "management", "lesson_learned"),
+        text="""# Synthetic Interim CPARS-Style Narrative
+
+**Contract:** N40080-23-D-3155
+**Evaluation Type:** Interim
+**Evaluation Period:** 01 January 2026 - 28 February 2026
+**Source Type:** Synthetic fixture for product testing. Not CPARS data.
+
+## Quality
+
+Rating: Satisfactory. Help desk documentation and technical resolutions were generally complete, but Tier 2 aging increased when tenant-specific software requests lacked approved security baseline documentation.
+
+## Schedule
+
+Rating: Marginal. Average time to resolve exceeded the 5.0 day target for two consecutive weekly reports. The contractor proposed a temporary Tier 2 analyst and an aging list, but the recovery depended on government decisions for RFI-041 and RFI-044.
+
+## Cost Control
+
+Rating: Satisfactory. The temporary staffing action used existing labor ceiling in the fixture scenario. Continued unresolved scope questions could create future cost pressure if after-hours or tenant-specific work expands without authorization.
+
+## Management
+
+Rating: Satisfactory. Management acknowledged the service-level degradation, froze unsupported tenant deployments, and submitted a corrective action plan. Stronger intake controls would have reduced the recurring issue earlier.
+
+## Reusable Lesson
+
+IT service contracts need controlled intake, government authorization status, and staffing risk on the same dashboard because unresolved tenant requests can look like contractor delay.
+""",
+    ),
+    SyntheticDocument(
         contract_number="N40080-22-D-4221",
         title="Synthetic Engineering Services REA Chronology",
         filename="synthetic_rea_chronology_2026-02.md",
@@ -372,6 +516,42 @@ KO/COR must determine whether the rework was caused by government direction chan
 ## Reusable Lesson
 
 Engineering support services need written task confirmation before work starts when a tenant stakeholder provides technical direction that changes source data, assumptions, or deliverable format.
+""",
+    ),
+    SyntheticDocument(
+        contract_number="N40080-22-D-4221",
+        title="Synthetic Interim CPARS-Style Narrative - Facility Engineering",
+        filename="synthetic_cpars_interim_2026-02.md",
+        document_kind="cpars_evaluation",
+        content_type="text/markdown",
+        purpose="Provides qualitative evaluation-style text for CPARS extraction without using protected CPARS data.",
+        expected_signal_types=("rating_trend", "quality", "schedule", "cost_control", "management", "lesson_learned"),
+        text="""# Synthetic Interim CPARS-Style Narrative
+
+**Contract:** N40080-22-D-4221
+**Evaluation Type:** Interim
+**Evaluation Period:** 15 April 2025 - 05 February 2026
+**Source Type:** Synthetic fixture for product testing. Not CPARS data.
+
+## Quality
+
+Rating: Satisfactory. Engineering analysis packages were technically useful, but early work relied on legacy facility data and later required re-analysis after the COR directed use of updated as-built drawings.
+
+## Schedule
+
+Rating: Marginal. Re-analysis shifted deliverable completion and created a chronology of verbal direction, written correction, and follow-on review. The contractor documented the sequence, but written task confirmation should have occurred before the initial analysis began.
+
+## Cost Control
+
+Rating: Marginal. The fixture chronology identifies approximately $187K in rework labor tied to the changed source data and resulting request for equitable adjustment analysis.
+
+## Management
+
+Rating: Satisfactory. Management preserved the decision record and elevated the cause of rework for KO/COR determination. Performance would improve with firmer controls on tenant-provided direction.
+
+## Reusable Lesson
+
+Engineering support contracts should require written COR confirmation when stakeholder direction changes assumptions, source data, labor mix, or deliverable format. That control prevents ambiguous rework from becoming a late cost dispute.
 """,
     ),
     SyntheticDocument(
@@ -403,6 +583,42 @@ Energy support work produced faster decisions when findings were tied to facilit
 ## Reusable Lesson
 
 Outcome reports should connect technical recommendations to dollars, mission disruption, and implementation owner. This makes cross-contract benchmarking more useful than a simple list of audit findings.
+""",
+    ),
+    SyntheticDocument(
+        contract_number="N40080-25-D-5318",
+        title="Synthetic Interim CPARS-Style Narrative - Energy Audit",
+        filename="synthetic_cpars_interim_2026-02.md",
+        document_kind="cpars_evaluation",
+        content_type="text/markdown",
+        purpose="Provides qualitative evaluation-style text for CPARS extraction without using protected CPARS data.",
+        expected_signal_types=("rating_trend", "quality", "schedule", "cost_control", "management", "lesson_learned"),
+        text="""# Synthetic Interim CPARS-Style Narrative
+
+**Contract:** N40080-25-D-5318
+**Evaluation Type:** Interim
+**Evaluation Period:** 01 February 2026 - 28 February 2026
+**Source Type:** Synthetic fixture for product testing. Not CPARS data.
+
+## Quality
+
+Rating: Very Good. Energy audit findings connected technical controls changes to facility-level cost, projected annual energy reduction, payback considerations, and mission-disruption risk.
+
+## Schedule
+
+Rating: Very Good. The contractor completed four metering reviews during the reporting period and produced actionable recommendations early enough for COR follow-on analysis approval.
+
+## Cost Control
+
+Rating: Very Good. The fixture outcome report identifies two controls changes projected to reduce annual energy use by 6.5 percent. Recommendations were framed with implementation owner and operational impact, making cost-benefit review faster.
+
+## Management
+
+Rating: Very Good. Management coordinated effectively with facility stakeholders, separated quick-return controls changes from longer-term analysis, and presented decision-ready options to the COR.
+
+## Reusable Lesson
+
+Energy support work becomes more useful for benchmarking when outcome reports tie each recommendation to dollars, mission disruption, payback period, and implementation owner rather than listing findings alone.
 """,
     ),
     SyntheticDocument(

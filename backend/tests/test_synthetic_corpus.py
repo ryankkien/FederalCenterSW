@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from typing import Union
 
-from app.synthetic_corpus import SYNTHETIC_DOCUMENTS, build_synthetic_corpus
+from app.synthetic_corpus import CONTRACTS, SYNTHETIC_DOCUMENTS, build_synthetic_corpus
 
 
 def test_build_synthetic_corpus_marks_generated_documents_and_real_anchors(tmp_path) -> None:
@@ -41,6 +41,22 @@ def test_build_synthetic_corpus_marks_generated_documents_and_real_anchors(tmp_p
     )
     assert len(manifest["cross_contract_patterns"]) >= 3
     assert (output_dir / "synthetic" / "cross_contract" / "shared" / "synthetic_cross_contract_lessons.md").exists()
+
+
+def test_synthetic_corpus_has_cpars_style_fixture_for_each_contract() -> None:
+    contract_numbers = {contract["contract_number"] for contract in CONTRACTS}
+    cpars_contract_numbers = {
+        document.contract_number
+        for document in SYNTHETIC_DOCUMENTS
+        if document.document_kind == "cpars_evaluation"
+    }
+
+    assert cpars_contract_numbers == contract_numbers
+    assert all(
+        "Not CPARS data" in document.text
+        for document in SYNTHETIC_DOCUMENTS
+        if document.document_kind == "cpars_evaluation"
+    )
 
 
 def _write_fixture_file(path: Path, content: Union[bytes, str]) -> None:
