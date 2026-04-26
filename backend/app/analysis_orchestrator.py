@@ -878,6 +878,9 @@ def _parse_json(text: str) -> dict:
         return {"raw": text}
 
 
+_PROMPT_CHAR_SOFT_BUDGET = 240_000
+
+
 def _openai_json_response(system: str, user: str) -> dict:
     api_key = get_openai_api_key()
     if not api_key:
@@ -886,6 +889,16 @@ def _openai_json_response(system: str, user: str) -> dict:
         from openai import OpenAI
     except ImportError as error:
         raise RuntimeError("openai package is required for orchestrated performance analysis") from error
+
+    total_chars = len(system) + len(user)
+    if total_chars > _PROMPT_CHAR_SOFT_BUDGET:
+        # Surface oversized prompts early; per-bucket compaction is the upstream
+        # bound and a breach here means it didn't trim enough for the cohort size.
+        import logging
+        logging.getLogger(__name__).warning(
+            "analysis prompt exceeds soft budget",
+            extra={"prompt_chars": total_chars, "budget": _PROMPT_CHAR_SOFT_BUDGET},
+        )
 
     client = OpenAI(
         api_key=api_key,

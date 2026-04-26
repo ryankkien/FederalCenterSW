@@ -161,8 +161,14 @@ CREATE TABLE document_chunks (
     document_upload_id VARCHAR(36) NOT NULL REFERENCES document_uploads(id) ON DELETE CASCADE,
     contract_id VARCHAR(36) REFERENCES contracts(id) ON DELETE SET NULL,
     chunk_index INTEGER NOT NULL,
+    page_number INTEGER,
+    section_title VARCHAR(300),
     text TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    text_blob_path VARCHAR(700),
+    token_count INTEGER,
+    metadata_json JSON,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_document_chunk_position UNIQUE (document_upload_id, chunk_index)
 );
 
 CREATE TABLE document_classification_decisions (
@@ -382,7 +388,10 @@ CREATE TABLE contract_hypotheses (
     metadata_json JSON,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT uq_contract_hypothesis_key UNIQUE (contract_id, hypothesis_key)
+    CONSTRAINT uq_contract_hypothesis_key UNIQUE (contract_id, hypothesis_key),
+    CONSTRAINT ck_contract_hypotheses_status CHECK (
+        status IN ('proposed','investigating','supported','contradicted','closed')
+    )
 );
 
 CREATE TABLE investigation_runs (
@@ -431,7 +440,10 @@ CREATE TABLE hypothesis_evidence (
     confidence FLOAT,
     evidence_hash VARCHAR(64),
     metadata_json JSON,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT ck_hypothesis_evidence_evidence_type CHECK (
+        evidence_type IN ('supporting','contradicting')
+    )
 );
 
 CREATE TABLE contract_similarity_links (
@@ -651,6 +663,122 @@ CREATE INDEX ix_document_semantic_links_target_document_upload_id ON document_se
 CREATE INDEX ix_contractor_profiles_vendor_name ON contractor_profiles (vendor_name);
 CREATE INDEX ix_contractor_profiles_vendor_uei ON contractor_profiles (vendor_uei);
 
+-- Knowledge wiki index (migration 0005)
+
+CREATE TABLE knowledge_ingestion_runs (
+    id VARCHAR(36) PRIMARY KEY,
+    scope VARCHAR(80) NOT NULL,
+    status VARCHAR(40) NOT NULL DEFAULT 'running',
+    sources_requested JSON,
+    contract_ids JSON,
+    vendor_ueis JSON,
+    "limit" INTEGER,
+    model_name VARCHAR(160),
+    prompt_version VARCHAR(80),
+    error_message TEXT,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    completed_at TIMESTAMPTZ,
+    metadata_json JSON
+);
+
+CREATE INDEX ix_knowledge_ingestion_runs_scope ON knowledge_ingestion_runs (scope);
+CREATE INDEX ix_knowledge_ingestion_runs_status ON knowledge_ingestion_runs (status);
+
+CREATE TABLE knowledge_source_records (
+    id VARCHAR(36) PRIMARY KEY,
+    ingestion_run_id VARCHAR(36) REFERENCES knowledge_ingestion_runs(id) ON DELETE SET NULL,
+    source_name VARCHAR(80) NOT NULL,
+    source_type VARCHAR(80) NOT NULL DEFAULT 'official',
+    source_key VARCHAR(500) NOT NULL,
+    status VARCHAR(40) NOT NULL DEFAULT 'available',
+    unavailable_reason TEXT,
+    url VARCHAR(1000),
+    title VARCHAR(500),
+    text TEXT,
+    raw_json JSON,
+    content_hash VARCHAR(64),
+    source_timestamp TIMESTAMPTZ,
+    contract_id VARCHAR(36) REFERENCES contracts(id) ON DELETE SET NULL,
+    vendor_uei VARCHAR(32),
+    metadata_json JSON,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_knowledge_source_key UNIQUE (source_name, source_key)
+);
+
+CREATE INDEX ix_knowledge_source_records_content_hash ON knowledge_source_records (content_hash);
+CREATE INDEX ix_knowledge_source_records_contract_id ON knowledge_source_records (contract_id);
+CREATE INDEX ix_knowledge_source_records_ingestion_run_id ON knowledge_source_records (ingestion_run_id);
+CREATE INDEX ix_knowledge_source_records_source_name ON knowledge_source_records (source_name);
+CREATE INDEX ix_knowledge_source_records_source_type ON knowledge_source_records (source_type);
+CREATE INDEX ix_knowledge_source_records_status ON knowledge_source_records (status);
+CREATE INDEX ix_knowledge_source_records_vendor_uei ON knowledge_source_records (vendor_uei);
+
+CREATE TABLE knowledge_nodes (
+    id VARCHAR(36) PRIMARY KEY,
+    node_type VARCHAR(80) NOT NULL,
+    slug VARCHAR(300) NOT NULL,
+    title VARCHAR(500) NOT NULL,
+    summary TEXT NOT NULL,
+    body TEXT NOT NULL,
+    contract_id VARCHAR(36) REFERENCES contracts(id) ON DELETE SET NULL,
+    vendor_uei VARCHAR(32),
+    security_level VARCHAR(40) NOT NULL DEFAULT 'standard',
+    status VARCHAR(40) NOT NULL DEFAULT 'active',
+    source_record_id VARCHAR(36) REFERENCES knowledge_source_records(id) ON DELETE SET NULL,
+    model_name VARCHAR(160),
+    prompt_version VARCHAR(80),
+    metadata_json JSON,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_knowledge_node_slug UNIQUE (node_type, slug)
+);
+
+CREATE INDEX ix_knowledge_nodes_contract_id ON knowledge_nodes (contract_id);
+CREATE INDEX ix_knowledge_nodes_node_type ON knowledge_nodes (node_type);
+CREATE INDEX ix_knowledge_nodes_security_level ON knowledge_nodes (security_level);
+CREATE INDEX ix_knowledge_nodes_slug ON knowledge_nodes (slug);
+CREATE INDEX ix_knowledge_nodes_source_record_id ON knowledge_nodes (source_record_id);
+CREATE INDEX ix_knowledge_nodes_status ON knowledge_nodes (status);
+CREATE INDEX ix_knowledge_nodes_vendor_uei ON knowledge_nodes (vendor_uei);
+
+CREATE TABLE knowledge_edges (
+    id VARCHAR(36) PRIMARY KEY,
+    source_node_id VARCHAR(36) NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
+    target_node_id VARCHAR(36) NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
+    edge_type VARCHAR(80) NOT NULL,
+    label VARCHAR(200),
+    weight FLOAT,
+    metadata_json JSON,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_knowledge_edge UNIQUE (source_node_id, target_node_id, edge_type)
+);
+
+CREATE INDEX ix_knowledge_edges_edge_type ON knowledge_edges (edge_type);
+CREATE INDEX ix_knowledge_edges_source_node_id ON knowledge_edges (source_node_id);
+CREATE INDEX ix_knowledge_edges_target_node_id ON knowledge_edges (target_node_id);
+
+CREATE TABLE knowledge_citations (
+    id VARCHAR(36) PRIMARY KEY,
+    node_id VARCHAR(36) NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
+    source_record_id VARCHAR(36) REFERENCES knowledge_source_records(id) ON DELETE SET NULL,
+    document_upload_id VARCHAR(36) REFERENCES document_uploads(id) ON DELETE SET NULL,
+    external_source_ref_id VARCHAR(36) REFERENCES external_source_refs(id) ON DELETE SET NULL,
+    label VARCHAR(300) NOT NULL,
+    excerpt TEXT NOT NULL,
+    url VARCHAR(1000),
+    source_path VARCHAR(1000),
+    quote_hash VARCHAR(64),
+    metadata_json JSON,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX ix_knowledge_citations_document_upload_id ON knowledge_citations (document_upload_id);
+CREATE INDEX ix_knowledge_citations_external_source_ref_id ON knowledge_citations (external_source_ref_id);
+CREATE INDEX ix_knowledge_citations_node_id ON knowledge_citations (node_id);
+CREATE INDEX ix_knowledge_citations_quote_hash ON knowledge_citations (quote_hash);
+CREATE INDEX ix_knowledge_citations_source_record_id ON knowledge_citations (source_record_id);
+
 -- Primitive extraction tables (migration 0006)
 
 CREATE TABLE primitive_extraction_runs (
@@ -660,7 +788,10 @@ CREATE TABLE primitive_extraction_runs (
     period_label VARCHAR(20),
     extracted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     model VARCHAR(160),
-    status VARCHAR(20) NOT NULL DEFAULT 'success'
+    status VARCHAR(20) NOT NULL DEFAULT 'success',
+    CONSTRAINT ck_primitive_extraction_runs_status CHECK (
+        status IN ('pending','success','partial','failed','no_rows')
+    )
 );
 
 CREATE INDEX ix_primitive_extraction_runs_contract_id ON primitive_extraction_runs (contract_id);
@@ -796,7 +927,10 @@ CREATE TABLE analysis_runs (
     completed_at TIMESTAMPTZ,
     model VARCHAR(160),
     result JSON,
-    analyzed_doc_ids JSON
+    analyzed_doc_ids JSON,
+    CONSTRAINT ck_analysis_runs_status CHECK (
+        status IN ('pending','queued','running','complete','failed')
+    )
 );
 
 CREATE INDEX ix_analysis_runs_run_type ON analysis_runs (run_type);

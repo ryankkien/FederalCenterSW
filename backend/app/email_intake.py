@@ -24,6 +24,7 @@ from urllib.request import Request, urlopen
 from uuid import NAMESPACE_URL, uuid5
 
 import resend
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.ai.providers import get_ai_provider
@@ -379,19 +380,30 @@ def save_email_documents(
                 uploader_role="contractor",
                 created_at=_record_datetime(record) or datetime.now(timezone.utc),
             )
-            db.add(document)
-            inline_text = _inline_extracted_text(storage, stored.text_blob_path) if get_ai_inline_processing_enabled() else ""
-            inline_provider = get_ai_provider() if inline_text else None
-            apply_inline_intake_decisions(db, document, text=inline_text, ai_provider=inline_provider)
-            db.add(
-                DocumentProcessingJob(
-                    id=str(uuid5(NAMESPACE_URL, f"processing:{document_id}")),
-                    document_upload_id=document_id,
-                    job_type="document_analysis",
-                    status="queued",
-                    metadata_json={"source": "email_intake"},
-                )
-            )
+            try:
+                with db.begin_nested():
+                    db.add(document)
+                    inline_text = (
+                        _inline_extracted_text(storage, stored.text_blob_path)
+                        if get_ai_inline_processing_enabled()
+                        else ""
+                    )
+                    inline_provider = get_ai_provider() if inline_text else None
+                    apply_inline_intake_decisions(
+                        db, document, text=inline_text, ai_provider=inline_provider
+                    )
+                    db.add(
+                        DocumentProcessingJob(
+                            id=str(uuid5(NAMESPACE_URL, f"processing:{document_id}")),
+                            document_upload_id=document_id,
+                            job_type="document_analysis",
+                            status="queued",
+                            metadata_json={"source": "email_intake"},
+                        )
+                    )
+            except IntegrityError:
+                # Concurrent intake already wrote this row; treat as already-processed.
+                continue
             saved_count += 1
 
         db.commit()
@@ -418,10 +430,13 @@ def _inline_extracted_text(storage: BlobStorage, text_blob_path: str) -> str:
     return text
 
 
+_IMAP_TIMEOUT_SECONDS = 30
+
+
 def run_once(config: EmailIntakeConfig, limit: Optional[int] = None) -> int:
     processed_count = 0
 
-    with imaplib.IMAP4_SSL(config.host, config.port) as client:
+    with imaplib.IMAP4_SSL(config.host, config.port, timeout=_IMAP_TIMEOUT_SECONDS) as client:
         client.login(config.username, config.password)
         _check_ok(client.select(config.mailbox), f"select mailbox {config.mailbox}")
         uids = _search_uids(client, config.search_criteria)

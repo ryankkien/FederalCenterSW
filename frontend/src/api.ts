@@ -179,6 +179,23 @@ export async function getContractAnalysisLog(contractId: string): Promise<Array<
   return request(`/api/contracts/${encodeURIComponent(contractId)}/analysis-log`);
 }
 
+export async function downloadContractInsightsPdf(contractId: string, contractNumber: string): Promise<void> {
+  const response = await fetch(`/api/contracts/${encodeURIComponent(contractId)}/insights-pdf`, {
+    headers: authHeaders(),
+  });
+  if (!response.ok) throw new Error(`Export failed with ${response.status}`);
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const safe = (contractNumber || contractId || 'contract').replace(/[^A-Za-z0-9._-]+/g, '_');
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `${safe}_insights.pdf`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
 export function normalizeContract(row: any) {
   const start = row.period_start || row.start || '2026-01-01';
   const end = row.period_end || row.end || '2027-12-31';

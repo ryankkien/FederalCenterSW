@@ -230,12 +230,26 @@ def get_contract_trends(
     )
 
 
-@router.get("/contracts/{contract_id}/documents", response_model=List[dict])
+class ContractDocumentSummary(BaseModel):
+    id: str
+    title: str
+    document_type: str
+    document_kind: str
+    match_status: str
+    processing_status: str
+    original_filename: str
+    created_at: datetime
+
+
+@router.get(
+    "/contracts/{contract_id}/documents",
+    response_model=List[ContractDocumentSummary],
+)
 def list_contract_documents(
     contract_id: str,
     user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> List[dict]:
+) -> List[ContractDocumentSummary]:
     require_contract_view(user, db, contract_id)
     rows = list(
         db.scalars(
@@ -245,16 +259,16 @@ def list_contract_documents(
         ).all()
     )
     return [
-        {
-            "id": row.id,
-            "title": row.title,
-            "document_type": row.document_type,
-            "document_kind": row.document_kind,
-            "match_status": row.match_status,
-            "processing_status": row.processing_status,
-            "original_filename": row.original_filename,
-            "created_at": row.created_at,
-        }
+        ContractDocumentSummary(
+            id=row.id,
+            title=row.title,
+            document_type=row.document_type,
+            document_kind=row.document_kind,
+            match_status=row.match_status,
+            processing_status=row.processing_status,
+            original_filename=row.original_filename,
+            created_at=row.created_at,
+        )
         for row in rows
     ]
 
