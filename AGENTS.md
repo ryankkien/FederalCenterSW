@@ -283,8 +283,10 @@ bun run infra:deploy
   processing run steps, pages, chunks, embeddings, signals, entities, facts,
   agent-curated topics, evidence links, topic revisions, and audit events. Blob Storage
   stores source artifacts and extracted text artifacts.
-- AI processing is feature-flagged with `AI_PROCESSING_ENABLED` and
-  `AI_INLINE_PROCESSING_ENABLED`. Keep OpenAI and future provider keys out of git.
+- AI processing defaults on when `OPENAI_API_KEY` is set and
+  `AI_PROCESSING_ENABLED`/`AI_INLINE_PROCESSING_ENABLED` are omitted. Set either flag
+  to `false` to force-disable that path. Keep OpenAI and future provider keys out of
+  git.
 - Email intake is currently a worker-style module, not a FastAPI route.
 - Email intake persistence is intentionally stubbed: it writes JSONL locally by default
   and can write JSON records to Azure Blob Storage when configured.

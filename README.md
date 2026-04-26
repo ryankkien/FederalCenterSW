@@ -147,11 +147,12 @@ Storage, while Postgres is the canonical store for contract records, processing 
 chunks, embeddings, signals, topics, evidence links, and audit history. Local Postgres
 uses a pgvector-enabled image so embeddings can live beside contract-scoped metadata.
 
-AI processing is feature-flagged off by default. Configure `AI_PROVIDER`,
-`AI_PROCESSING_ENABLED`, `AI_INLINE_PROCESSING_ENABLED`, `OPENAI_API_KEY`,
-`OPENAI_LLM_MODEL`, and `OPENAI_EMBEDDING_MODEL` in an ignored env file or Azure app
-settings before running OpenAI-backed extraction. Upload and email intake workflows
-continue to store documents when AI processing is disabled or blocked.
+AI processing defaults on when `OPENAI_API_KEY` is set and the AI flags are omitted.
+Configure `AI_PROVIDER`, `OPENAI_API_KEY`, `OPENAI_LLM_MODEL`, and
+`OPENAI_EMBEDDING_MODEL` in an ignored env file or Azure app settings before running
+OpenAI-backed extraction. Set `AI_PROCESSING_ENABLED=false` or
+`AI_INLINE_PROCESSING_ENABLED=false` to force-disable either path. Upload and email
+intake workflows continue to store documents when AI processing is disabled or blocked.
 
 The contract analyst pipeline extends the processing foundation with page-level
 extraction, deterministic v1 classification, hard-link matching, extracted entities
