@@ -11,6 +11,7 @@
     "local:down": "./scripts/local-down.sh",
     "local:reset": "./scripts/local-reset.sh",
     "email:intake": "PYTHONPATH=backend .venv/bin/python -m app.email_intake",
+    "discord:html-renderer": "PYTHONPATH=backend .venv/bin/python -m app.discord_html_renderer",
     "infra:whatif": "./scripts/infra-whatif.sh",
     "infra:deploy": "./scripts/infra-deploy.sh",
     "build": "bun run --cwd frontend build",
