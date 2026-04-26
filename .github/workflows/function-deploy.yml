@@ -1,4 +1,4 @@
-name: Email Intake Function Deploy
+name: Backend Worker Function Deploy
 
 on:
   push:
@@ -17,8 +17,11 @@ env:
   AZURE_FUNCTION_APP_NAME: ${{ vars.AZURE_FUNCTION_APP_NAME || 'fcsw-email-intake-e7e9f2' }}
   AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || 'federal-center-sw-dev' }}
   AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID || '99596387-8247-4e94-9917-cf8bc695f106' }}
+  AZURE_STORAGE_CONTAINER: ${{ vars.AZURE_STORAGE_CONTAINER || 'app-assets' }}
   EMAIL_INTAKE_DEFAULT_DOCUMENT_TYPE: ${{ vars.EMAIL_INTAKE_DEFAULT_DOCUMENT_TYPE || 'Email Attachment' }}
   EMAIL_INTAKE_DEFAULT_UPLOADER_ID: ${{ vars.EMAIL_INTAKE_DEFAULT_UPLOADER_ID || 'contractor-demo' }}
+  DOCUMENT_PROCESSING_TIMER_SCHEDULE: ${{ vars.DOCUMENT_PROCESSING_TIMER_SCHEDULE || '0 */5 * * * *' }}
+  DOCUMENT_PROCESSING_LIMIT: ${{ vars.DOCUMENT_PROCESSING_LIMIT || '25' }}
 
 jobs:
   deploy:
@@ -55,8 +58,25 @@ jobs:
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_FUNCTION_APP_NAME" \
             --settings \
+              AZURE_STORAGE_CONTAINER="$AZURE_STORAGE_CONTAINER" \
               EMAIL_INTAKE_DEFAULT_UPLOADER_ID="$EMAIL_INTAKE_DEFAULT_UPLOADER_ID" \
-              EMAIL_INTAKE_DEFAULT_DOCUMENT_TYPE="$EMAIL_INTAKE_DEFAULT_DOCUMENT_TYPE"
+              EMAIL_INTAKE_DEFAULT_DOCUMENT_TYPE="$EMAIL_INTAKE_DEFAULT_DOCUMENT_TYPE" \
+              DOCUMENT_PROCESSING_TIMER_SCHEDULE="$DOCUMENT_PROCESSING_TIMER_SCHEDULE" \
+              DOCUMENT_PROCESSING_LIMIT="$DOCUMENT_PROCESSING_LIMIT"
+
+      - name: Configure Blob Storage Function App setting
+        env:
+          AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_FUNCTION_STORAGE_CONNECTION_STRING }}
+        run: |
+          if [ -z "$AZURE_STORAGE_CONNECTION_STRING" ]; then
+            echo "::error::AZURE_FUNCTION_STORAGE_CONNECTION_STRING is not set; refusing to deploy code that needs Blob Storage."
+            exit 1
+          fi
+
+          az functionapp config appsettings set \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_FUNCTION_APP_NAME" \
+            --settings AZURE_STORAGE_CONNECTION_STRING="$AZURE_STORAGE_CONNECTION_STRING"
 
       - name: Configure database Function App setting
         env:

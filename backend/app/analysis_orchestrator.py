@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """Orchestrate per-contract and cohort contract performance analysis.
 
 Loads five primitive tables (deliverable, financial, decisions, issue, personnel)
 plus CPARS ratings, assembles them into the analysis prompt, calls OpenAI, and
 stores the JSON result in analysis_runs.
 """
+
+from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone

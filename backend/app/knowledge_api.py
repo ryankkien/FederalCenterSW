@@ -15,7 +15,6 @@ from app.knowledge import live_contract_article_data, run_knowledge_ingestion
 from app.models import (
     Contract,
     ContractorProfile,
-    DocumentUpload,
     KnowledgeCitation,
     KnowledgeEdge,
     KnowledgeIngestionRun,
