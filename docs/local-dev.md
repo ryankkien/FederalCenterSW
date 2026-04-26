@@ -216,7 +216,10 @@ docker compose up -d feature_extractor
 The service reads `contracts/{document_id}/text.json`, falls back to legacy
 `documents/{doc_id}/ocr.json`, and writes `contracts/{document_id}/summary.json`.
 Configure `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `MODEL_PREFERENCE` only in ignored
-local env files or shell exports.
+local env files or shell exports. `backend/.env.example`,
+`backend/.env.local.example`, and `feature_extractor/.env.example` intentionally carry
+the same ordered variable names so local backend and optional feature-extractor config do
+not drift.
 
 ## Boundaries
 

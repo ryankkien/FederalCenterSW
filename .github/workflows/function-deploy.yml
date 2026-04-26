@@ -58,20 +58,6 @@ jobs:
               EMAIL_INTAKE_DEFAULT_UPLOADER_ID="$EMAIL_INTAKE_DEFAULT_UPLOADER_ID" \
               EMAIL_INTAKE_DEFAULT_DOCUMENT_TYPE="$EMAIL_INTAKE_DEFAULT_DOCUMENT_TYPE"
 
-      - name: Configure database Function App setting
-        env:
-          DATABASE_URL: ${{ secrets.AZURE_FUNCTION_DATABASE_URL }}
-        run: |
-          if [ -z "$DATABASE_URL" ]; then
-            echo "::error::AZURE_FUNCTION_DATABASE_URL is not set; refusing to deploy code that needs PostgreSQL."
-            exit 1
-          fi
-
-          az functionapp config appsettings set \
-            --resource-group "$AZURE_RESOURCE_GROUP" \
-            --name "$AZURE_FUNCTION_APP_NAME" \
-            --settings DATABASE_URL="$DATABASE_URL"
-
       - name: Deploy Function App
         uses: Azure/functions-action@v1
         with:
