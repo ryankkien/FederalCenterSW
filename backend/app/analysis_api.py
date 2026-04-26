@@ -5,7 +5,7 @@ import re
 import secrets
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -27,6 +27,7 @@ from app.cohort_builder import build_cohort
 from app.config import get_internal_service_token
 from app.contract_analysis import create_investigation_run
 from app.database import SessionLocal, get_db
+from app.insights_pdf import build_contract_insights_pdf
 from app.models import (
     BaselineObligation,
     BaselineRevision,
@@ -2742,6 +2743,36 @@ class AnalysisLogEntryResponse(BaseModel):
     insight_hypothesis_id: Optional[str] = None
 
 
+def _to_analysis_log_entry(run: dict) -> AnalysisLogEntryResponse:
+    result = run.get("result") or {}
+    if isinstance(result, str):
+        try:
+            import json as _json
+            result = _json.loads(result)
+        except Exception:
+            result = {}
+    result_dict = result if isinstance(result, dict) else {}
+    summary = result_dict.get("summary")
+    if not summary and isinstance(result_dict.get("submitted"), dict):
+        submitted = result_dict["submitted"]
+        title = submitted.get("title") or ""
+        narrative = submitted.get("narrative") or ""
+        summary = (f"{title}\n\n{narrative}" if title and narrative else (title or narrative)).strip() or None
+    return AnalysisLogEntryResponse(
+        id=run["id"],
+        status=run.get("status", "unknown"),
+        run_type=run.get("run_type"),
+        created_at=run.get("created_at"),
+        completed_at=run.get("completed_at"),
+        analyzed_doc_count=len(run.get("analyzed_doc_ids") or []),
+        summary=summary,
+        prior_run_id=result_dict.get("prior_run_id"),
+        changes=result_dict.get("changes"),
+        investigated_contract_ids=result_dict.get("investigated_contract_ids"),
+        insight_hypothesis_id=result_dict.get("insight_hypothesis_id"),
+    )
+
+
 @router.get(
     "/contracts/{contract_id}/analysis-log",
     response_model=List[AnalysisLogEntryResponse],
@@ -2752,36 +2783,73 @@ def get_contract_analysis_log(
     db: Session = Depends(get_db),
 ) -> List[AnalysisLogEntryResponse]:
     require_contract_view(user, db, contract_id)
-    runs = get_analysis_log(db, contract_id)
-    entries = []
-    for run in runs:
-        result = run.get("result") or {}
-        if isinstance(result, str):
-            try:
-                import json as _json
-                result = _json.loads(result)
-            except Exception:
-                result = {}
-        result_dict = result if isinstance(result, dict) else {}
-        summary = result_dict.get("summary")
-        if not summary and isinstance(result_dict.get("submitted"), dict):
-            submitted = result_dict["submitted"]
-            title = submitted.get("title") or ""
-            narrative = submitted.get("narrative") or ""
-            summary = (f"{title}\n\n{narrative}" if title and narrative else (title or narrative)).strip() or None
-        entries.append(
-            AnalysisLogEntryResponse(
-                id=run["id"],
-                status=run.get("status", "unknown"),
-                run_type=run.get("run_type"),
-                created_at=run.get("created_at"),
-                completed_at=run.get("completed_at"),
-                analyzed_doc_count=len(run.get("analyzed_doc_ids") or []),
-                summary=summary,
-                prior_run_id=result_dict.get("prior_run_id"),
-                changes=result_dict.get("changes"),
-                investigated_contract_ids=result_dict.get("investigated_contract_ids"),
-                insight_hypothesis_id=result_dict.get("insight_hypothesis_id"),
-            )
+    return [_to_analysis_log_entry(run) for run in get_analysis_log(db, contract_id)]
+
+
+_PDF_FILENAME_SAFE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+@router.get("/contracts/{contract_id}/insights-pdf")
+def export_contract_insights_pdf(
+    contract_id: str,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    require_contract_view(user, db, contract_id)
+    contract = db.get(Contract, contract_id)
+    if contract is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contract not found")
+
+    findings = list(
+        db.scalars(
+            select(RegressionFinding)
+            .where(RegressionFinding.contract_id == contract_id)
+            .order_by(RegressionFinding.created_at.desc())
+        ).all()
+    )
+    document_ids = {finding.document_upload_id for finding in findings if finding.document_upload_id}
+    document_titles: Dict[str, str] = {}
+    if document_ids:
+        document_titles = {
+            doc.id: doc.title
+            for doc in db.scalars(select(DocumentUpload).where(DocumentUpload.id.in_(document_ids))).all()
+        }
+
+    hypothesis_rows = list(
+        db.scalars(
+            select(ContractHypothesis)
+            .where(ContractHypothesis.contract_id == contract_id)
+            .order_by(ContractHypothesis.updated_at.desc())
+        ).all()
+    )
+    hypotheses: List[Tuple[ContractHypothesis, List[HypothesisEvidence]]] = []
+    for hypothesis in hypothesis_rows:
+        evidence = list(
+            db.scalars(
+                select(HypothesisEvidence)
+                .where(HypothesisEvidence.hypothesis_id == hypothesis.id)
+                .order_by(HypothesisEvidence.created_at.asc())
+            ).all()
         )
-    return entries
+        hypotheses.append((hypothesis, evidence))
+
+    analysis_log = [
+        _to_analysis_log_entry(run).model_dump()
+        for run in get_analysis_log(db, contract_id)
+    ]
+
+    pdf_bytes = build_contract_insights_pdf(
+        contract,
+        findings,
+        hypotheses,
+        analysis_log,
+        document_titles=document_titles,
+    )
+
+    safe_number = _PDF_FILENAME_SAFE.sub("_", contract.contract_number or contract.id).strip("_") or "contract"
+    filename = f"{safe_number}_insights.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

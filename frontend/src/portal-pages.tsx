@@ -10,6 +10,7 @@ import {
 } from './portal-shell';
 import {
   createContract,
+  downloadContractInsightsPdf,
   downloadDocumentBlob,
   getContractAnalysis,
   getContractAnalysisLog,
@@ -2387,12 +2388,42 @@ function ContractInsightsTab({ contract: c, findings, analysisLog = [], lifecycl
     rowsById.set(row.id, row);
   }
   const rows = [...rowsById.values()];
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState(null);
+  const canExport = rows.length > 0 || analysisLog.length > 0;
+  async function handleExport() {
+    if (exporting || !canExport) return;
+    setExporting(true);
+    setExportError(null);
+    try {
+      await downloadContractInsightsPdf(c.id, c.number);
+    } catch (err) {
+      setExportError(err?.message || 'Export failed');
+    } finally {
+      setExporting(false);
+    }
+  }
   return (
     <div style={{ padding:'24px 24px 48px' }}>
-      <SectionHeader
-        title="Findings on this contract"
-        subtitle={`${rows.length} backend issue rows from regressions and lifecycle extraction`}
-      />
+      <div style={{ display:'flex', alignItems:'flex-end', justifyContent:'space-between', gap:16, marginBottom:8 }}>
+        <SectionHeader
+          title="Findings on this contract"
+          subtitle={`${rows.length} backend issue rows from regressions and lifecycle extraction`}
+        />
+        <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
+          {exportError && (
+            <span style={{ fontSize:11, color:'var(--flag)', fontFamily:'var(--mono)' }}>{exportError}</span>
+          )}
+          <BtnSecondary
+            onClick={handleExport}
+            disabled={!canExport || exporting}
+            style={{ opacity: !canExport || exporting ? 0.45 : 1, cursor: !canExport || exporting ? 'not-allowed' : 'pointer' }}
+            title={canExport ? 'Download a PDF of findings, hypotheses, and analysis history' : 'No insights to export yet'}
+          >
+            {exporting ? 'Exporting…' : 'Export PDF'}
+          </BtnSecondary>
+        </div>
+      </div>
       <div style={{ display:'grid', gap:14, marginBottom:36 }}>
         {rows.length === 0 && (
           <EmptyState title="No extracted findings" sub="Run document processing or upload reports with extractable performance issues; no demo findings are shown here." />
