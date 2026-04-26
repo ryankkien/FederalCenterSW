@@ -1,12 +1,12 @@
-name: Summarizer Deploy
+name: Feature Extractor Deploy
 
 on:
   push:
     branches:
       - main
     paths:
-      - 'summarizer/**'
-      - '.github/workflows/summarizer-deploy.yml'
+      - 'feature_extractor/**'
+      - '.github/workflows/feature-extractor-deploy.yml'
   workflow_dispatch:
 
 permissions:
@@ -14,8 +14,9 @@ permissions:
   id-token: write
 
 env:
+  ACR_NAME: ${{ vars.ACR_NAME || 'fcswdevacr' }}
   ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER || 'fcswdevacr.azurecr.io' }}
-  ACA_APP_NAME: ${{ vars.SUMMARIZER_APP_NAME || 'fcsw-summarizer-dev' }}
+  ACA_APP_NAME: ${{ vars.FEATURE_EXTRACTOR_APP_NAME || 'fcsw-feature-extractor-dev' }}
   AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || 'federal-center-sw-dev' }}
   AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID || '99596387-8247-4e94-9917-cf8bc695f106' }}
 
@@ -35,12 +36,12 @@ jobs:
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
 
       - name: Log in to ACR
-        run: az acr login --name ${{ env.ACR_LOGIN_SERVER }}
+        run: az acr login --name ${{ env.ACR_NAME }}
 
       - name: Build and push image
         run: |
-          IMAGE="${{ env.ACR_LOGIN_SERVER }}/summarizer"
-          docker build -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" summarizer/
+          IMAGE="${{ env.ACR_LOGIN_SERVER }}/feature-extractor"
+          docker build -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" feature_extractor/
           docker push "$IMAGE:${{ github.sha }}"
           docker push "$IMAGE:latest"
 
@@ -49,4 +50,4 @@ jobs:
           az containerapp update \
             --name "$ACA_APP_NAME" \
             --resource-group "$AZURE_RESOURCE_GROUP" \
-            --image "${{ env.ACR_LOGIN_SERVER }}/summarizer:${{ github.sha }}"
+            --image "${{ env.ACR_LOGIN_SERVER }}/feature-extractor:${{ github.sha }}"

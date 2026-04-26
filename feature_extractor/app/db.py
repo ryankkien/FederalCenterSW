@@ -23,7 +23,7 @@ def log_event(
     status: str,
     metadata: dict | None = None,
 ) -> None:
-    """Write a summarizer pipeline event to audit_events.
+    """Write a feature extraction pipeline event to audit_events.
 
     event_type examples: 'feature_extractor.summary', 'feature_extractor.chunking', 'feature_extractor.index'
     status: 'success' or 'fail'

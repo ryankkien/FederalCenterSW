@@ -17,5 +17,5 @@ param postgresAdministratorLogin = 'fcadmin'
 
 param acrName = 'fcswdevacr'
 param acaEnvironmentName = 'fcsw-dev-aca-env'
-param summarizerAppName = 'fcsw-summarizer-dev'
-// openaiApiKey and summarizerDatabaseUrl are intentionally not set here — supply via CI/CD secrets or az deployment group create --parameters
+param featureExtractorAppName = 'fcsw-feature-extractor-dev'
+// featureExtractorOpenAiApiKey and featureExtractorDatabaseUrl are intentionally not set here; supply via CI/CD secrets or az deployment group create --parameters.

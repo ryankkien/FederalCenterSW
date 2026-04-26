@@ -33,6 +33,9 @@ Everything for this project should live in the single resource group `federal-ce
 | Function package container | `app-package-fcswemailintakee7e9f2-3009836` | `eastus` | Private container for Function App package deployment. |
 | Function App plan | `ASP-federalcenterswdev-818f` | `eastus` | Flex Consumption plan. |
 | Backend worker Function App | `fcsw-email-intake-e7e9f2` | `eastus` | Timer-trigger Function App for email intake and queued document processing. |
+| Azure Container Registry | `fcswdevacr` | `eastus` | Stores deployable pipeline service images. |
+| Container Apps environment | `fcsw-dev-aca-env` | `eastus` | Managed environment for optional pipeline services. |
+| Feature extractor Container App | `fcsw-feature-extractor-dev` | `eastus` | Optional service image built from `feature_extractor/`. This rename from the prior dev app name requires a delete/create cutover. |
 
 ## Portal Links
 
