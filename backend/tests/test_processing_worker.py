@@ -12,7 +12,7 @@ from app.blob_storage import get_blob_storage
 from app.database import Base, get_db
 from app.main import app
 from app.models import DocumentChunk, DocumentProcessingJob, DocumentUpload
-from app.processing_worker import drain_queued_processing_jobs
+from app.processing_worker import _worker_count_for_session_factory, drain_queued_processing_jobs
 
 
 class FakeBlobStorage:
@@ -216,6 +216,12 @@ def test_processing_worker_concurrent_drain_claims_each_job_once(tmp_path) -> No
     assert {job.attempt_count for job in jobs} == {1}
     assert all(job.worker_id for job in jobs)
     assert {document.processing_status for document in documents} == {"processed"}
+
+
+def test_sqlite_processing_drains_are_serialized_to_avoid_write_locks(tmp_path) -> None:
+    session_factory = _session_factory(tmp_path)
+
+    assert _worker_count_for_session_factory(4, session_factory) == 1
 
 
 def _client_with_test_dependencies(session_factory: sessionmaker, fake_storage: FakeBlobStorage) -> TestClient:
