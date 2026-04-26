@@ -1177,7 +1177,14 @@ class GenerateInsightsResponse(BaseModel):
 def _contracts_with_new_docs(
     db: Session, visible_ids: List[str]
 ) -> Dict[str, List[str]]:
-    """Return {contract_id: [new_doc_id, ...]} for contracts with unanalyzed completed docs."""
+    """Return {contract_id: [new_doc_id, ...]} for completed docs not yet covered by a
+    prior manual portfolio insights run.
+
+    A doc is "new" if its id is absent from every `analysis_runs.analyzed_doc_ids` list
+    for the contract. Only manual "Generate New Insights" runs populate that column —
+    auto per-contract runs that fire after upload extraction leave it null — so this
+    correctly ignores those auto runs when deciding whether the button should light up.
+    """
     if not visible_ids:
         return {}
     result: Dict[str, List[str]] = {}
@@ -1188,12 +1195,13 @@ def _contracts_with_new_docs(
                 SELECT id FROM document_uploads
                 WHERE contract_id = :cid
                   AND processing_status = 'completed'
-                  AND created_at > COALESCE(
-                      (SELECT MAX(ar.completed_at) FROM analysis_runs ar
-                       WHERE ar.target_contract_id = :cid
-                         AND ar.run_type = 'per_contract'
-                         AND ar.status = 'complete'),
-                      '1970-01-01T00:00:00+00:00'
+                  AND id NOT IN (
+                      SELECT json_array_elements_text(ar.analyzed_doc_ids)
+                      FROM analysis_runs ar
+                      WHERE ar.target_contract_id = :cid
+                        AND ar.run_type = 'per_contract'
+                        AND ar.status = 'complete'
+                        AND ar.analyzed_doc_ids IS NOT NULL
                   )
                 ORDER BY created_at ASC
                 """
