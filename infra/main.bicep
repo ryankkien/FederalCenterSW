@@ -306,7 +306,6 @@ resource functionAppSettings 'Microsoft.Web/sites/config@2024-04-01' = {
     OPENAI_EMBEDDING_MODEL: 'text-embedding-3-large'
     OPENAI_LLM_MODEL: 'gpt-5.5'
     RESEND_API_KEY: keyVaultReferences.resendApiKey
-    SCM_DO_BUILD_DURING_DEPLOYMENT: 'true'
   }
 }
 
