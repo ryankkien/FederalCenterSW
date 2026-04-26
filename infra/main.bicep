@@ -33,6 +33,26 @@ param postgresDatabaseName string
 @description('Existing PostgreSQL administrator login. The password is intentionally not managed in this adoption template.')
 param postgresAdministratorLogin string
 
+@description('Azure Container Registry name for pipeline service images.')
+param acrName string
+
+@description('ACA managed environment name.')
+param acaEnvironmentName string
+
+@description('Container App name for the Summarizer service.')
+param summarizerAppName string
+
+@description('Summarizer Docker image tag to deploy.')
+param summarizerImageTag string = 'latest'
+
+@description('Anthropic API key secret for the Summarizer.')
+@secure()
+param anthropicApiKey string = ''
+
+@description('OpenAI API key secret for the Summarizer (used if Anthropic key is empty).')
+@secure()
+param openaiApiKey string = ''
+
 resource appStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: appStorageAccountName
   location: appLocation
@@ -216,6 +236,129 @@ resource postgresDatabase 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2
   }
 }
 
+// --- Azure Container Registry ---
+
+resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
+  name: acrName
+  location: appLocation
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    adminUserEnabled: true
+  }
+}
+
+// --- ACA Environment (Log Analytics + Managed Environment) ---
+
+resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
+  name: '${acaEnvironmentName}-logs'
+  location: appLocation
+  properties: {
+    sku: {
+      name: 'PerGB2018'
+    }
+    retentionInDays: 30
+  }
+}
+
+resource acaEnvironment 'Microsoft.App/managedEnvironments@2024-03-01' = {
+  name: acaEnvironmentName
+  location: appLocation
+  properties: {
+    appLogsConfiguration: {
+      destination: 'log-analytics'
+      logAnalyticsConfiguration: {
+        customerId: logAnalytics.properties.customerId
+        sharedKey: logAnalytics.listKeys().primarySharedKey
+      }
+    }
+  }
+}
+
+// --- Summarizer Container App ---
+
+resource summarizerApp 'Microsoft.App/containerApps@2024-03-01' = {
+  name: summarizerAppName
+  location: appLocation
+  properties: {
+    managedEnvironmentId: acaEnvironment.id
+    configuration: {
+      activeRevisionsMode: 'Single'
+      ingress: {
+        external: true
+        targetPort: 8000
+        transport: 'http'
+      }
+      registries: [
+        {
+          server: acr.properties.loginServer
+          username: acr.listCredentials().username
+          passwordSecretRef: 'acr-password'
+        }
+      ]
+      secrets: [
+        {
+          name: 'acr-password'
+          value: acr.listCredentials().passwords[0].value
+        }
+        {
+          name: 'storage-connection-string'
+          value: 'DefaultEndpointsProtocol=https;AccountName=${appStorage.name};AccountKey=${appStorage.listKeys().keys[0].value};EndpointSuffix=${environment().suffixes.storage}'
+        }
+        {
+          name: 'anthropic-api-key'
+          value: anthropicApiKey
+        }
+        {
+          name: 'openai-api-key'
+          value: openaiApiKey
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'summarizer'
+          image: '${acr.properties.loginServer}/summarizer:${summarizerImageTag}'
+          resources: {
+            cpu: json('0.5')
+            memory: '1Gi'
+          }
+          env: [
+            {
+              name: 'AZURE_STORAGE_CONNECTION_STRING'
+              secretRef: 'storage-connection-string'
+            }
+            {
+              name: 'AZURE_STORAGE_CONTAINER'
+              value: appAssetsContainerName
+            }
+            {
+              name: 'ANTHROPIC_API_KEY'
+              secretRef: 'anthropic-api-key'
+            }
+            {
+              name: 'OPENAI_API_KEY'
+              secretRef: 'openai-api-key'
+            }
+            {
+              name: 'MODEL_PREFERENCE'
+              value: 'claude'
+            }
+          ]
+        }
+      ]
+      scale: {
+        minReplicas: 0
+        maxReplicas: 10
+      }
+    }
+  }
+}
+
 output functionAppHostName string = functionApp.properties.defaultHostName
 output postgresFullyQualifiedDomainName string = postgresServer.properties.fullyQualifiedDomainName
 output appStorageBlobEndpoint string = appStorage.properties.primaryEndpoints.blob
+output acrLoginServer string = acr.properties.loginServer
+output summarizerUrl string = 'https://${summarizerApp.properties.configuration.ingress.fqdn}'
