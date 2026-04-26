@@ -211,9 +211,9 @@ signature, then maps Entra user and group ids to `contract_access_grants.princip
 
 ## OCR Notes
 
-PDF text extraction uses embedded PDF text when available. Scanned PDFs and uploaded
-images need OCR. The backend renders scanned PDF pages with PyMuPDF and calls the
-local Tesseract binary.
+PDF text extraction uses embedded PDF text when the text layer is usable. Scanned PDFs,
+PDFs with low-quality embedded OCR, and uploaded images need OCR. The backend renders
+PDF pages with PyMuPDF and calls the local Tesseract binary.
 
 Install Tesseract locally before testing scanned documents:
 
@@ -230,9 +230,25 @@ DOCUMENT_OCR_MAX_PAGES=25
 DOCUMENT_OCR_DPI_SCALE=2.0
 ```
 
-When Tesseract is missing, uploads still succeed, but `text.json` records
-`extraction_status: failed` with an OCR-specific error. Long PDFs are limited by
-`DOCUMENT_OCR_MAX_PAGES` so synchronous uploads do not spend unbounded time in OCR.
+When Tesseract is missing, uploads still succeed. `text.json` records the extraction
+failure, or falls back to embedded PDF text with a warning when usable embedded text is
+available. Long PDFs are limited by `DOCUMENT_OCR_MAX_PAGES` so synchronous uploads do
+not spend unbounded time in OCR.
+
+## Optional Summarizer Notes
+
+The local Compose file includes an optional `summarizer` service on port `8001`. It is
+not started by `bun run local:up`; start it explicitly when you want layered summary
+and PSC/NAICS classification output:
+
+```sh
+docker compose up -d summarizer
+```
+
+The service reads `contracts/{document_id}/text.json`, falls back to legacy
+`documents/{doc_id}/ocr.json`, and writes `contracts/{document_id}/summary.json`.
+Configure `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `MODEL_PREFERENCE` only in ignored
+local env files or shell exports.
 
 ## Boundaries
 

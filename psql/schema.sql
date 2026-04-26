@@ -466,6 +466,107 @@ CREATE TABLE document_semantic_links (
     )
 );
 
+CREATE TABLE knowledge_ingestion_runs (
+    id VARCHAR(36) PRIMARY KEY,
+    scope VARCHAR(80) NOT NULL,
+    status VARCHAR(40) NOT NULL DEFAULT 'running',
+    sources_requested JSON,
+    contract_ids JSON,
+    vendor_ueis JSON,
+    "limit" INTEGER,
+    model_name VARCHAR(160),
+    prompt_version VARCHAR(80),
+    error_message TEXT,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    completed_at TIMESTAMPTZ,
+    metadata_json JSON
+);
+
+CREATE TABLE knowledge_source_records (
+    id VARCHAR(36) PRIMARY KEY,
+    ingestion_run_id VARCHAR(36) REFERENCES knowledge_ingestion_runs(id) ON DELETE SET NULL,
+    source_name VARCHAR(80) NOT NULL,
+    source_type VARCHAR(80) NOT NULL DEFAULT 'official',
+    source_key VARCHAR(500) NOT NULL,
+    status VARCHAR(40) NOT NULL DEFAULT 'available',
+    unavailable_reason TEXT,
+    url VARCHAR(1000),
+    title VARCHAR(500),
+    text TEXT,
+    raw_json JSON,
+    content_hash VARCHAR(64),
+    source_timestamp TIMESTAMPTZ,
+    contract_id VARCHAR(36) REFERENCES contracts(id) ON DELETE SET NULL,
+    vendor_uei VARCHAR(32),
+    metadata_json JSON,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_knowledge_source_key UNIQUE (source_name, source_key)
+);
+
+CREATE TABLE knowledge_nodes (
+    id VARCHAR(36) PRIMARY KEY,
+    node_type VARCHAR(80) NOT NULL,
+    slug VARCHAR(300) NOT NULL,
+    title VARCHAR(500) NOT NULL,
+    summary TEXT NOT NULL,
+    body TEXT NOT NULL,
+    contract_id VARCHAR(36) REFERENCES contracts(id) ON DELETE SET NULL,
+    vendor_uei VARCHAR(32),
+    security_level VARCHAR(40) NOT NULL DEFAULT 'standard',
+    status VARCHAR(40) NOT NULL DEFAULT 'active',
+    source_record_id VARCHAR(36) REFERENCES knowledge_source_records(id) ON DELETE SET NULL,
+    model_name VARCHAR(160),
+    prompt_version VARCHAR(80),
+    metadata_json JSON,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_knowledge_node_slug UNIQUE (node_type, slug)
+);
+
+CREATE TABLE knowledge_edges (
+    id VARCHAR(36) PRIMARY KEY,
+    source_node_id VARCHAR(36) NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
+    target_node_id VARCHAR(36) NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
+    edge_type VARCHAR(80) NOT NULL,
+    label VARCHAR(200),
+    weight FLOAT,
+    metadata_json JSON,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_knowledge_edge UNIQUE (source_node_id, target_node_id, edge_type)
+);
+
+CREATE TABLE knowledge_citations (
+    id VARCHAR(36) PRIMARY KEY,
+    node_id VARCHAR(36) NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
+    source_record_id VARCHAR(36) REFERENCES knowledge_source_records(id) ON DELETE SET NULL,
+    document_upload_id VARCHAR(36) REFERENCES document_uploads(id) ON DELETE SET NULL,
+    external_source_ref_id VARCHAR(36) REFERENCES external_source_refs(id) ON DELETE SET NULL,
+    label VARCHAR(300) NOT NULL,
+    excerpt TEXT NOT NULL,
+    url VARCHAR(1000),
+    source_path VARCHAR(1000),
+    quote_hash VARCHAR(64),
+    metadata_json JSON,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE contractor_profiles (
+    id VARCHAR(36) PRIMARY KEY,
+    vendor_uei VARCHAR(32),
+    vendor_name VARCHAR(300) NOT NULL,
+    summary TEXT NOT NULL,
+    evidence_labels JSON,
+    award_count INTEGER NOT NULL DEFAULT 0,
+    total_obligated FLOAT,
+    unresolved_issue_count INTEGER NOT NULL DEFAULT 0,
+    contradiction_count INTEGER NOT NULL DEFAULT 0,
+    metadata_json JSON,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_contractor_profiles_vendor_uei UNIQUE (vendor_uei)
+);
+
 CREATE INDEX ix_contracts_agency_name ON contracts (agency_name);
 CREATE INDEX ix_contracts_contract_number ON contracts (contract_number);
 CREATE INDEX ix_contracts_naics_code ON contracts (naics_code);
@@ -635,3 +736,35 @@ CREATE INDEX ix_contract_similarity_links_target_contract_id ON contract_similar
 CREATE INDEX ix_document_semantic_links_link_type ON document_semantic_links (link_type);
 CREATE INDEX ix_document_semantic_links_source_document_upload_id ON document_semantic_links (source_document_upload_id);
 CREATE INDEX ix_document_semantic_links_target_document_upload_id ON document_semantic_links (target_document_upload_id);
+
+CREATE INDEX ix_knowledge_ingestion_runs_scope ON knowledge_ingestion_runs (scope);
+CREATE INDEX ix_knowledge_ingestion_runs_status ON knowledge_ingestion_runs (status);
+
+CREATE INDEX ix_knowledge_source_records_content_hash ON knowledge_source_records (content_hash);
+CREATE INDEX ix_knowledge_source_records_contract_id ON knowledge_source_records (contract_id);
+CREATE INDEX ix_knowledge_source_records_ingestion_run_id ON knowledge_source_records (ingestion_run_id);
+CREATE INDEX ix_knowledge_source_records_source_name ON knowledge_source_records (source_name);
+CREATE INDEX ix_knowledge_source_records_source_type ON knowledge_source_records (source_type);
+CREATE INDEX ix_knowledge_source_records_status ON knowledge_source_records (status);
+CREATE INDEX ix_knowledge_source_records_vendor_uei ON knowledge_source_records (vendor_uei);
+
+CREATE INDEX ix_knowledge_nodes_contract_id ON knowledge_nodes (contract_id);
+CREATE INDEX ix_knowledge_nodes_node_type ON knowledge_nodes (node_type);
+CREATE INDEX ix_knowledge_nodes_security_level ON knowledge_nodes (security_level);
+CREATE INDEX ix_knowledge_nodes_slug ON knowledge_nodes (slug);
+CREATE INDEX ix_knowledge_nodes_source_record_id ON knowledge_nodes (source_record_id);
+CREATE INDEX ix_knowledge_nodes_status ON knowledge_nodes (status);
+CREATE INDEX ix_knowledge_nodes_vendor_uei ON knowledge_nodes (vendor_uei);
+
+CREATE INDEX ix_knowledge_edges_edge_type ON knowledge_edges (edge_type);
+CREATE INDEX ix_knowledge_edges_source_node_id ON knowledge_edges (source_node_id);
+CREATE INDEX ix_knowledge_edges_target_node_id ON knowledge_edges (target_node_id);
+
+CREATE INDEX ix_knowledge_citations_document_upload_id ON knowledge_citations (document_upload_id);
+CREATE INDEX ix_knowledge_citations_external_source_ref_id ON knowledge_citations (external_source_ref_id);
+CREATE INDEX ix_knowledge_citations_node_id ON knowledge_citations (node_id);
+CREATE INDEX ix_knowledge_citations_quote_hash ON knowledge_citations (quote_hash);
+CREATE INDEX ix_knowledge_citations_source_record_id ON knowledge_citations (source_record_id);
+
+CREATE INDEX ix_contractor_profiles_vendor_name ON contractor_profiles (vendor_name);
+CREATE INDEX ix_contractor_profiles_vendor_uei ON contractor_profiles (vendor_uei);

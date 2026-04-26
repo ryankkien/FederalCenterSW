@@ -78,7 +78,6 @@ Configure these GitHub repository secrets for deployment and notifications:
 | --- | --- |
 | `AZURE_FUNCTION_DATABASE_URL` | PostgreSQL connection string written to the Function App as `DATABASE_URL`. |
 | `DISCORD_PULL_REQUEST_WEBHOOK_URL` | Discord webhook URL for the pull request notification channel. |
-| `DISCORD_HTML_RENDERER_WEBHOOK_URL` | Discord webhook URL used by the HTML renderer worker to post PNGs. |
 
 The Azure identity needs permission to run resource group deployments in
 `federal-center-sw-dev` and deploy to the Function App. Use least privilege when possible;

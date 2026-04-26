@@ -1,0 +1,138 @@
+
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--font-sans); color: var(--color-text-primary); }
+  .canvas { padding: 2rem 1.5rem; display: flex; flex-direction: column; gap: 2rem; }
+  .section-label { font-size: 11px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-text-tertiary); margin-bottom: 0.75rem; }
+  .card { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 1.25rem 1.5rem; }
+  .card-header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 0.75rem; }
+  .card-title { font-size: 15px; font-weight: 500; }
+  .badge { font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 20px; }
+  .badge-teal { background: #E1F5EE; color: #0F6E56; }
+  .badge-purple { background: #EEEDFE; color: #3C3489; }
+  .badge-amber { background: #FAEEDA; color: #633806; }
+  .badge-gray { background: #F1EFE8; color: #444441; }
+  .badge-red { background: #FCEBEB; color: #791F1F; }
+  .why { font-size: 13px; color: var(--color-text-secondary); line-height: 1.6; padding: 0.6rem 0.75rem; background: var(--color-background-secondary); border-radius: var(--border-radius-md); margin-bottom: 1rem; border-left: 2px solid var(--color-border-secondary); }
+  .step-list { display: flex; flex-direction: column; gap: 0.5rem; }
+  .step { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; line-height: 1.5; }
+  .step-num { font-size: 11px; font-weight: 500; color: var(--color-text-tertiary); min-width: 18px; margin-top: 2px; }
+  .step-text { flex: 1; color: var(--color-text-primary); }
+  .step-text code { font-family: var(--font-mono); font-size: 11.5px; background: var(--color-background-secondary); padding: 1px 5px; border-radius: 4px; border: 0.5px solid var(--color-border-tertiary); }
+  .note { font-size: 12px; color: var(--color-text-secondary); display: flex; align-items: flex-start; gap: 6px; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 0.5px solid var(--color-border-tertiary); }
+  .note-icon { font-size: 13px; flex-shrink: 0; margin-top: 1px; }
+  .sub-section { margin-top: 1rem; }
+  .sub-title { font-size: 12px; font-weight: 500; color: var(--color-text-secondary); margin-bottom: 0.4rem; }
+  .formats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-top: 0.5rem; }
+  .format-chip { background: var(--color-background-secondary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-md); padding: 0.5rem 0.75rem; }
+  .format-chip .label { font-size: 11px; font-weight: 500; color: var(--color-text-secondary); }
+  .format-chip .value { font-size: 12.5px; color: var(--color-text-primary); margin-top: 2px; }
+  .divider { height: 0.5px; background: var(--color-border-tertiary); }
+  .ref-link { font-size: 11px; color: var(--color-text-info, #185FA5); text-decoration: none; }
+  .ref-link:hover { text-decoration: underline; }
+  .checklist-note { background: #EEEDFE; border-radius: var(--border-radius-md); padding: 0.6rem 0.75rem; margin-top: 0.75rem; font-size: 12px; color: #3C3489; line-height: 1.5; }
+</style>
+
+<div class="canvas">
+
+  <div>
+    <div class="section-label">Data source integration</div>
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">CPARS</span>
+        <span class="badge badge-teal">Unclassified only</span>
+      </div>
+
+      <div class="why">
+        Contains CO/COR performance narratives and contractor response comments — the best qualitative summaries of how a contract actually went.
+      </div>
+
+      <div class="step-list">
+        <div class="step">
+          <span class="step-num">1.</span>
+          <span class="step-text">Pull service contract numbers from <code>SAM.gov API</code> — confirm API availability for Navy-scoped contract list</span>
+        </div>
+        <div class="step">
+          <span class="step-num">2.</span>
+          <span class="step-text">For each contract number, pull evaluation as HTML via authenticated session (Focal Point role) → parse into JSON</span>
+        </div>
+        <div class="step">
+          <span class="step-num">3.</span>
+          <span class="step-text">Extract: ratings (quality, schedule, cost control, management, regulatory compliance), CO/COR narrative, contractor response narrative, period of performance, eval type (interim/final)</span>
+        </div>
+        <div class="step">
+          <span class="step-num">4.</span>
+          <span class="step-text">Join to contract master record via <code>contract_id</code></span>
+        </div>
+        <div class="step">
+          <span class="step-num">5.</span>
+          <span class="step-text">Run narratives through LLM analysis layer; collect structured ratings</span>
+        </div>
+      </div>
+
+      <div class="note">
+        <span class="note-icon">⚠</span>
+        <span>Does not apply to classified contracts — CPARS is unclassified only. Those contracts rely solely on IPMDAR + weekly reports.</span>
+      </div>
+
+      <div class="checklist-note">
+        Reference: CPAR Quality Checklist (DoD COR Handbook) — to be used for generating example CPARS reports for testing pipeline. Fields: contract/order number, DUNS/PSC/NAICS, eval type, narrative quality criteria, rating definitions (Exceptional → Unsatisfactory).
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <div>
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">IPMDAR</span>
+        <span class="badge badge-purple">Monthly cadence</span>
+      </div>
+
+      <div class="why">
+        Where most structured contract performance data lives — cost, schedule, EVM metrics — plus the Performance Narrative Report, a rich qualitative document produced per reporting period.
+      </div>
+
+      <div class="step-list">
+        <div class="step">
+          <span class="step-num">1.</span>
+          <span class="step-text">Query <code>EVM-CR</code> (DoD EVM Central Repository) via authorized API using Navy credentials — pull CPD + SPD + narrative per contract per reporting period</span>
+        </div>
+        <div class="step">
+          <span class="step-num">1b.</span>
+          <span class="step-text">Alternative / future: route all contractor IPMDAR submissions to <code>reporting@navy.mil</code> equivalent — bypasses EVM-CR pull entirely for newer contracts</span>
+        </div>
+        <div class="step">
+          <span class="step-num">2.</span>
+          <span class="step-text">Join to contract master record via <code>contract_id</code></span>
+        </div>
+      </div>
+
+      <div class="sub-section">
+        <div class="sub-title">What comes in and how</div>
+        <div class="formats-grid">
+          <div class="format-chip">
+            <div class="label">Contract Performance Dataset (CPD)</div>
+            <div class="value">JSON — BCWS, BCWP, ACWP, ETC, EAC by control account</div>
+          </div>
+          <div class="format-chip">
+            <div class="label">Schedule Performance Dataset (SPD)</div>
+            <div class="value">JSON — milestones, critical path, planned vs. actual dates</div>
+          </div>
+          <div class="format-chip">
+            <div class="label">Performance Narrative Report</div>
+            <div class="value">Word / PDF — defined in DID. OCR → LLM pipeline.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="note">
+        <span class="note-icon">↗</span>
+        <span><a class="ref-link" href="https://blog.humphreys-assoc.com/introduction-ipmdar-data-deliverable/" target="_blank">Source: Humphreys & Associates — Introduction to the IPMDAR Data Deliverable</a></span>
+      </div>
+    </div>
+  </div>
+
+</div>

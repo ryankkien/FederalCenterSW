@@ -14,3 +14,8 @@ param functionAppName = 'fcsw-email-intake-e7e9f2'
 param postgresServerName = 'federal-center-sw-dev-pg-jal50w'
 param postgresDatabaseName = 'federal_center_sw'
 param postgresAdministratorLogin = 'fcadmin'
+
+param acrName = 'fcswdevacr'
+param acaEnvironmentName = 'fcsw-dev-aca-env'
+param summarizerAppName = 'fcsw-summarizer-dev'
+// anthropicApiKey and openaiApiKey are intentionally not set here — supply via CI/CD secrets or az deployment group create --parameters

@@ -36,6 +36,22 @@ services:
     volumes:
       - fcsw_azurite_data:/data
 
+  summarizer:
+    build: ./summarizer
+    container_name: fcsw-summarizer-local
+    ports:
+      - "8001:8000"
+    environment:
+      # Points at the local Azurite emulator
+      AZURE_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFeqCnf2mqk3aE7GcxY8wEkxSQ9fL3aPo/l72tK4G8Y7YX8WfPjY4I3K0W2d8t0oL8+/hQ==;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
+      AZURE_STORAGE_CONTAINER: app-assets
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      MODEL_PREFERENCE: ${MODEL_PREFERENCE:-claude}
+    depends_on:
+      azurite:
+        condition: service_healthy
+
 volumes:
   fcsw_postgres_data:
   fcsw_azurite_data:

@@ -195,6 +195,20 @@ GET /api/documents/{document_id}/sas-url
 
 That endpoint checks the signed-in user's document access and returns a read-only Blob URL that expires in 15 minutes. If Azure Blob Storage is not configured locally, the endpoint returns `501` and the frontend falls back to the backend download route.
 
+New portal and email attachments store a source file plus extracted text metadata:
+
+```text
+documents/{uploader_id}/{document_id}/{original_filename}
+documents/{uploader_id}/{document_id}/text.json
+```
+
+PDFs with a usable embedded text layer are extracted directly. Scanned PDFs, PDFs with
+low-quality embedded OCR, and images use OCR. The current backend OCR path calls a local
+Tesseract binary after rendering PDF pages with PyMuPDF. Standard Azure Functions zip
+deployments should not be assumed to include Tesseract, so cloud OCR needs either a
+custom runtime image that installs Tesseract or a managed OCR service such as Azure AI
+Document Intelligence before scanned PDF extraction is considered production-ready.
+
 Example local backend env shape:
 
 ```env
@@ -235,6 +249,10 @@ Current env variables used by the backend:
 | `EMAIL_INTAKE_OUTPUT_PATH` | Local JSONL audit output path. |
 | `EMAIL_INTAKE_DEFAULT_UPLOADER_ID` | Contractor id assigned to emailed attachments until real contractor accounts exist. |
 | `EMAIL_INTAKE_DEFAULT_DOCUMENT_TYPE` | Document type assigned to emailed attachments. |
+| `DOCUMENT_OCR_TESSERACT_CMD` | Optional OCR command path, default `tesseract`. |
+| `DOCUMENT_OCR_LANGUAGE` | Optional OCR language code, default `eng`. |
+| `DOCUMENT_OCR_MAX_PAGES` | Optional max scanned PDF pages to OCR synchronously, default `25`; use `0` for no limit. |
+| `DOCUMENT_OCR_DPI_SCALE` | Optional PDF render scale before OCR, default `2.0`. |
 
 ## Adding More People
 

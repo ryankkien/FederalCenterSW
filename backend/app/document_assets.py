@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+import re
 import subprocess
 import zipfile
 from dataclasses import dataclass
@@ -29,6 +30,9 @@ except ImportError:
 TEXT_JSON_FILENAME = "text.json"
 DEFAULT_OCR_DPI_SCALE = 2.0
 DEFAULT_OCR_MAX_PAGES = 25
+MIN_EMBEDDED_TEXT_CHARS = 300
+MIN_TEXT_QUALITY_SCORE = 0.55
+MAX_OCR_SAMPLE_PAGES = 3
 
 
 @dataclass
@@ -127,9 +131,13 @@ def _text_json_payload(
         "content_type": content_type,
         "source": source,
         "text": extracted.text,
+        "status": extracted.status,
+        "method": extracted.method,
         "extraction_status": extracted.status,
         "extraction_error": extracted.error,
         "extraction_warning": extracted.warning,
+        "embedded_quality": extracted.embedded_quality,
+        "ocr_quality": extracted.ocr_quality,
         "pages": extracted.pages,
     }
     return json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")
@@ -139,8 +147,11 @@ def _text_json_payload(
 class _ExtractedText:
     text: str
     status: str
+    method: str = "none"
     error: Optional[str] = None
     warning: Optional[str] = None
+    embedded_quality: Optional[float] = None
+    ocr_quality: Optional[float] = None
     pages: Optional[List[Dict[str, object]]] = None
 
     def __post_init__(self) -> None:
@@ -155,11 +166,13 @@ def _extract_text(filename: str, content_type: str, data: bytes) -> _ExtractedTe
             return _extract_pdf_text(data)
         elif content_type in {"text/plain", "text/csv"} or extension in {".txt", ".csv"}:
             text = _decode_text(data)
+            method = "direct"
         elif content_type in {"image/png", "image/jpeg"} or extension in {".png", ".jpg", ".jpeg"}:
             text, warning = _ocr_image_text(data)
             return _ExtractedText(
                 text=text,
                 status="ocr_extracted",
+                method="ocr",
                 warning=warning,
                 pages=_single_page_payload(text, "ocr_extracted", warning=warning),
             )
@@ -168,11 +181,13 @@ def _extract_text(filename: str, content_type: str, data: bytes) -> _ExtractedTe
             or extension == ".docx"
         ):
             text = _extract_docx_text(data)
+            method = "docx"
         elif (
             content_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             or extension == ".xlsx"
         ):
             text = _extract_xlsx_text(data)
+            method = "xlsx"
         else:
             return _ExtractedText(text="", status="unsupported")
     except Exception as error:
@@ -181,11 +196,93 @@ def _extract_text(filename: str, content_type: str, data: bytes) -> _ExtractedTe
     return _ExtractedText(
         text=text,
         status="extracted",
+        method=method,
         pages=_single_page_payload(text, "extracted"),
     )
 
 
 def _extract_pdf_text(data: bytes) -> _ExtractedText:
+    embedded_text, pages, document = _extract_pdf_embedded_text(data)
+    embedded_quality = _text_quality_score(embedded_text)
+
+    if _should_try_ocr(document, embedded_text, embedded_quality):
+        try:
+            ocr_text, warning = _ocr_pdf_text(data)
+        except Exception as error:
+            if embedded_text.strip():
+                return _ExtractedText(
+                    text=embedded_text,
+                    status="extracted",
+                    method="embedded",
+                    warning=f"OCR failed; using embedded PDF text: {error}",
+                    embedded_quality=embedded_quality,
+                    pages=pages,
+                )
+            return _ExtractedText(
+                text="",
+                status="failed",
+                method="none",
+                error=f"PDF text extraction produced no usable text and OCR failed: {error}",
+                embedded_quality=embedded_quality,
+            )
+
+        ocr_quality = _text_quality_score(ocr_text)
+        if _prefer_ocr(embedded_text, embedded_quality, ocr_text, ocr_quality):
+            return _ExtractedText(
+                text=ocr_text.strip(),
+                status="ocr_extracted",
+                method="ocr",
+                warning=warning,
+                embedded_quality=embedded_quality,
+                ocr_quality=ocr_quality,
+                pages=_single_page_payload(ocr_text.strip(), "ocr_extracted", warning=warning),
+            )
+
+    if embedded_text.strip():
+        return _ExtractedText(
+            text=embedded_text,
+            status="extracted",
+            method="embedded",
+            embedded_quality=embedded_quality,
+            pages=pages,
+        )
+
+    return _ExtractedText(
+        text="",
+        status="failed",
+        method="none",
+        error="PDF extraction produced no text",
+        embedded_quality=embedded_quality,
+    )
+
+
+def _extract_pdf_embedded_text(
+    data: bytes,
+) -> Tuple[str, List[Dict[str, object]], Optional[object]]:
+    if fitz is not None:
+        document = fitz.open(stream=data, filetype="pdf")
+        pages = []
+        page_text_values = []
+        offset = 0
+        for index, page in enumerate(document, start=1):
+            page_text = (page.get_text() or "").strip()
+            if not page_text:
+                continue
+            start = offset
+            page_text_values.append(page_text)
+            offset += len(page_text)
+            pages.append(
+                {
+                    "page_number": index,
+                    "text": page_text,
+                    "start_char": start,
+                    "end_char": offset,
+                    "extraction_status": "extracted",
+                }
+            )
+            offset += 2
+        return "\n\n".join(page_text_values).strip(), pages, document
+
     reader = PdfReader(BytesIO(data))
     pages = []
     offset = 0
@@ -206,27 +303,81 @@ def _extract_pdf_text(data: bytes) -> _ExtractedText:
                 }
             )
             offset += 2
-    text = "\n\n".join(page_text_values).strip()
-    if text:
-        return _ExtractedText(text=text, status="extracted", pages=pages)
+    return "\n\n".join(page_text_values).strip(), pages, None
 
-    try:
-        ocr_text, warning = _ocr_pdf_text(data)
-    except Exception as error:
-        return _ExtractedText(
-            text="",
-            status="failed",
-            error=f"PDF text extraction produced no text and OCR failed: {error}",
-        )
 
+def _should_try_ocr(
+    document: Optional[object],
+    embedded_text: str,
+    embedded_quality: float,
+) -> bool:
+    if not embedded_text.strip():
+        return True
+    if len(embedded_text) < MIN_EMBEDDED_TEXT_CHARS:
+        return True
+    return bool(document) and embedded_quality < MIN_TEXT_QUALITY_SCORE and _is_image_heavy_pdf(document)
+
+
+def _is_image_heavy_pdf(document: object) -> bool:
+    sample_pages = min(len(document), MAX_OCR_SAMPLE_PAGES)
+    if sample_pages == 0:
+        return False
+
+    image_heavy_pages = 0
+    for page_index in range(sample_pages):
+        page = document[page_index]
+        page_area = max(page.rect.width * page.rect.height, 1)
+        image_area = 0.0
+        for image in page.get_images(full=True):
+            for rect in page.get_image_rects(image[0]):
+                image_area += rect.width * rect.height
+        if image_area / page_area >= 0.5:
+            image_heavy_pages += 1
+
+    return image_heavy_pages >= max(1, sample_pages // 2)
+
+
+def _prefer_ocr(
+    embedded_text: str,
+    embedded_quality: float,
+    ocr_text: str,
+    ocr_quality: float,
+) -> bool:
     if not ocr_text.strip():
-        return _ExtractedText(text="", status="failed", error="PDF OCR completed but produced no text")
-    return _ExtractedText(
-        text=ocr_text.strip(),
-        status="ocr_extracted",
-        warning=warning,
-        pages=_single_page_payload(ocr_text.strip(), "ocr_extracted", warning=warning),
-    )
+        return False
+    if not embedded_text.strip():
+        return True
+    if len(embedded_text) < MIN_EMBEDDED_TEXT_CHARS:
+        return True
+    return ocr_quality >= embedded_quality + 0.08
+
+
+def _text_quality_score(text: str) -> float:
+    stripped = text.strip()
+    if not stripped:
+        return 0.0
+
+    tokens = re.findall(r"[A-Za-z0-9][A-Za-z0-9'./@#%&+-]*", stripped)
+    if not tokens:
+        return 0.0
+
+    printable_ratio = sum(character.isprintable() for character in stripped) / len(stripped)
+    word_like = sum(_is_word_like(token) for token in tokens) / len(tokens)
+    short_noise = sum(1 for token in tokens if len(token) == 1) / len(tokens)
+    return max(0.0, min(1.0, (printable_ratio * 0.35) + (word_like * 0.75) - short_noise))
+
+
+def _is_word_like(token: str) -> bool:
+    if token.isdigit():
+        return True
+    letters = [character for character in token if character.isalpha()]
+    if not letters:
+        return True
+    if len(letters) <= 2:
+        return True
+    if sum(character.lower() in "aeiouy" for character in letters) > 0:
+        return True
+    return token.isupper() and len(letters) <= 6
 
 
 def _ocr_pdf_text(data: bytes) -> Tuple[str, Optional[str]]:
