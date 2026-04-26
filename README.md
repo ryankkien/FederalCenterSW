@@ -114,7 +114,9 @@ file hash, PDFs are copied to `contracts/{document_id}/main.pdf`, extracted text
 stored at `contracts/{document_id}/text.json`, and processing jobs are queued for
 new or reset documents. In Azure, the backend Function App drains queued document
 processing jobs on `DOCUMENT_PROCESSING_TIMER_SCHEDULE`; locally, use
-`bun run processing:run -- --limit 200` for an immediate drain.
+`bun run processing:run -- --limit 200 --workers 4` for an immediate concurrent drain.
+`DOCUMENT_PROCESSING_MAX_WORKERS` controls the default worker count for CLI and Azure
+Function drains.
 
 An optional local feature extractor service lives in `feature_extractor/`. It can read
 `contracts/{document_id}/text.json`, generate a layered summary, classify PSC/NAICS,

@@ -1714,6 +1714,10 @@ def _baseline_obligation_exists(
 
 def _update_document_semantic_links(session: Session) -> None:
     rows = list(session.scalars(select(RegressionFinding)).all())
+    seen_links = {
+        (row.source_document_upload_id, row.target_document_upload_id, row.link_type)
+        for row in session.scalars(select(DocumentSemanticLink)).all()
+    }
     for index, source in enumerate(rows):
         for target in rows[index + 1 :]:
             if not source.document_upload_id or not target.document_upload_id:
@@ -1723,15 +1727,10 @@ def _update_document_semantic_links(session: Session) -> None:
             if source.finding_type != target.finding_type:
                 continue
             source_id, target_id = sorted([source.document_upload_id, target.document_upload_id])
-            existing = session.scalars(
-                select(DocumentSemanticLink).where(
-                    DocumentSemanticLink.source_document_upload_id == source_id,
-                    DocumentSemanticLink.target_document_upload_id == target_id,
-                    DocumentSemanticLink.link_type == source.finding_type,
-                )
-            ).first()
-            if existing is not None:
+            link_key = (source_id, target_id, source.finding_type)
+            if link_key in seen_links:
                 continue
+            seen_links.add(link_key)
             session.add(
                 DocumentSemanticLink(
                     id=str(uuid4()),

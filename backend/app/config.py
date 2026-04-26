@@ -141,6 +141,14 @@ def get_ai_max_retries() -> int:
         return 2
 
 
+def get_document_processing_max_workers() -> int:
+    value = os.getenv("DOCUMENT_PROCESSING_MAX_WORKERS", "4")
+    try:
+        return max(1, int(value))
+    except ValueError:
+        return 4
+
+
 def get_sam_api_key() -> Optional[str]:
     return os.getenv("SAM_API_KEY")
 

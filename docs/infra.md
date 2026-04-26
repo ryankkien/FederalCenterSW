@@ -123,6 +123,7 @@ environment variables:
 | `EMAIL_INTAKE_DEFAULT_DOCUMENT_TYPE` | Optional override; defaults to `Email Attachment`. |
 | `DOCUMENT_PROCESSING_TIMER_SCHEDULE` | Optional Azure Functions NCRONTAB schedule; defaults to every five minutes. |
 | `DOCUMENT_PROCESSING_LIMIT` | Optional queued document jobs to drain per timer tick; defaults to `25`. |
+| `DOCUMENT_PROCESSING_MAX_WORKERS` | Optional concurrent document processing workers per drain; defaults to `4`. |
 
 Configure these GitHub repository secrets for deployment and notifications:
 

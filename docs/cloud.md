@@ -344,6 +344,7 @@ Current env variables used by the backend:
 | `EMAIL_INTAKE_DEFAULT_DOCUMENT_TYPE` | Document type assigned to emailed attachments. |
 | `DOCUMENT_PROCESSING_TIMER_SCHEDULE` | Azure Functions NCRONTAB schedule for draining queued document processing jobs. |
 | `DOCUMENT_PROCESSING_LIMIT` | Maximum queued document jobs to drain per timer tick. |
+| `DOCUMENT_PROCESSING_MAX_WORKERS` | Maximum concurrent queued document jobs to process per timer tick. |
 | `DOCUMENT_OCR_TESSERACT_CMD` | Optional OCR command path, default `tesseract`. |
 | `DOCUMENT_OCR_LANGUAGE` | Optional OCR language code, default `eng`. |
 | `DOCUMENT_OCR_MAX_PAGES` | Optional max scanned PDF pages to OCR synchronously, default `25`; use `0` for no limit. |
