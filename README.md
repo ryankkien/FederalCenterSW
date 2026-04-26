@@ -106,6 +106,13 @@ bun run infra:deploy
 
 See [docs/infra.md](docs/infra.md) for the Bicep/GitHub Actions workflow and drift policy.
 
+## Pull Request Notifications
+
+Pull request notifications can post to a Discord `#pull-requests` channel through
+`.github/workflows/discord-pr-notifications.yml`. Create a Discord webhook in that
+channel and add its URL to the GitHub repository secret
+`DISCORD_PULL_REQUEST_WEBHOOK_URL`.
+
 ## Mock Auth And Document Ingest
 
 The app starts with a mock role login. Choose `Contractor` to upload documents, or `Government official` to review contractor uploads. Uploaded files are stored through the backend blob storage adapter and document metadata is stored in the backend database.

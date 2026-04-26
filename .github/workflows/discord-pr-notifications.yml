@@ -1,0 +1,87 @@
+name: Discord Pull Request Notifications
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - ready_for_review
+      - converted_to_draft
+      - closed
+
+permissions: {}
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    env:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_PULL_REQUEST_WEBHOOK_URL }}
+    steps:
+      - name: Send pull request notification
+        shell: bash
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "DISCORD_PULL_REQUEST_WEBHOOK_URL is not configured; skipping Discord notification."
+            exit 0
+          fi
+
+          action="$(jq -r '.action' "$GITHUB_EVENT_PATH")"
+          merged="$(jq -r '.pull_request.merged' "$GITHUB_EVENT_PATH")"
+
+          if [ "$action" = "closed" ] && [ "$merged" = "true" ]; then
+            status="Merged"
+            color="8953236"
+          elif [ "$action" = "closed" ]; then
+            status="Closed"
+            color="15158332"
+          elif [ "$action" = "opened" ]; then
+            status="Opened"
+            color="3066993"
+          elif [ "$action" = "reopened" ]; then
+            status="Reopened"
+            color="15844367"
+          elif [ "$action" = "ready_for_review" ]; then
+            status="Ready for review"
+            color="3447003"
+          elif [ "$action" = "converted_to_draft" ]; then
+            status="Converted to draft"
+            color="9807270"
+          else
+            status="$action"
+            color="9807270"
+          fi
+
+          payload="$(jq -n \
+            --arg status "$status" \
+            --arg repository "$(jq -r '.repository.full_name' "$GITHUB_EVENT_PATH")" \
+            --arg number "$(jq -r '.pull_request.number | tostring' "$GITHUB_EVENT_PATH")" \
+            --arg title "$(jq -r '.pull_request.title' "$GITHUB_EVENT_PATH")" \
+            --arg url "$(jq -r '.pull_request.html_url' "$GITHUB_EVENT_PATH")" \
+            --arg author "$(jq -r '.pull_request.user.login' "$GITHUB_EVENT_PATH")" \
+            --arg base "$(jq -r '.pull_request.base.ref' "$GITHUB_EVENT_PATH")" \
+            --arg head "$(jq -r '.pull_request.head.ref' "$GITHUB_EVENT_PATH")" \
+            --arg timestamp "$(jq -r '.pull_request.updated_at' "$GITHUB_EVENT_PATH")" \
+            --argjson color "$color" \
+            '{
+              username: "GitHub Pull Requests",
+              allowed_mentions: {parse: []},
+              embeds: [
+                {
+                  title: ("#" + $number + " " + ($title | if length > 220 then .[0:217] + "..." else . end)),
+                  url: $url,
+                  color: $color,
+                  fields: [
+                    {name: "Status", value: $status, inline: true},
+                    {name: "Author", value: ("@" + $author), inline: true},
+                    {name: "Branches", value: ("`" + $head + "` -> `" + $base + "`"), inline: false}
+                  ],
+                  footer: {text: $repository},
+                  timestamp: $timestamp
+                }
+              ]
+            }')"
+
+          curl --fail --silent --show-error \
+            --header "Content-Type: application/json" \
+            --data "$payload" \
+            "$DISCORD_WEBHOOK_URL"

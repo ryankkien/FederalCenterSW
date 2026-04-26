@@ -53,7 +53,14 @@ The repo includes three Azure-facing workflows:
 - `.github/workflows/function-deploy.yml` deploys the email intake Function App from
   `backend/` on pushes to `main` that touch backend files, and can also be run manually.
 
-Both workflows use Azure OIDC login. Configure these GitHub repository variables:
+The repo also includes `.github/workflows/discord-pr-notifications.yml`, which posts
+pull request lifecycle events to Discord. Create a Discord channel such as
+`#pull-requests`, add a webhook for that channel, and save the webhook URL as the GitHub
+repository secret `DISCORD_PULL_REQUEST_WEBHOOK_URL`. The workflow uses
+`pull_request_target` so forked pull requests can still notify Discord, but it does not
+check out or run pull request code.
+
+The Azure workflows use Azure OIDC login. Configure these GitHub repository variables:
 
 | Variable | Value |
 | --- | --- |
@@ -65,11 +72,12 @@ Both workflows use Azure OIDC login. Configure these GitHub repository variables
 | `EMAIL_INTAKE_DEFAULT_UPLOADER_ID` | Optional override; defaults to `contractor-demo`. |
 | `EMAIL_INTAKE_DEFAULT_DOCUMENT_TYPE` | Optional override; defaults to `Email Attachment`. |
 
-Configure this GitHub repository secret for the Function App deployment:
+Configure these GitHub repository secrets for deployment and notifications:
 
 | Secret | Purpose |
 | --- | --- |
 | `AZURE_FUNCTION_DATABASE_URL` | PostgreSQL connection string written to the Function App as `DATABASE_URL`. |
+| `DISCORD_PULL_REQUEST_WEBHOOK_URL` | Discord webhook URL for the pull request notification channel. |
 
 The Azure identity needs permission to run resource group deployments in
 `federal-center-sw-dev` and deploy to the Function App. Use least privilege when possible;
