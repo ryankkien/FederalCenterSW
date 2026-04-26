@@ -46,14 +46,17 @@ Core metadata record for each ingested document.
 `psc_code` and `naics_code` are written by the Durable Functions orchestrator after the Summarizer ACA returns its classification result.
 
 #### `chunks`
-Stores ordered chunks of a document for retrieval.
+Stores ordered 256-word chunks of a document for hybrid search (keyword + vector).
 
 | Column | Type | Constraints |
 |--------|------|-------------|
 | `doc_id` | UUID | FK → `documents.uuid`, CASCADE DELETE |
 | `chunk_index` | INTEGER | NOT NULL |
+| `text` | TEXT | NOT NULL |
 
 **PK:** `(doc_id, chunk_index)`
+
+Chunks are written by the Summarizer ACA from the full concatenated OCR text, split at 256-word boundaries.
 
 #### `document_log`
 Audit trail of pipeline events per document.
