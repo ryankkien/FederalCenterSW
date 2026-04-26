@@ -17,6 +17,10 @@ def get_auth_mode() -> str:
     return os.getenv("AUTH_MODE", "mock").strip().lower()
 
 
+def get_internal_service_token() -> Optional[str]:
+    return os.getenv("INTERNAL_SERVICE_TOKEN")
+
+
 def get_entra_tenant_id() -> Optional[str]:
     return os.getenv("ENTRA_TENANT_ID") or os.getenv("AZURE_TENANT_ID")
 
@@ -78,11 +82,11 @@ def get_ai_provider_name() -> str:
 
 
 def get_ai_processing_enabled() -> bool:
-    return _env_bool("AI_PROCESSING_ENABLED", default=False)
+    return _env_bool("AI_PROCESSING_ENABLED", default=_has_openai_api_key())
 
 
 def get_ai_inline_processing_enabled() -> bool:
-    return _env_bool("AI_INLINE_PROCESSING_ENABLED", default=False)
+    return _env_bool("AI_INLINE_PROCESSING_ENABLED", default=_has_openai_api_key())
 
 
 def get_openai_api_key() -> Optional[str]:
@@ -90,7 +94,7 @@ def get_openai_api_key() -> Optional[str]:
 
 
 def get_openai_llm_model() -> str:
-    return os.getenv("OPENAI_LLM_MODEL", "gpt-4o-mini")
+    return os.getenv("OPENAI_LLM_MODEL", "gpt-5.5")
 
 
 def get_openai_embedding_model() -> str:
@@ -114,6 +118,19 @@ def get_ai_request_timeout_seconds() -> float:
         return max(1.0, float(value))
     except ValueError:
         return 30.0
+
+
+def get_feature_extractor_url() -> Optional[str]:
+    value = os.getenv("FEATURE_EXTRACTOR_URL", "").strip()
+    return value.rstrip("/") if value else None
+
+
+def get_feature_extractor_request_timeout_seconds() -> float:
+    value = os.getenv("FEATURE_EXTRACTOR_REQUEST_TIMEOUT_SECONDS", "120")
+    try:
+        return max(1.0, float(value))
+    except ValueError:
+        return 120.0
 
 
 def get_ai_max_retries() -> int:
@@ -142,6 +159,10 @@ def _env_bool(name: str, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _has_openai_api_key() -> bool:
+    return bool((os.getenv("OPENAI_API_KEY") or "").strip())
 
 
 def _csv_env(name: str) -> Set[str]:

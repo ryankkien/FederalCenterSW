@@ -19,7 +19,7 @@ services:
   azurite:
     image: mcr.microsoft.com/azure-storage/azurite:3.35.0
     container_name: fcsw-azurite-local
-    command: azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0
+    command: azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 --skipApiVersionCheck
     ports:
       - "10000:10000"
       - "10001:10001"
@@ -43,16 +43,21 @@ services:
       - "8000:8000"
     environment:
       DATABASE_URL: postgresql://fcadmin:local_dev_password@postgres:5432/federal_center_sw
-      AZURE_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFeqCnf2mqk3aE7GcxY8wEkxSQ9fL3aPo/l72tK4G8Y7YX8WfPjY4I3K0W2d8t0oL8+/hQ==;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
+      AZURE_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
       AZURE_STORAGE_CONTAINER: app-assets
       AUTH_MODE: ${AUTH_MODE:-mock}
       AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:-dev-only-auth-secret-change-me}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-local-dev-internal-token}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_LLM_MODEL: ${OPENAI_LLM_MODEL:-gpt-4o-mini}
       OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
       AI_PROVIDER: ${AI_PROVIDER:-openai}
       AI_PROCESSING_ENABLED: ${AI_PROCESSING_ENABLED:-false}
       AI_INLINE_PROCESSING_ENABLED: ${AI_INLINE_PROCESSING_ENABLED:-false}
+      FEATURE_EXTRACTOR_URL: ${FEATURE_EXTRACTOR_URL:-http://feature_extractor:8000}
+      FEATURE_EXTRACTOR_REQUEST_TIMEOUT_SECONDS: ${FEATURE_EXTRACTOR_REQUEST_TIMEOUT_SECONDS:-120}
+      APPINSIGHTS_CONNECTION_STRING: ${APPINSIGHTS_CONNECTION_STRING:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       azurite:
         condition: service_healthy
@@ -66,13 +71,16 @@ services:
       - "8001:8000"
     environment:
       # Points at the local Azurite emulator
-      AZURE_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFeqCnf2mqk3aE7GcxY8wEkxSQ9fL3aPo/l72tK4G8Y7YX8WfPjY4I3K0W2d8t0oL8+/hQ==;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
+      AZURE_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
       AZURE_STORAGE_CONTAINER: app-assets
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      MODEL_PREFERENCE: ${MODEL_PREFERENCE:-claude}
+      OPENAI_LLM_MODEL: ${OPENAI_LLM_MODEL:-gpt-5.4-mini}
       DATABASE_URL: postgresql://fcadmin:local_dev_password@postgres:5432/federal_center_sw
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      BACKEND_API_URL: http://backend:8000
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-local-dev-internal-token}
+      APPINSIGHTS_CONNECTION_STRING: ${APPINSIGHTS_CONNECTION_STRING:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       azurite:
         condition: service_healthy

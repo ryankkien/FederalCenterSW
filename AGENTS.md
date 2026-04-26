@@ -62,8 +62,10 @@ same-origin routing can both work.
 - `backend/app/main.py` creates the FastAPI app, configures CORS, and defines API routes.
 - `backend/app/email_intake.py` contains the IMAP email intake worker, message parsing,
   JSONL/Azure Blob stub persistence, and auto-reply logic.
+- `backend/app/processing_worker.py` drains queued document processing jobs through
+  the shared processing pipeline.
 - `backend/function_app.py` is the Azure Functions timer-trigger entry point for
-  running email intake in Azure.
+  running email intake and queued document processing in Azure.
 - `backend/host.json` contains Azure Functions host configuration.
 - Backend tests live in `backend/tests/`.
 
@@ -79,6 +81,8 @@ logic in separate modules under `backend/app/` and cover it with pytest tests.
 - Use `bun run infra:whatif` before changing Azure resources.
 - Use `bun run infra:deploy` only when the what-if output is understood.
 - GitHub Actions workflows for infrastructure live in `.github/workflows/`.
+- `.github/workflows/feature-extractor-deploy.yml` builds `feature_extractor/` and
+  deploys the `fcsw-feature-extractor-dev` Container App image.
 - Pull request Discord notifications live in
   `.github/workflows/discord-pr-notifications.yml` and require the GitHub repository
   secret `DISCORD_PULL_REQUEST_WEBHOOK_URL`.
@@ -89,7 +93,8 @@ logic in separate modules under `backend/app/` and cover it with pytest tests.
   strings. Use local `.env` files, GitHub environment configuration, Azure app settings,
   or Key Vault.
 - Function App app settings currently contain secrets and are not fully managed by Bicep.
-  Move secrets to Key Vault before making app settings fully declarative.
+  New secret-bearing app settings should use Key Vault references resolved by managed
+  identity; do not write raw secret values through workflows or Bicep parameters.
 
 ### Local Development Mirror
 
@@ -105,6 +110,9 @@ logic in separate modules under `backend/app/` and cover it with pytest tests.
   and Blob container name. Hosts, passwords, storage accounts, and credentials can differ.
 - Local Compose is not a replacement for Bicep. Use it for fast app testing; use
   `bun run infra:whatif` for Azure drift.
+- `backend/.env.example`, `backend/.env.local.example`, and
+  `feature_extractor/.env.example` should carry the same ordered env variable names so
+  backend and optional feature-extractor configuration does not drift.
 - The local mirror CI workflow is `.github/workflows/local-mirror.yml`.
 
 ### Docs And Config
@@ -236,14 +244,27 @@ bun run infra:deploy
   immutable document artifact folders:
   `contracts/{document_id}/main.{ext}` and `contracts/{document_id}/text.json`.
   The hard parent contract is stored in Postgres on `document_uploads.contract_id`.
+- Portal uploads and committed email attachments run inline deterministic intake
+  classification and contract matching against filename/title/notes/type cues before
+  async processing. The decisions are recorded in
+  `document_classification_decisions` and `document_match_decisions`; OCR, full text
+  classification, and AI fallback matching remain processing-job work.
 - Contract hard-link parentage lives on `document_uploads.contract_id`. Cross-contract
   and cross-document pattern relationships live in semantic link tables and must not
   rewrite the hard parent contract.
+- Unmatched source contract and task order uploads may auto-scaffold a new
+  `contracts` row only when classification confidence is high and the regex matcher
+  extracts exactly one contract number. Auto-created contracts use
+  `status="pending_review"` and must write a `contract.auto_created` audit event.
 - The contract analyst pipeline stores page text, classifier decisions, extracted
   entities, report facts, interpreted baselines, baseline obligations, baseline
   revisions, regression findings, hypotheses, hypothesis evidence, investigation
   runs, official external-source references, processing run logs, and semantic
   similarity links.
+- Kind-specific routing runs after generic extraction: CPARS-style documents populate
+  `cpars_ratings`, modifications populate `contract_primitives_decisions` and append
+  `baseline_revisions`, and GAO/OIG reports are linked as official
+  `external_source_refs` rather than treated as contract artifacts.
 - The knowledge wiki index stores local fixture/synthetic ingestion runs, source
   records, wiki nodes, edges, citations, and contractor evidence profiles. The
   frontend uses `/api/wiki/*` for the Grokipedia workspace; it should not rebuild the
@@ -262,13 +283,21 @@ bun run infra:deploy
 - The optional `feature_extractor/` service reads canonical `contracts/{document_id}/text.json`
   artifacts, writes `contracts/{document_id}/summary.json`, extracts structured primitives
   (deliverable, financial, decisions, issue, personnel) into the DB, and may provide
-  supplemental PSC/NAICS classification evidence. It is not the canonical analyst
-  store.
+  supplemental PSC/NAICS classification evidence. When `FEATURE_EXTRACTOR_URL` is
+  configured, completed backend processing runs call `/summarize` and then
+  `/extract-primitives`; extractor failures are recorded in `processing_run_steps` and
+  must not roll back the upstream processing run. When configured with
+  `BACKEND_API_URL` and `INTERNAL_SERVICE_TOKEN`, successful primitive extraction
+  triggers a debounced per-contract analysis run for the document's hard-linked
+  `contract_id`; cohort-wide analysis remains on-demand. It is not the canonical
+  analyst store.
 - `bun run corpus:build-synthetic` creates an ignored file corpus under
   `backend/data/corpus/navy-service-v1/` from the WWR, AGOR, and Natalie fixture
   families. Treat `real_fixture` downloaded anchors separately from
   `synthetic_fixture` reports, CPARS-style narratives, IPMDAR-style JSON, decision
-  logs, and cross-contract lesson notes.
+  logs, and cross-contract lesson notes. Each contract has one CPARS-style
+  `cpars_evaluation` fixture for extraction testing; these generated records are
+  not real CPARS data.
 - Optional knowledge sources use `SAM_API_KEY`, `REGULATIONS_API_KEY`, and
   `CPARS_IMPORT_DIR`; absent optional sources should be logged as unavailable rather
   than failing ingestion. CPARS data must come from authorized exports/imports, not
@@ -281,9 +310,18 @@ bun run infra:deploy
   processing run steps, pages, chunks, embeddings, signals, entities, facts,
   agent-curated topics, evidence links, topic revisions, and audit events. Blob Storage
   stores source artifacts and extracted text artifacts.
-- AI processing is feature-flagged with `AI_PROCESSING_ENABLED` and
-  `AI_INLINE_PROCESSING_ENABLED`. Keep OpenAI and future provider keys out of git.
+- AI processing defaults on when `OPENAI_API_KEY` is set and
+  `AI_PROCESSING_ENABLED`/`AI_INLINE_PROCESSING_ENABLED` are omitted. Set either flag
+  to `false` to force-disable that path. Keep OpenAI and future provider keys out of
+  git.
+- Backend API, feature extractor, and email intake Function logs use structured JSON
+  with `request_id`, `contract_id`, `document_upload_id`, and `processing_run_id` when
+  available. Set `APPINSIGHTS_CONNECTION_STRING` to export telemetry to Application
+  Insights; leave it blank for local-only logs.
 - Email intake is currently a worker-style module, not a FastAPI route.
+- Queued document processing is drained by the Azure Function timer in
+  `backend/function_app.py`; the worker skips jobs whose `text.json` still reports
+  `extraction_status="pending_ocr"` so they can be retried after OCR text arrives.
 - Email intake persistence is intentionally stubbed: it writes JSONL locally by default
   and can write JSON records to Azure Blob Storage when configured.
 - In Azure Functions, email intake should use Blob Storage for durable stub output

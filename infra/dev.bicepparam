@@ -8,7 +8,9 @@ param appAssetsContainerName = 'app-assets'
 
 param functionStorageAccountName = 'fcswemailfunce7e9f2'
 param functionPackageContainerName = 'app-package-fcswemailintakee7e9f2-3009836'
+param keyVaultName = 'fcsw-dev-kv-e7e9f2'
 param functionPlanName = 'ASP-federalcenterswdev-818f'
+param functionManagedIdentityName = 'fcsw-email-intake-dev-mi'
 param functionAppName = 'fcsw-email-intake-e7e9f2'
 
 param postgresServerName = 'federal-center-sw-dev-pg-jal50w'
@@ -17,7 +19,9 @@ param postgresAdministratorLogin = 'fcadmin'
 
 param acrName = 'fcswdevacr'
 param acaEnvironmentName = 'fcsw-dev-aca-env'
-param summarizerAppName = 'fcsw-summarizer-dev'
+param featureExtractorAppName = 'fcsw-summarizer-dev'
+param featureExtractorManagedIdentityName = 'fcsw-feature-extractor-dev-mi'
 param backendAppName = 'fcsw-backend-dev'
+param backendManagedIdentityName = 'fcsw-backend-dev-mi'
 param staticWebAppName = 'fcsw-frontend-dev'
-// openaiApiKey, summarizerDatabaseUrl, and backendDatabaseUrl are intentionally not set here — supply via CI/CD secrets or az deployment group create --parameters
+// All secrets (openaiApiKey, databaseUrl, storageConnectionString, etc.) are stored in Key Vault — not passed as deployment parameters

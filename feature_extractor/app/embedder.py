@@ -11,7 +11,7 @@ def embed_chunks(
 ) -> None:
     """Generate embeddings for each (chunk_id, text) pair and write to chunk_embeddings.
 
-    Uses OpenAI text-embedding-3-small (1536 dims) regardless of MODEL_PREFERENCE.
+    Uses the configured OpenAI embedding model.
     """
     if not chunks:
         return

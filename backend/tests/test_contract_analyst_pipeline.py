@@ -14,6 +14,9 @@ from app.contract_analysis import (
     classify_document,
     create_external_source_ref,
     detect_regression_findings,
+    handle_cpars_document,
+    handle_gao_oig_report_document,
+    handle_modification_document,
     refresh_hypothesis_status,
     seed_contract_from_markdown,
     update_contract_baseline_from_document,
@@ -24,13 +27,18 @@ from app.contract_matching import ContractMatchContext, match_contract
 from app.database import Base, get_db
 from app.main import app
 from app.models import (
+    AuditEvent,
     BaselineObligation,
+    BaselineRevision,
     Contract,
     ContractAccessGrant,
     ContractHypothesis,
+    ContractPrimitiveDecision,
     ContractSimilarityLink,
+    CparsRating,
     DocumentClassificationDecision,
     DocumentEntity,
+    DocumentMatchDecision,
     DocumentProcessingJob,
     DocumentPage,
     DocumentReportFact,
@@ -40,6 +48,8 @@ from app.models import (
     ProcessingRun,
     ProcessingRunStep,
 )
+from app.feature_extractor_client import FeatureExtractorStepResult
+from app.synthetic_corpus import SYNTHETIC_DOCUMENTS
 
 
 class FakeBlobStorage:
@@ -185,6 +195,93 @@ def test_regression_detection_finds_scope_rfi_schedule_and_skips_funding_only_mo
     assert skipped == []
 
 
+def test_cpars_handler_extracts_factor_ratings_from_synthetic_narrative(tmp_path) -> None:
+    synthetic = next(item for item in SYNTHETIC_DOCUMENTS if item.document_kind == "cpars_evaluation")
+    with next(_test_db_session(tmp_path)) as db:
+        db.add(_contract(id="wwr", number="M0026426R0001", title="WWR Support"))
+        document = _document(
+            id="cpars-1",
+            contract_id="wwr",
+            filename=synthetic.filename,
+            title=synthetic.title,
+            kind=synthetic.document_kind,
+        )
+        db.add(document)
+        db.flush()
+
+        kind, _ = classify_document(document, synthetic.text)
+        rows = handle_cpars_document(db, "wwr", document, synthetic.text)
+
+        persisted = db.scalars(select(CparsRating).where(CparsRating.doc_upload_id == "cpars-1")).all()
+
+    assert kind == "cpars"
+    assert len(rows) == 1
+    assert len(persisted) == 1
+    assert persisted[0].quality_rating == "Very Good"
+    assert persisted[0].schedule_rating == "Satisfactory"
+    assert persisted[0].management_rating == "Very Good"
+    assert persisted[0].evaluation_period == "01 August 2027 - 31 January 2028"
+
+
+def test_modification_handler_persists_decision_and_baseline_revision(tmp_path) -> None:
+    text = (
+        "Modification P00001 executed 18 July 2027 and effective 28 July 2027. "
+        "The Contracting Officer added one NMCM labor position to address caseload surge. "
+        "The action increases contract value by $125,000 and extends the period of performance by 30 days."
+    )
+    with next(_test_db_session(tmp_path)) as db:
+        db.add(_contract(id="wwr", number="M0026426R0001", title="WWR Support"))
+        document = _document(
+            id="mod-doc",
+            contract_id="wwr",
+            filename="M0026426R0001_P00001.pdf",
+            title="Modification P00001",
+            kind="modification",
+        )
+        db.add(document)
+        db.flush()
+
+        rows = handle_modification_document(db, "wwr", document, text, [])
+        decisions = db.scalars(select(ContractPrimitiveDecision)).all()
+        revisions = db.scalars(
+            select(BaselineRevision).where(BaselineRevision.change_type == "modification")
+        ).all()
+
+    assert len(rows) == 1
+    assert decisions[0].mod_number == "P00001"
+    assert float(decisions[0].value_change) == 125000.0
+    assert decisions[0].pop_change_days == 30
+    assert decisions[0].decision_date.isoformat() == "2027-07-28"
+    assert len(revisions) == 1
+    assert revisions[0].metadata_json["mod_number"] == "P00001"
+
+
+def test_gao_oig_handler_stores_official_external_refs(tmp_path) -> None:
+    text = (
+        "GAO report GAO-26-100 found recurring schedule oversight weaknesses on the contract. "
+        "Recommendation: Navy should document corrective action ownership. "
+        "Source: https://www.gao.gov/products/gao-26-100"
+    )
+    with next(_test_db_session(tmp_path)) as db:
+        db.add(_contract(id="atlantic", number="N40080-24-D-1042"))
+        document = _document(
+            id="gao-doc",
+            contract_id="atlantic",
+            filename="GAO-26-100.pdf",
+            title="GAO Contract Oversight Report",
+            kind="gao_oig_report",
+        )
+        db.add(document)
+        db.flush()
+
+        rows = handle_gao_oig_report_document(db, "atlantic", document, text)
+
+    assert rows
+    assert {row.source_type for row in rows} == {"gao_oig_report"}
+    assert all(row.source_domain == "www.gao.gov" for row in rows)
+    assert all(row.metadata_json["source_document_upload_id"] == "gao-doc" for row in rows)
+
+
 def test_hypotheses_are_deduped_evidence_linked_and_can_be_contradicted(tmp_path) -> None:
     with next(_test_db_session(tmp_path)) as db:
         db.add(_contract(id="cardinal", number="N40080-23-D-3155"))
@@ -297,6 +394,32 @@ def test_processing_job_run_and_analysis_apis_are_contract_scoped(tmp_path, monk
     contractor_token = _token(client, "contractor")
     monkeypatch.delenv("AI_PROCESSING_ENABLED", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    feature_calls = []
+
+    def fake_trigger_feature_extractor(
+        document_id: str,
+        contract_id: str,
+        doc_classification: str,
+        processing_run_id=None,
+    ):
+        feature_calls.append((document_id, contract_id, doc_classification))
+        return [
+            FeatureExtractorStepResult(
+                step_name="feature_extractor.summary",
+                event_type="feature_extractor.summary",
+                status="success",
+                metadata={"blob_path": f"contracts/{document_id}/summary.json"},
+            ),
+            FeatureExtractorStepResult(
+                step_name="feature_extractor.primitives",
+                event_type="feature_extractor.primitives",
+                status="failed",
+                message="extractor unavailable",
+                metadata={"endpoint": "/extract-primitives"},
+            ),
+        ]
+
+    monkeypatch.setattr("app.processing.trigger_feature_extractor", fake_trigger_feature_extractor)
 
     text = (
         "Weekly Status Report for contract N40080-24-D-1042. "
@@ -400,6 +523,9 @@ def test_processing_job_run_and_analysis_apis_are_contract_scoped(tmp_path, monk
         persisted_steps = db.scalars(
             select(ProcessingRunStep).where(ProcessingRunStep.document_upload_id == "job-doc")
         ).all()
+        persisted_audit_events = db.scalars(
+            select(AuditEvent).where(AuditEvent.document_upload_id == "job-doc")
+        ).all()
 
     assert run.status_code == 200
     assert run.json()["matched_contract_id"] == "atlantic"
@@ -422,7 +548,117 @@ def test_processing_job_run_and_analysis_apis_are_contract_scoped(tmp_path, monk
     assert {entity.entity_type for entity in persisted_entities} >= {"contract_number", "rfi"}
     assert {fact.fact_type for fact in persisted_facts} >= {"rfi_age", "schedule_signal"}
     assert persisted_runs[0].status == "completed"
-    assert {"extraction", "matching", "analysis"}.issubset({step.step_name for step in persisted_steps})
+    assert feature_calls == [("job-doc", "atlantic", "weekly_report")]
+    step_statuses = {step.step_name: step.status for step in persisted_steps}
+    assert {"extraction", "matching", "analysis"}.issubset(step_statuses)
+    assert step_statuses["feature_extractor.summary"] == "success"
+    assert step_statuses["feature_extractor.primitives"] == "failed"
+    assert {event.event_type for event in persisted_audit_events} >= {
+        "feature_extractor.summary",
+        "feature_extractor.primitives",
+    }
+
+
+def test_processing_auto_scaffolds_unmatched_source_contract(tmp_path, monkeypatch) -> None:
+    fake_storage = FakeBlobStorage()
+    client = _client_with_test_dependencies(tmp_path, fake_storage)
+    official_token = _token(client, "official")
+    monkeypatch.delenv("AI_PROCESSING_ENABLED", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    text = """
+Source Contract
+Contract Number: N40080-26-C-1001
+Contract Title: Harbor Facilities Maintenance Support
+Agency: Department of the Navy
+Contractor: Tidewater Facilities LLC
+
+The PWS defines inspection, maintenance, and reporting requirements.
+"""
+    with next(_test_db_session(tmp_path)) as db:
+        db.add(_contract(id="hidden", number="N40080-99-D-9999"))
+        db.add(
+            ContractAccessGrant(
+                id="grant-hidden",
+                contract_id="hidden",
+                principal_id="official-demo",
+                role="viewer",
+            )
+        )
+        db.add(
+            _document(
+                id="source-doc",
+                contract_id=None,
+                filename="N40080-26-C-1001_source_contract.pdf",
+                title="Harbor source contract",
+                kind="email_context",
+                uploader_id="contractor-demo",
+            )
+        )
+        db.add(
+            DocumentProcessingJob(
+                id="source-job",
+                document_upload_id="source-doc",
+                job_type="document_analysis",
+                status="queued",
+            )
+        )
+        db.commit()
+    fake_storage.upload_bytes(
+        "contracts/source-doc/text.json",
+        json.dumps(
+            {
+                "document_id": "source-doc",
+                "original_filename": "N40080-26-C-1001_source_contract.pdf",
+                "stored_filename": "main.pdf",
+                "content_type": "application/pdf",
+                "source": "email",
+                "text": text,
+                "extraction_status": "extracted",
+            }
+        ).encode("utf-8"),
+        "application/json",
+    )
+
+    run = client.post(
+        "/api/processing/jobs/source-job/run",
+        headers={"Authorization": f"Bearer {official_token}"},
+    )
+    contracts = client.get("/api/contracts", headers={"Authorization": f"Bearer {official_token}"})
+
+    with next(_test_db_session(tmp_path)) as db:
+        created = db.scalars(
+            select(Contract).where(Contract.contract_number == "N40080-26-C-1001")
+        ).one()
+        document = db.get(DocumentUpload, "source-doc")
+        audit = db.scalars(
+            select(AuditEvent).where(AuditEvent.event_type == "contract.auto_created")
+        ).one()
+        match_decision = db.scalars(
+            select(DocumentMatchDecision).where(DocumentMatchDecision.document_upload_id == "source-doc")
+        ).one()
+        classification = db.scalars(
+            select(DocumentClassificationDecision).where(
+                DocumentClassificationDecision.document_upload_id == "source-doc"
+            )
+        ).one()
+
+    assert run.status_code == 200
+    assert run.json()["matched_contract_id"] == created.id
+    assert contracts.status_code == 200
+    assert created.id in {item["id"] for item in contracts.json()}
+    assert created.title == "Harbor Facilities Maintenance Support"
+    assert created.agency_name == "Department of the Navy"
+    assert created.vendor_name == "Tidewater Facilities LLC"
+    assert created.status == "pending_review"
+    assert created.metadata_json["auto_created"] is True
+    assert document.contract_id == created.id
+    assert document.match_status == "matched"
+    assert audit.contract_id == created.id
+    assert audit.document_upload_id == "source-doc"
+    assert match_decision.decision_source == "auto_scaffold"
+    assert classification.document_kind == "source_contract"
+    assert classification.confidence >= 0.85
 
 
 def _client_with_test_dependencies(tmp_path, fake_storage: FakeBlobStorage) -> TestClient:

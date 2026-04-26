@@ -93,6 +93,15 @@ class AIProvider(Protocol):
     def summarize_external_source(self, question: str, source_text: str) -> StructuredAnalysisResult:
         ...
 
+    def extract_cpars_ratings(self, text: str) -> StructuredAnalysisResult:
+        ...
+
+    def extract_modification_decisions(self, text: str) -> StructuredAnalysisResult:
+        ...
+
+    def extract_gao_oig_findings(self, text: str) -> StructuredAnalysisResult:
+        ...
+
     def build_contract_onboarding(self, payload: Dict[str, object]) -> StructuredAnalysisResult:
         ...
 
@@ -148,6 +157,15 @@ class NullAIProvider:
         return StructuredAnalysisResult(provider=self.status.name, data={})
 
     def summarize_external_source(self, question: str, source_text: str) -> StructuredAnalysisResult:
+        return StructuredAnalysisResult(provider=self.status.name, data={})
+
+    def extract_cpars_ratings(self, text: str) -> StructuredAnalysisResult:
+        return StructuredAnalysisResult(provider=self.status.name, data={})
+
+    def extract_modification_decisions(self, text: str) -> StructuredAnalysisResult:
+        return StructuredAnalysisResult(provider=self.status.name, data={})
+
+    def extract_gao_oig_findings(self, text: str) -> StructuredAnalysisResult:
         return StructuredAnalysisResult(provider=self.status.name, data={})
 
     def build_contract_onboarding(self, payload: Dict[str, object]) -> StructuredAnalysisResult:
@@ -305,6 +323,46 @@ class OpenAIProvider:
             "external_source_summary_v1",
             "Summarize official source text relevant to the question as JSON.",
             {"question": question, "source_text": source_text[:12000]},
+        )
+
+    def extract_cpars_ratings(self, text: str) -> StructuredAnalysisResult:
+        return self._structured_json(
+            "cpars_rating_extraction_v1",
+            (
+                "You are a federal contract document analyst extracting CPARS ratings. "
+                "Return JSON with a 'results' array. Each item may include "
+                "evaluation_period, evaluation_date, quality_rating, schedule_rating, "
+                "cost_control_rating, management_rating, small_business_rating, "
+                "regulatory_compliance_rating, overall_rating, and narrative. "
+                "Use only adjectival ratings present in the text."
+            ),
+            {"text": text[:12000]},
+        )
+
+    def extract_modification_decisions(self, text: str) -> StructuredAnalysisResult:
+        return self._structured_json(
+            "modification_decision_extraction_v1",
+            (
+                "You are a federal contract document analyst extracting contract "
+                "modifications and decisions. Return JSON with a 'results' array. "
+                "Each item may include decision_type, mod_number, mod_reason, "
+                "value_change, pop_change_days, scope_change_description, "
+                "decision_date, effective_date, and deciding_party."
+            ),
+            {"text": text[:12000]},
+        )
+
+    def extract_gao_oig_findings(self, text: str) -> StructuredAnalysisResult:
+        return self._structured_json(
+            "gao_oig_finding_extraction_v1",
+            (
+                "You are a federal acquisition analyst. Extract official GAO or OIG "
+                "findings and recommendations about a contract. Return JSON with a "
+                "'results' array. Each item may include kind, title, citation_text, "
+                "url, confidence, and source_name. Treat these as external official "
+                "references, not contractor-submitted contract artifacts."
+            ),
+            {"text": text[:12000]},
         )
 
     def build_contract_onboarding(self, payload: Dict[str, object]) -> StructuredAnalysisResult:

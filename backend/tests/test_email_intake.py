@@ -12,6 +12,7 @@ import resend
 from app.email_intake import (
     AutoReplyConfig,
     EmailIntakeConfig,
+    _canonicalized_blob_resource,
     build_auto_reply_params,
     load_env_files,
     parse_email,
@@ -20,7 +21,7 @@ from app.email_intake import (
     send_auto_reply,
     should_send_auto_reply,
 )
-from app.models import DocumentUpload
+from app.models import Contract, DocumentClassificationDecision, DocumentMatchDecision, DocumentUpload
 
 
 class FakeBlobStorage:
@@ -84,7 +85,8 @@ def test_parse_email_uses_raw_hash_when_message_id_is_missing():
     assert record.message_id.startswith("sha256:")
 
 
-def test_save_email_intake_writes_jsonl_stub(tmp_path):
+def test_save_email_intake_writes_jsonl_stub(tmp_path, monkeypatch):
+    monkeypatch.setenv("EMAIL_INTAKE_STUB_BLOB_ENABLED", "false")
     message = EmailMessage()
     message["Message-ID"] = "<abc123@example.com>"
     message["From"] = "sender@example.com"
@@ -102,6 +104,20 @@ def test_save_email_intake_writes_jsonl_stub(tmp_path):
     assert saved["message_id"] == "<abc123@example.com>"
     assert saved["subject"] == "Persist me"
     assert saved["body_text"] == "Body"
+
+
+def test_canonicalized_blob_resource_includes_azurite_endpoint_path():
+    resource = _canonicalized_blob_resource(
+        account_name="devstoreaccount1",
+        blob_endpoint="http://127.0.0.1:10000/devstoreaccount1",
+        container_name="app-assets",
+        blob_name="email-intake/2026/04/26/message.json",
+    )
+
+    assert resource == (
+        "/devstoreaccount1/devstoreaccount1/app-assets/"
+        "email-intake/2026/04/26/message.json"
+    )
 
 
 def test_load_env_files_supports_local_overrides_without_replacing_exported_values(
@@ -190,6 +206,56 @@ def test_save_email_documents_uploads_supported_attachments_to_portal_storage(tm
     assert text_json["source"] == "email"
     assert text_json["status"] == "failed"
     assert "Source UID: 77." in document.notes
+
+
+def test_save_email_documents_runs_inline_deterministic_classification_and_matching(tmp_path):
+    message = EmailMessage()
+    message["Message-ID"] = "<weekly@example.com>"
+    message["From"] = "Contractor <contractor@example.com>"
+    message["To"] = "intake@example.com"
+    message["Subject"] = "Weekly status report N40080-24-D-1042"
+    message.set_content("See attached.")
+    message.add_attachment(
+        b"weekly pdf bytes",
+        maintype="application",
+        subtype="pdf",
+        filename="N40080-24-D-1042_WSR-002.pdf",
+    )
+    raw_message = message.as_bytes()
+    record = parse_email(raw_message, source_uid="88")
+    fake_storage = FakeBlobStorage()
+    db = _test_db_session(tmp_path)
+    db.add(
+        Contract(
+            id="atlantic",
+            contract_number="N40080-24-D-1042",
+            title="Atlantic Environmental Support",
+        )
+    )
+    db.commit()
+    config = EmailIntakeConfig(
+        host="imap.example.com",
+        username="intake@example.com",
+        password="secret",
+        dry_run=False,
+    )
+
+    saved_count = save_email_documents(record, raw_message, config, db=db, storage=fake_storage)
+
+    assert saved_count == 1
+    document = db.query(DocumentUpload).one()
+    classification = db.query(DocumentClassificationDecision).filter_by(document_upload_id=document.id).one()
+    match = db.query(DocumentMatchDecision).filter_by(document_upload_id=document.id).one()
+    assert document.document_kind == "weekly_report"
+    assert document.contract_id == "atlantic"
+    assert document.match_status == "matched"
+    assert classification.document_kind == "weekly_report"
+    assert classification.classifier_name == "deterministic"
+    assert classification.metadata_json["source"] == "deterministic"
+    assert match.contract_id == "atlantic"
+    assert match.matched_contract_number == "N40080-24-D-1042"
+    assert match.decision_status == "matched"
+    assert match.decision_source == "deterministic"
 
 
 def test_save_email_documents_is_idempotent_for_same_email(tmp_path):

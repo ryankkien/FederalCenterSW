@@ -1,6 +1,6 @@
 # Email Intake
 
-The email intake worker fetches unread messages from an IMAP mailbox and parses them into a normalized audit record. Locally, the audit record can be written as newline-delimited JSON; in Azure Functions, it can write durable JSON records to Blob Storage. In commit mode, supported attachments are also uploaded through the backend blob storage adapter and inserted into the same document table used by the contractor and official portals.
+The email intake worker fetches unread messages from an IMAP mailbox and parses them into a normalized audit record. Locally, the audit record can be written as newline-delimited JSON; in Azure Functions, it can write durable JSON records to Blob Storage. In commit mode, supported attachments are also uploaded through the backend blob storage adapter, run deterministic intake classification and contract matching, and are inserted into the same document table used by the contractor and official portals.
 
 ## Local Run
 
@@ -35,6 +35,14 @@ bun run email:intake -- --limit 5 --commit
 Commit mode writes the JSON audit record, stores supported attachments as portal documents, and then moves the email to the `Processed` mailbox. If a processing error occurs, it moves the email to `Failed`.
 
 Until real contractor accounts are added, emailed attachments are assigned to `EMAIL_INTAKE_DEFAULT_UPLOADER_ID`, which defaults to the mock contractor `contractor-demo`. That means they appear on the mock contractor portal and on the official analyst workspace. Unsupported attachment types are skipped; the accepted types match the web upload form: PDF, DOC, DOCX, TXT, CSV, XLSX, PNG, JPG, and JPEG.
+
+Each committed attachment runs the same inline deterministic intake step as portal
+uploads. Filename, email-subject-derived title, notes, and configured document type
+can set the initial `document_kind`; filename, title, and notes can also match a known
+contract number and hard-link `document_uploads.contract_id`. The decisions are
+persisted to `document_classification_decisions` and `document_match_decisions` with
+deterministic source metadata. OCR, full text classification, and AI fallback matching
+remain processing-job work.
 
 ## Auto Reply
 
@@ -80,26 +88,31 @@ If a message has no `Message-ID` header, the worker uses a SHA-256 hash of the r
 
 ## Azure Function Timer
 
-The preferred deployment is an Azure Function timer trigger, not a VM. The function lives in `backend/function_app.py` and uses the same `app.email_intake` worker.
+The preferred deployment is an Azure Function timer trigger, not a VM. The function lives in `backend/function_app.py` and uses the same `app.email_intake` worker. The same Function App also hosts the queued document processing timer so emailed attachments and portal uploads can move from `queued` to analyzed without a manual CLI run.
 
-Create a Linux Python Function App, configure the `EMAIL_INTAKE_*` app settings, then deploy the `backend/` folder. The repo deploys this automatically from `.github/workflows/function-deploy.yml` after backend changes land on `main`, and the workflow can also be run manually.
+Create a Linux Python Function App with Bicep, configure non-secret `EMAIL_INTAKE_*`
+settings, populate Key Vault secrets, then deploy the `backend/` folder. The repo deploys
+this automatically from `.github/workflows/function-deploy.yml` after backend changes land
+on `main`, and the workflow can also be run manually.
 
-The deployment workflow uses the `azure-dev` GitHub environment plus these repository values:
+The deployment workflow uses the `azure-dev` GitHub environment plus these environment
+variables:
 
 - `AZURE_CLIENT_ID`
 - `AZURE_TENANT_ID`
 - `AZURE_SUBSCRIPTION_ID`
 - `AZURE_RESOURCE_GROUP`
 - `AZURE_FUNCTION_APP_NAME`
-- `AZURE_FUNCTION_DATABASE_URL` as a GitHub secret
 
 The timer schedule uses Azure Functions NCRONTAB format:
 
 ```env
 EMAIL_INTAKE_TIMER_SCHEDULE=0 */5 * * * *
+DOCUMENT_PROCESSING_TIMER_SCHEDULE=0 */5 * * * *
+DOCUMENT_PROCESSING_LIMIT=25
 ```
 
-That example runs every five minutes. Use `0 */1 * * * *` for every minute.
+Those examples run every five minutes. Use `0 */1 * * * *` for every minute. The document processing timer drains queued jobs that already have extracted text and leaves `extraction_status="pending_ocr"` jobs queued until `text.json` is ready.
 
 For serverless deployment, enable the durable JSON stub so parsed records go to Azure Blob Storage instead of an ephemeral local file:
 
@@ -110,7 +123,25 @@ EMAIL_INTAKE_STUB_BLOB_CONTAINER=app-assets
 EMAIL_INTAKE_STUB_BLOB_PREFIX=email-intake
 ```
 
-The Function App still needs `AZURE_STORAGE_CONNECTION_STRING` or `EMAIL_INTAKE_STUB_BLOB_CONNECTION_STRING` so it can write the JSON audit record to Blob Storage. It also needs `DATABASE_URL` for emailed attachments to appear in the portal; the deploy workflow writes this from the `AZURE_FUNCTION_DATABASE_URL` GitHub secret.
+The Function App reads secret-bearing settings through Key Vault references configured by
+`infra/main.bicep`. Populate these vault secrets before enabling the timer:
+
+```text
+database-url
+app-storage-connection-string
+function-storage-connection-string
+email-intake-host
+email-intake-username
+email-intake-password
+openai-api-key
+resend-api-key
+```
+
+`AZURE_STORAGE_CONNECTION_STRING` and `DATABASE_URL` remain the application env variable
+names, but their app setting values should be Key Vault references rather than raw
+connection strings. The deploy workflow also writes the non-secret Application Insights
+connection string from `fcsw-dev-aca-env-appi` so timer invocations and exceptions are
+exported with structured log fields.
 
 Useful Azure CLI shape:
 

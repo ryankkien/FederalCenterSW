@@ -16,8 +16,10 @@ Start local dependencies:
 bun run local:up
 ```
 
-This requires Docker Desktop and Azure CLI. The Azure CLI is used only to initialize the
-local Azurite blob container.
+This requires Docker Desktop plus either the backend Python dependencies or Azure CLI.
+The Python Azure Blob SDK is preferred for initializing the local Azurite blob
+container, with Azure CLI as a fallback. `local:up` retries Azurite container setup for
+up to `AZURITE_SETUP_RETRIES` attempts; the default is 90 seconds for slower CI runners.
 
 Stop local dependencies:
 
@@ -92,6 +94,12 @@ must remain local-only and should not be copied into Bicep or Azure app settings
 - Real local app env file: `backend/.env.local`, ignored by git.
 - Shared env contract examples: `backend/.env.example`.
 
+Local services emit structured JSON logs by default. Leave
+`APPINSIGHTS_CONNECTION_STRING` blank for local-only logs, or set it in an ignored env
+file or shell export when you intentionally want local telemetry sent to the shared Azure
+Application Insights component. `X-Request-ID` is echoed on FastAPI responses and
+forwarding helpers preserve it for service-to-service calls.
+
 ## Azurite Notes
 
 `bun run local:up` creates the local `app-assets` container in Azurite. The email intake
@@ -102,6 +110,12 @@ EMAIL_INTAKE_STUB_BLOB_ENABLED=true
 EMAIL_INTAKE_STUB_BLOB_CONTAINER=app-assets
 AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;...
 ```
+
+On slow Docker hosts or cold CI runners, `local-up.sh` waits for PostgreSQL and Azurite
+before creating the blob container. Override `POSTGRES_READY_ATTEMPTS` or
+`AZURITE_SETUP_RETRIES` only when the default readiness window is not long enough.
+Compose starts Azurite with `--skipApiVersionCheck` so newer Azure CLI storage clients
+can still talk to the pinned local emulator image.
 
 Portal uploads, fixture PDFs, and committed email attachments use the same local blob
 layout as Azure:
@@ -114,6 +128,12 @@ contracts/{document_id}/text.json
 The `document_id` folder is the immutable document artifact folder. Contract hard
 parentage lives in Postgres on `document_uploads.contract_id`; semantic links never
 rewrite that parent contract.
+
+During processing, unmatched uploads can auto-create a parent contract only when the
+document is classified as `source_contract` or `task_order` with high confidence and a
+single contract number is extracted by the regex matcher. The new contract is stored
+with `status="pending_review"`, linked back to the upload, and accompanied by a
+`contract.auto_created` audit event so officials can review it.
 
 ## pgvector Notes
 
@@ -133,20 +153,21 @@ integration tests.
 
 ## AI Processing Notes
 
-AI processing is disabled by default in `backend/.env.local.example`:
+AI processing stays disabled when `OPENAI_API_KEY` is unset. When the key is present
+and the AI flags are omitted, both processing and inline processing default on:
 
 ```env
 AI_PROVIDER=openai
-AI_PROCESSING_ENABLED=false
-AI_INLINE_PROCESSING_ENABLED=false
 OPENAI_API_KEY=
-OPENAI_LLM_MODEL=gpt-5.5
+OPENAI_LLM_MODEL=gpt-5.4-mini
 OPENAI_EMBEDDING_MODEL=text-embedding-3-large
 ```
 
 Set `OPENAI_API_KEY` only in ignored local env files or deployed app settings. When AI is
-disabled or misconfigured, uploads and email intake still store documents and create
-processing jobs; extraction and indexing remain blocked until configuration is enabled.
+disabled, unset, or misconfigured, uploads and email intake still store documents and
+create processing jobs; extraction and indexing remain blocked until configuration is
+enabled. To force-disable either path even with a key present, set
+`AI_PROCESSING_ENABLED=false` or `AI_INLINE_PROCESSING_ENABLED=false`.
 
 ## Synthetic Corpus Notes
 
@@ -215,8 +236,27 @@ docker compose up -d feature_extractor
 
 The service reads `contracts/{document_id}/text.json`, falls back to legacy
 `documents/{doc_id}/ocr.json`, and writes `contracts/{document_id}/summary.json`.
-Configure `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `MODEL_PREFERENCE` only in ignored
-local env files or shell exports.
+Set `FEATURE_EXTRACTOR_URL=http://127.0.0.1:8001` for a locally run backend, or use
+`http://feature_extractor:8000` for the backend Compose service, to auto-trigger it
+after processing jobs complete. The backend calls `/summarize` first and then
+`/extract-primitives` with the document classification from the processing run.
+Extractor failures are logged to `processing_run_steps` and `audit_events` but do not
+roll back the completed processing job.
+
+After primitive extraction succeeds for a document with a known `contract_id`, the
+service calls the backend internal analysis trigger when `BACKEND_API_URL` and
+`INTERNAL_SERVICE_TOKEN` are configured. The backend debounces the request: it skips
+the run when an `analysis_runs` row for that contract is newer than the latest
+successful or partial primitive extraction. Low-N cohorts still run and are tagged
+`low_confidence`.
+
+Configure `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENAI_LLM_MODEL`, and
+`MODEL_PREFERENCE` only in ignored local env files or shell exports. The backend
+default LLM model is `gpt-5.5`. The feature extractor also accepts
+`APPINSIGHTS_CONNECTION_STRING` and emits the same structured correlation fields as the
+backend API. `backend/.env.example`, `backend/.env.local.example`, and
+`feature_extractor/.env.example` intentionally carry the same ordered variable names so
+local backend and optional feature-extractor config do not drift.
 
 ## Boundaries
 

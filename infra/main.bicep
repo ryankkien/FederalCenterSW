@@ -18,8 +18,14 @@ param functionStorageAccountName string
 @description('Blob container used by Azure Functions Flex Consumption for package deployment.')
 param functionPackageContainerName string
 
+@description('Azure Key Vault name for development app secrets.')
+param keyVaultName string
+
 @description('Azure Functions Flex Consumption plan name.')
 param functionPlanName string
+
+@description('User-assigned managed identity name for the email intake Function App.')
+param functionManagedIdentityName string
 
 @description('Email intake Azure Function App name.')
 param functionAppName string
@@ -39,15 +45,20 @@ param acrName string
 @description('ACA managed environment name.')
 param acaEnvironmentName string
 
-@description('Container App name for the Summarizer service.')
-param summarizerAppName string
+@description('Container App name for the Feature Extractor service.')
+param featureExtractorAppName string
+
+@description('User-assigned managed identity name for the Feature Extractor Container App.')
+param featureExtractorManagedIdentityName string
+
+@description('Feature Extractor Docker image tag to deploy.')
+param featureExtractorImageTag string = 'latest'
 
 @description('Container App name for the Backend API service.')
 param backendAppName string
 
-@description('PostgreSQL connection string for the Backend API.')
-@secure()
-param backendDatabaseUrl string = ''
+@description('User-assigned managed identity name for the Backend API Container App.')
+param backendManagedIdentityName string
 
 @description('Azure Static Web App name for the Frontend.')
 param staticWebAppName string
@@ -55,16 +66,32 @@ param staticWebAppName string
 @description('Azure region for the Static Web App (limited regions supported).')
 param staticWebAppLocation string = 'eastus2'
 
-@description('Summarizer Docker image tag to deploy.')
-param summarizerImageTag string = 'latest'
+var keyVaultSecretsUserRoleDefinitionId = subscriptionResourceId(
+  'Microsoft.Authorization/roleDefinitions',
+  '4633458b-17de-408a-b874-0445c86b69e6'
+)
 
-@description('OpenAI API key secret for the Summarizer and Backend.')
-@secure()
-param openaiApiKey string = ''
+var keyVaultSecretUris = {
+  appStorageConnectionString: '${keyVault.properties.vaultUri}secrets/app-storage-connection-string'
+  databaseUrl: '${keyVault.properties.vaultUri}secrets/database-url'
+  emailIntakeHost: '${keyVault.properties.vaultUri}secrets/email-intake-host'
+  emailIntakePassword: '${keyVault.properties.vaultUri}secrets/email-intake-password'
+  emailIntakeUsername: '${keyVault.properties.vaultUri}secrets/email-intake-username'
+  functionStorageConnectionString: '${keyVault.properties.vaultUri}secrets/function-storage-connection-string'
+  openaiApiKey: '${keyVault.properties.vaultUri}secrets/openai-api-key'
+  resendApiKey: '${keyVault.properties.vaultUri}secrets/resend-api-key'
+}
 
-@description('PostgreSQL connection string for the Summarizer.')
-@secure()
-param summarizerDatabaseUrl string = ''
+var keyVaultReferences = {
+  appStorageConnectionString: '@Microsoft.KeyVault(SecretUri=${keyVaultSecretUris.appStorageConnectionString})'
+  databaseUrl: '@Microsoft.KeyVault(SecretUri=${keyVaultSecretUris.databaseUrl})'
+  emailIntakeHost: '@Microsoft.KeyVault(SecretUri=${keyVaultSecretUris.emailIntakeHost})'
+  emailIntakePassword: '@Microsoft.KeyVault(SecretUri=${keyVaultSecretUris.emailIntakePassword})'
+  emailIntakeUsername: '@Microsoft.KeyVault(SecretUri=${keyVaultSecretUris.emailIntakeUsername})'
+  functionStorageConnectionString: '@Microsoft.KeyVault(SecretUri=${keyVaultSecretUris.functionStorageConnectionString})'
+  openaiApiKey: '@Microsoft.KeyVault(SecretUri=${keyVaultSecretUris.openaiApiKey})'
+  resendApiKey: '@Microsoft.KeyVault(SecretUri=${keyVaultSecretUris.resendApiKey})'
+}
 
 resource appStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: appStorageAccountName
@@ -98,6 +125,30 @@ resource appAssetsContainer 'Microsoft.Storage/storageAccounts/blobServices/cont
     defaultEncryptionScope: '$account-encryption-key'
     denyEncryptionScopeOverride: false
     publicAccess: 'None'
+  }
+}
+
+resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
+  name: keyVaultName
+  location: appLocation
+  properties: {
+    tenantId: subscription().tenantId
+    sku: {
+      family: 'A'
+      name: 'standard'
+    }
+    enabledForDeployment: false
+    enabledForDiskEncryption: false
+    enabledForTemplateDeployment: false
+    enablePurgeProtection: false
+    enableRbacAuthorization: true
+    enableSoftDelete: true
+    publicNetworkAccess: 'Enabled'
+    softDeleteRetentionInDays: 90
+    networkAcls: {
+      bypass: 'AzureServices'
+      defaultAction: 'Allow'
+    }
   }
 }
 
@@ -136,6 +187,21 @@ resource functionPackageContainer 'Microsoft.Storage/storageAccounts/blobService
   }
 }
 
+resource functionManagedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: functionManagedIdentityName
+  location: appLocation
+}
+
+resource functionKeyVaultSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(keyVault.id, functionManagedIdentity.id, keyVaultSecretsUserRoleDefinitionId)
+  scope: keyVault
+  properties: {
+    roleDefinitionId: keyVaultSecretsUserRoleDefinitionId
+    principalId: functionManagedIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
 resource functionPlan 'Microsoft.Web/serverfarms@2024-04-01' = {
   name: functionPlanName
   location: appLocation
@@ -157,10 +223,17 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
   name: functionAppName
   location: appLocation
   kind: 'functionapp,linux'
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${functionManagedIdentity.id}': {}
+    }
+  }
   properties: {
     serverFarmId: functionPlan.id
     clientAffinityEnabled: false
     httpsOnly: false
+    keyVaultReferenceIdentity: functionManagedIdentity.id
     storageAccountRequired: false
     siteConfig: {
       localMySqlEnabled: false
@@ -187,6 +260,55 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
         alwaysReady: []
       }
     }
+  }
+}
+
+resource functionAppSettings 'Microsoft.Web/sites/config@2024-04-01' = {
+  parent: functionApp
+  name: 'appsettings'
+  dependsOn: [
+    functionKeyVaultSecretsUser
+  ]
+  properties: {
+    AI_INLINE_PROCESSING_ENABLED: 'false'
+    AI_MAX_RETRIES: '3'
+    AI_PROCESSING_ENABLED: 'false'
+    AI_PROVIDER: 'openai'
+    AI_REQUEST_TIMEOUT_SECONDS: '60'
+    AZURE_STORAGE_CONNECTION_STRING: keyVaultReferences.appStorageConnectionString
+    AZURE_STORAGE_CONTAINER: appAssetsContainerName
+    AZURE_STORAGE_ACCOUNT: appStorage.name
+    AzureWebJobsStorage: keyVaultReferences.functionStorageConnectionString
+    DATABASE_URL: keyVaultReferences.databaseUrl
+    DEPLOYMENT_STORAGE_CONNECTION_STRING: keyVaultReferences.functionStorageConnectionString
+    DOCUMENT_OCR_DPI_SCALE: '2.0'
+    DOCUMENT_OCR_LANGUAGE: 'eng'
+    DOCUMENT_OCR_MAX_PAGES: '25'
+    DOCUMENT_OCR_TESSERACT_CMD: 'tesseract'
+    EMAIL_INTAKE_AUTO_REPLY_ENABLED: 'false'
+    EMAIL_INTAKE_DEFAULT_DOCUMENT_TYPE: 'Email Attachment'
+    EMAIL_INTAKE_DEFAULT_UPLOADER_ID: 'contractor-demo'
+    EMAIL_INTAKE_DRY_RUN: 'false'
+    EMAIL_INTAKE_FAILED_MAILBOX: 'Failed'
+    EMAIL_INTAKE_HOST: keyVaultReferences.emailIntakeHost
+    EMAIL_INTAKE_LIMIT: '25'
+    EMAIL_INTAKE_MAILBOX: 'INBOX'
+    EMAIL_INTAKE_PASSWORD: keyVaultReferences.emailIntakePassword
+    EMAIL_INTAKE_PROCESSED_MAILBOX: 'Processed'
+    EMAIL_INTAKE_SEARCH: 'UNSEEN'
+    EMAIL_INTAKE_STUB_BLOB_CONTAINER: appAssetsContainerName
+    EMAIL_INTAKE_STUB_BLOB_ENABLED: 'true'
+    EMAIL_INTAKE_STUB_BLOB_PREFIX: 'email-intake'
+    EMAIL_INTAKE_TIMER_SCHEDULE: '0 */5 * * * *'
+    EMAIL_INTAKE_USERNAME: keyVaultReferences.emailIntakeUsername
+    FUNCTIONS_EXTENSION_VERSION: '~4'
+    FUNCTIONS_WORKER_RUNTIME: 'python'
+    OPENAI_API_KEY: keyVaultReferences.openaiApiKey
+    OPENAI_EMBEDDING_DIMENSIONS: '3072'
+    OPENAI_EMBEDDING_MODEL: 'text-embedding-3-large'
+    OPENAI_LLM_MODEL: 'gpt-5.5'
+    RESEND_API_KEY: keyVaultReferences.resendApiKey
+    SCM_DO_BUILD_DURING_DEPLOYMENT: 'true'
   }
 }
 
@@ -275,6 +397,16 @@ resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   }
 }
 
+resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
+  name: '${acaEnvironmentName}-appi'
+  location: appLocation
+  kind: 'web'
+  properties: {
+    Application_Type: 'web'
+    WorkspaceResourceId: logAnalytics.id
+  }
+}
+
 resource acaEnvironment 'Microsoft.App/managedEnvironments@2024-03-01' = {
   name: acaEnvironmentName
   location: appLocation
@@ -289,11 +421,35 @@ resource acaEnvironment 'Microsoft.App/managedEnvironments@2024-03-01' = {
   }
 }
 
-// --- Summarizer Container App ---
+// --- Feature Extractor Container App ---
 
-resource summarizerApp 'Microsoft.App/containerApps@2024-03-01' = {
-  name: summarizerAppName
+resource featureExtractorManagedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: featureExtractorManagedIdentityName
   location: appLocation
+}
+
+resource featureExtractorKeyVaultSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(keyVault.id, featureExtractorManagedIdentity.id, keyVaultSecretsUserRoleDefinitionId)
+  scope: keyVault
+  properties: {
+    roleDefinitionId: keyVaultSecretsUserRoleDefinitionId
+    principalId: featureExtractorManagedIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource featureExtractorApp 'Microsoft.App/containerApps@2024-03-01' = {
+  name: featureExtractorAppName
+  location: appLocation
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${featureExtractorManagedIdentity.id}': {}
+    }
+  }
+  dependsOn: [
+    featureExtractorKeyVaultSecretsUser
+  ]
   properties: {
     managedEnvironmentId: acaEnvironment.id
     configuration: {
@@ -317,15 +473,18 @@ resource summarizerApp 'Microsoft.App/containerApps@2024-03-01' = {
         }
         {
           name: 'storage-connection-string'
-          value: 'DefaultEndpointsProtocol=https;AccountName=${appStorage.name};AccountKey=${appStorage.listKeys().keys[0].value};EndpointSuffix=${environment().suffixes.storage}'
+          keyVaultUrl: keyVaultSecretUris.appStorageConnectionString
+          identity: featureExtractorManagedIdentity.id
         }
         {
           name: 'openai-api-key'
-          value: openaiApiKey
+          keyVaultUrl: keyVaultSecretUris.openaiApiKey
+          identity: featureExtractorManagedIdentity.id
         }
         {
           name: 'database-url'
-          value: summarizerDatabaseUrl
+          keyVaultUrl: keyVaultSecretUris.databaseUrl
+          identity: featureExtractorManagedIdentity.id
         }
       ]
     }
@@ -333,7 +492,7 @@ resource summarizerApp 'Microsoft.App/containerApps@2024-03-01' = {
       containers: [
         {
           name: 'feature-extractor'
-          image: '${acr.properties.loginServer}/feature-extractor:${summarizerImageTag}'
+          image: '${acr.properties.loginServer}/feature-extractor:${featureExtractorImageTag}'
           resources: {
             cpu: json('0.5')
             memory: '1Gi'
@@ -356,12 +515,24 @@ resource summarizerApp 'Microsoft.App/containerApps@2024-03-01' = {
               value: 'openai'
             }
             {
+              name: 'OPENAI_LLM_MODEL'
+              value: 'gpt-5.4-mini'
+            }
+            {
               name: 'DATABASE_URL'
               secretRef: 'database-url'
             }
             {
               name: 'EMBEDDING_MODEL'
               value: 'text-embedding-3-small'
+            }
+            {
+              name: 'APPINSIGHTS_CONNECTION_STRING'
+              value: appInsights.properties.ConnectionString
+            }
+            {
+              name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
+              value: appInsights.properties.ConnectionString
             }
           ]
         }
@@ -376,9 +547,33 @@ resource summarizerApp 'Microsoft.App/containerApps@2024-03-01' = {
 
 // --- Backend Container App ---
 
+resource backendManagedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: backendManagedIdentityName
+  location: appLocation
+}
+
+resource backendKeyVaultSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(keyVault.id, backendManagedIdentity.id, keyVaultSecretsUserRoleDefinitionId)
+  scope: keyVault
+  properties: {
+    roleDefinitionId: keyVaultSecretsUserRoleDefinitionId
+    principalId: backendManagedIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
 resource backendApp 'Microsoft.App/containerApps@2024-03-01' = {
   name: backendAppName
   location: appLocation
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${backendManagedIdentity.id}': {}
+    }
+  }
+  dependsOn: [
+    backendKeyVaultSecretsUser
+  ]
   properties: {
     managedEnvironmentId: acaEnvironment.id
     configuration: {
@@ -402,15 +597,18 @@ resource backendApp 'Microsoft.App/containerApps@2024-03-01' = {
         }
         {
           name: 'storage-connection-string'
-          value: 'DefaultEndpointsProtocol=https;AccountName=${appStorage.name};AccountKey=${appStorage.listKeys().keys[0].value};EndpointSuffix=${environment().suffixes.storage}'
+          keyVaultUrl: keyVaultSecretUris.appStorageConnectionString
+          identity: backendManagedIdentity.id
         }
         {
           name: 'openai-api-key'
-          value: openaiApiKey
+          keyVaultUrl: keyVaultSecretUris.openaiApiKey
+          identity: backendManagedIdentity.id
         }
         {
           name: 'database-url'
-          value: backendDatabaseUrl
+          keyVaultUrl: keyVaultSecretUris.databaseUrl
+          identity: backendManagedIdentity.id
         }
       ]
     }
@@ -452,6 +650,14 @@ resource backendApp 'Microsoft.App/containerApps@2024-03-01' = {
               name: 'AI_PROCESSING_ENABLED'
               value: 'true'
             }
+            {
+              name: 'APPINSIGHTS_CONNECTION_STRING'
+              value: appInsights.properties.ConnectionString
+            }
+            {
+              name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
+              value: appInsights.properties.ConnectionString
+            }
           ]
         }
       ]
@@ -488,7 +694,10 @@ resource linkedBackend 'Microsoft.Web/staticSites/linkedBackends@2023-01-01' = {
 output functionAppHostName string = functionApp.properties.defaultHostName
 output postgresFullyQualifiedDomainName string = postgresServer.properties.fullyQualifiedDomainName
 output appStorageBlobEndpoint string = appStorage.properties.primaryEndpoints.blob
+output keyVaultUri string = keyVault.properties.vaultUri
 output acrLoginServer string = acr.properties.loginServer
-output summarizerUrl string = 'https://${summarizerApp.properties.configuration.ingress.fqdn}'
+output featureExtractorUrl string = 'https://${featureExtractorApp.properties.configuration.ingress.fqdn}'
 output backendUrl string = 'https://${backendApp.properties.configuration.ingress.fqdn}'
 output staticWebAppUrl string = 'https://${staticWebApp.properties.defaultHostname}'
+output appInsightsName string = appInsights.name
+output appInsightsConnectionString string = appInsights.properties.ConnectionString

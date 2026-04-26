@@ -120,6 +120,15 @@ low-confidence when the visible cohort has fewer than 20 contracts, and missing
 deliverable, financial, decision, personnel, compliance, or closeout primitives are
 reported as `not_extractable` rather than estimated.
 
+The contract interaction flow should also answer "what similar contracts failed on,
+and what should I do differently next time?" The v1 implementation should combine
+embedding similarity from indexed document chunks, stored semantic links from extracted
+signals, and cohort metadata fallback to return similar visible contracts, observed
+failure points, early warnings, and contract-writing controls. The guidance should be
+evidence-backed and framed as drafting/review actions, such as clearer GFE/GFI
+responsibility matrices, government response deadlines, staffing coverage requirements,
+quality gates, cost variance triggers, and recovery-plan thresholds.
+
 Contract structure analysis is a separate high-value input. CLIN structure, contract
 type, incentive fees, government-furnished equipment obligations, period of
 performance, approval workflows, and option structure require ingested contract
@@ -183,6 +192,12 @@ The analyst pipeline should keep hard parentage and soft similarity separate:
 Baseline processing should maintain an interpreted current baseline per contract,
 baseline obligations, and append-only revisions when source contract documents, task
 orders, modifications, or official direction change the baseline.
+
+Kind-specific document routing should preserve source semantics. CPARS-style
+evaluations should extract per-factor adjectival ratings into `cpars_ratings`;
+contract modifications should extract modification decision details and append
+baseline revisions; GAO/OIG reports should be linked as official external references
+about the contract, not as contractor-submitted contract artifacts.
 
 Weekly and monthly report processing should compare new evidence against the baseline,
 prior reports, prior decisions, active topics, and open hypotheses. Regression findings

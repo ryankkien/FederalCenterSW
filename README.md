@@ -74,6 +74,11 @@ The frontend runs on `http://localhost:5173` and proxies `/api/*` requests to th
 
 See [docs/local-dev.md](docs/local-dev.md) for the Docker-based local mirror of PostgreSQL and Blob Storage.
 
+Backend, feature extractor, and email intake logs are emitted as structured JSON with
+`request_id`, `contract_id`, `document_upload_id`, and `processing_run_id` fields when
+available. Set `APPINSIGHTS_CONNECTION_STRING` to export telemetry to Azure Application
+Insights; leave it blank for local-only JSON logs.
+
 ## Product Direction
 
 The product direction is documented in [docs/product.md](docs/product.md). It covers the
@@ -107,17 +112,28 @@ bun run processing:run -- --limit 200
 Fixture seeding is idempotent. Document IDs are deterministic from fixture path and
 file hash, PDFs are copied to `contracts/{document_id}/main.pdf`, extracted text is
 stored at `contracts/{document_id}/text.json`, and processing jobs are queued for
-new or reset documents.
+new or reset documents. In Azure, the backend Function App drains queued document
+processing jobs on `DOCUMENT_PROCESSING_TIMER_SCHEDULE`; locally, use
+`bun run processing:run -- --limit 200` for an immediate drain.
 
 An optional local feature extractor service lives in `feature_extractor/`. It can read
 `contracts/{document_id}/text.json`, generate a layered summary, classify PSC/NAICS,
 extract structured primitives (deliverable, financial, decisions, issue, personnel) into
-the DB, and write `contracts/{document_id}/summary.json`. The main analyst pipeline does not
-require it; it is supplemental to the DB-backed processing store.
+the DB, and write `contracts/{document_id}/summary.json`. When `FEATURE_EXTRACTOR_URL`
+is configured for the backend, completed document processing runs automatically call
+`/summarize` and then `/extract-primitives`; extractor failures are recorded on the
+processing run and do not roll back the completed run. When `BACKEND_API_URL` and
+`INTERNAL_SERVICE_TOKEN` are configured, successful primitive extraction asks the
+backend to enqueue a debounced per-contract analysis run for the document's
+`contract_id`.
+The main analyst pipeline does not require it; it is supplemental to the DB-backed
+processing store.
 
 ## Infrastructure
 
 Azure infrastructure is defined with Bicep in `infra/`.
+The template provisions the shared Log Analytics workspace, Azure Application Insights
+component, Function App resources, storage, database, ACR, and Container Apps environment.
 
 Preview infrastructure changes:
 
@@ -132,6 +148,13 @@ bun run infra:deploy
 ```
 
 See [docs/infra.md](docs/infra.md) for the Bicep/GitHub Actions workflow and drift policy.
+Azure secrets are stored in Key Vault and consumed by the Function App and Feature Extractor
+Container App through user-assigned managed-identity Key Vault references, not raw app
+setting values.
+
+The optional feature extractor cloud service is deployed by
+`.github/workflows/feature-extractor-deploy.yml` from the `feature_extractor/` image
+into the dev Container App `fcsw-feature-extractor-dev`.
 
 ## Pull Request Notifications
 
@@ -147,11 +170,17 @@ Storage, while Postgres is the canonical store for contract records, processing 
 chunks, embeddings, signals, topics, evidence links, and audit history. Local Postgres
 uses a pgvector-enabled image so embeddings can live beside contract-scoped metadata.
 
-AI processing is feature-flagged off by default. Configure `AI_PROVIDER`,
-`AI_PROCESSING_ENABLED`, `AI_INLINE_PROCESSING_ENABLED`, `OPENAI_API_KEY`,
-`OPENAI_LLM_MODEL`, and `OPENAI_EMBEDDING_MODEL` in an ignored env file or Azure app
-settings before running OpenAI-backed extraction. Upload and email intake workflows
-continue to store documents when AI processing is disabled or blocked.
+AI processing defaults on when `OPENAI_API_KEY` is set and the AI flags are omitted.
+Configure `AI_PROVIDER`, `OPENAI_API_KEY`, `OPENAI_LLM_MODEL`, and
+`OPENAI_EMBEDDING_MODEL` in an ignored env file or Azure Key Vault-backed app setting
+before running OpenAI-backed extraction. Set `AI_PROCESSING_ENABLED=false` or
+`AI_INLINE_PROCESSING_ENABLED=false` to force-disable either path. Upload and email intake
+workflows continue to store documents when AI processing is disabled or blocked.
+
+Queued document processing runs automatically in Azure through the timer trigger in
+`backend/function_app.py`. The worker skips jobs whose `text.json` still has
+`extraction_status="pending_ocr"` so OCR-delayed documents stay queued until extracted
+text is available.
 
 The contract analyst pipeline extends the processing foundation with page-level
 extraction, deterministic v1 classification, hard-link matching, extracted entities
@@ -159,7 +188,15 @@ and report facts, interpreted baselines, regression findings, hypotheses,
 investigation logs, official external-source references, semantic links, and
 step-level run logs. Hard parentage stays on `document_uploads.contract_id`;
 cross-contract and cross-document pattern relationships are stored separately as
-semantic links.
+semantic links. When an unmatched upload is confidently classified as a source
+contract or task order and exactly one contract number is extracted, processing
+auto-creates a `pending_review` contract record, links the upload, and writes a
+`contract.auto_created` audit event for official review.
+
+Kind-specific routing runs after the generic extraction pass. CPARS-style documents
+populate `cpars_ratings`, modifications populate `contract_primitives_decisions` and
+append `baseline_revisions`, and GAO/OIG reports are stored as official
+`external_source_refs` for the linked contract instead of becoming baseline evidence.
 
 The knowledge wiki index is a server-backed Grokipedia-style layer for officials. It
 mines seeded local fixture contracts, processed report evidence, and the generated
@@ -190,6 +227,7 @@ GET  /api/contracts/{contract_id}/hypotheses/{hypothesis_id}
 POST /api/contracts/{contract_id}/hypotheses/{hypothesis_id}/investigate
 POST /api/contracts/{contract_id}/hypotheses/{hypothesis_id}/status
 GET  /api/contracts/{contract_id}/similar-contracts
+GET  /api/contracts/{contract_id}/similarity-insights
 GET  /api/documents/{document_id}
 GET  /api/documents/{document_id}/relationships
 POST /api/documents/{document_id}/match-decisions
@@ -218,7 +256,8 @@ bun run corpus:build-synthetic
 The generated corpus lives under ignored `backend/data/corpus/navy-service-v1/` and
 keeps `real_fixture` downloaded anchors separate from `synthetic_fixture` reports,
 CPARS-style narratives, IPMDAR-style JSON, decision logs, and cross-contract lesson
-notes.
+notes. Each contract has one CPARS-style `cpars_evaluation` fixture for extraction
+testing; these generated records are not real CPARS data.
 
 ## Auth Modes
 
@@ -232,7 +271,7 @@ ids to `contract_access_grants.principal_id` for contract-scoped RBAC.
 ## Document Ingest
 
 In mock local mode, choose `Contractor` to upload documents or `Government official`
-to inspect the contract analyst workspace and review queue. Uploaded files are stored
+to inspect the contract analyst workspace. Uploaded files are stored
 through the backend blob storage adapter and document metadata is stored in Postgres.
 Each upload gets an immutable document artifact folder:
 
@@ -253,11 +292,25 @@ as `document_uploads.contract_id`, so new reports immediately become child docum
 the contract while semantic cross-document and cross-contract relationships remain
 separate.
 
+Portal uploads run cheap deterministic intake decisions before the async processor:
+filename, title, notes, and type cues update `document_kind`, `match_status`, and
+`contract_id` when a known contract number is found. The upload response includes
+`detected_kind` and `matched_contract_id`; full text classification and AI-assisted
+matching still run later through processing jobs.
+
+Email or portal uploads that cannot match an existing contract remain unmatched unless
+processing can safely scaffold a new parent. Auto-scaffolding only runs for high
+confidence `source_contract` or `task_order` classifications with one regex-extracted
+contract number; the created contract is marked `pending_review` and records its source
+document in audit history.
+
 Government officials see a contract-first analysis workspace. The current v1 view uses
 existing extracted primitives and wiki records to show a cited contract brief,
 chronological report signals, recurring versus one-off issues, early warnings before
 degradation, positive signals, contractor execution patterns, CPARS outcome context
-when imported, and cohort-level pattern comparisons.
+when imported, cohort-level pattern comparisons, similar-contract failure points, and
+drafting guidance for future contract writing. Similarity insights use chunk embeddings
+when available, stored semantic links when available, and cohort metadata as a fallback.
 
 For local development without Azure env values, the backend falls back to ignored
 local storage under `backend/data/`. For Azure-backed runs, fill in `DATABASE_URL`,
@@ -265,7 +318,7 @@ local storage under `backend/data/`. For Azure-backed runs, fill in `DATABASE_UR
 
 ## Email Intake
 
-The backend includes an IMAP intake worker that parses unread mailbox messages into JSONL audit records. In commit mode, supported attachments are uploaded to the same contract-folder storage used by the portal and become visible to the mock contractor portal and official analyst workspace. It can also send an optional receipt auto-reply. Configure it with `EMAIL_INTAKE_*` environment variables, then run:
+The backend includes an IMAP intake worker that parses unread mailbox messages into JSONL audit records. In commit mode, supported attachments are uploaded to the same contract-folder storage used by the portal, run the same deterministic intake decisions, and become visible to the mock contractor portal and official analyst workspace. It can also send an optional receipt auto-reply. Configure it with `EMAIL_INTAKE_*` environment variables, then run:
 
 ```sh
 bun run email:intake -- --limit 5
@@ -277,4 +330,4 @@ Use `--commit` only after dry-run output looks correct; commit mode moves proces
 
 Azure resource inventory, access steps, PostgreSQL commands, and Blob Storage commands are documented in [docs/cloud.md](docs/cloud.md).
 
-Local development mirrors the cloud-facing PostgreSQL and Blob Storage contract with Docker Compose. Keep Azure inventory and access notes in `docs/cloud.md`, infrastructure workflow notes in `docs/infra.md`, and local mirror instructions in `docs/local-dev.md`.
+Local development mirrors the cloud-facing PostgreSQL and Blob Storage contract with Docker Compose: PostgreSQL 16 plus pgvector, database `federal_center_sw`, and private Blob container `app-assets`. The Azure Function deploy workflow writes the matching non-secret app settings and expects the database and storage connection strings in GitHub secrets. Keep Azure inventory and access notes in `docs/cloud.md`, infrastructure workflow notes in `docs/infra.md`, and local mirror instructions in `docs/local-dev.md`.

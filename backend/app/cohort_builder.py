@@ -1,13 +1,12 @@
-from __future__ import annotations
-
 """Build cohort definitions for contract performance analysis.
 
 Given a target contract, finds comparable contracts using NAICS prefix, contract type,
 obligated value band, POP length band, agency, and competition type.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
-from datetime import date
 
 from sqlalchemy.orm import Session
 
@@ -69,6 +68,19 @@ def build_cohort(db: Session, target_contract_id: str) -> CohortDefinition:
         candidate_ids = _filter_value(db, candidate_ids, target_value)
         criteria["obligated_value"] = target_value
         criteria["value_band_pct"] = _VALUE_BAND_PCT
+
+    if not candidate_ids:
+        candidate_ids = [
+            row[0]
+            for row in db.query(Contract.id)
+            .filter(Contract.id != target_contract_id)
+            .all()
+        ]
+        if candidate_ids:
+            criteria["fallback"] = (
+                "No strict metadata matches were available; using all other contracts "
+                "as a low-confidence comparison cohort."
+            )
 
     N = len(candidate_ids)
     return CohortDefinition(

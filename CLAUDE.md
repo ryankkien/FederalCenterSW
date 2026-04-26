@@ -93,13 +93,13 @@ These tables store structured records extracted from documents by the `feature_e
 
 ### Feature Extractor Service (`feature_extractor/`)
 
-The optional `feature_extractor/` service replaces the old `summarizer/`. It reads a text artifact from blob, runs hierarchical summarization, classifies the document (PSC/NAICS), chunks and embeds the text, and extracts structured primitives into the DB. The `/extract-primitives` endpoint is called by the backend with `doc_id`, `contract_id`, and `doc_classification`.
+The optional `feature_extractor/` service reads a text artifact from blob, runs hierarchical summarization, classifies the document (PSC/NAICS), chunks and embeds the text, and extracts structured primitives into the DB. When `FEATURE_EXTRACTOR_URL` is configured, completed backend processing runs call `/summarize` and then call `/extract-primitives` with `doc_id`, `contract_id`, and `doc_classification`.
 
 **New endpoints:**
 - `POST /summarize` — unchanged, runs summarization + chunking + embedding (pipeline steps 1-4)
 - `POST /extract-primitives` — extracts primitives for a document given its classification
 
-**Audit events** use `event_type` values: `feature_extractor.summary`, `feature_extractor.chunking`, `feature_extractor.index`, `feature_extractor.primitives`
+**Audit events** use `event_type` values: `feature_extractor.summary`, `feature_extractor.chunking`, `feature_extractor.index`, `feature_extractor.primitives`. Backend-triggered summary and primitive failures are also surfaced in `processing_run_steps`; they must not roll back the upstream processing run.
 
 **Blob paths** (container: `app-assets`, env: `AZURE_STORAGE_CONTAINER`):
 
@@ -114,7 +114,7 @@ The optional `feature_extractor/` service replaces the old `summarizer/`. It rea
 {
   "doc_id": "document_upload_id",
   "generated_at": "2026-04-26T12:00:00+00:00",
-  "model": "claude-sonnet-4-6",
+  "model": "gpt-5.4-mini",
   "source_path": "contracts/{id}/text.json",
   "classification": {
     "psc_code": "D302",
@@ -137,7 +137,7 @@ The optional `feature_extractor/` service replaces the old `summarizer/`. It rea
 
 **`backend/app/cohort_builder.py`**: Given a `contract_id`, finds comparable contracts using NAICS 4-digit prefix, `contract_type`, agency, `competition_type`, POP length (±25%), and obligated value band (±50%). Flags `low_confidence: true` when N < 20.
 
-**`backend/app/analysis_orchestrator.py`**: Loads primitives + CPARS for target + cohort, assembles the analysis prompt, calls Claude, stores result in `analysis_runs`.
+**`backend/app/analysis_orchestrator.py`**: Loads primitives + CPARS for target + cohort, assembles the analysis prompt, calls OpenAI, stores result in `analysis_runs`.
 
 **New API endpoints:**
 - `GET /api/contracts/{id}/cohort` → cohort definition + contract IDs

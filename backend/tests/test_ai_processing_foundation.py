@@ -2,6 +2,11 @@ import json
 
 from app.ai.providers import NullAIProvider, get_ai_provider
 from app.chunking import chunk_text
+from app.config import (
+    get_ai_inline_processing_enabled,
+    get_ai_processing_enabled,
+    get_openai_llm_model,
+)
 from app.contract_matching import ContractMatchContext, match_contract
 from app.processing import TextJsonPayload, gate_text_payload, process_document_upload
 
@@ -43,6 +48,30 @@ def test_default_ai_provider_is_null_when_disabled(monkeypatch):
     assert provider.status.available is False
 
 
+def test_ai_flags_default_on_when_openai_key_is_present(monkeypatch):
+    monkeypatch.delenv("AI_PROCESSING_ENABLED", raising=False)
+    monkeypatch.delenv("AI_INLINE_PROCESSING_ENABLED", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    assert get_ai_processing_enabled() is True
+    assert get_ai_inline_processing_enabled() is True
+
+
+def test_ai_flags_can_force_disable_with_openai_key(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("AI_PROCESSING_ENABLED", "false")
+    monkeypatch.setenv("AI_INLINE_PROCESSING_ENABLED", "false")
+
+    assert get_ai_processing_enabled() is False
+    assert get_ai_inline_processing_enabled() is False
+
+
+def test_openai_llm_default_matches_current_config(monkeypatch):
+    monkeypatch.delenv("OPENAI_LLM_MODEL", raising=False)
+
+    assert get_openai_llm_model() == "gpt-5.5"
+
+
 def test_contract_matching_finds_wwr_contract_from_filename():
     result = match_contract(
         contracts=[{"id": "wwr", "contract_number": "M0026426R0001"}],
@@ -63,6 +92,16 @@ def test_contract_matching_finds_agor_contract_from_text():
     assert result.status == "matched"
     assert result.source == "deterministic"
     assert result.matched_contract_number == "N00014-12-C-0305"
+
+
+def test_contract_matching_preserves_hints_without_known_contracts():
+    result = match_contract(
+        contracts=[],
+        context=ContractMatchContext(text="Source contract N40080-26-C-1001 for review."),
+    )
+
+    assert result.status == "unmatched"
+    assert result.hints == ["N40080-26-C-1001"]
 
 
 def test_gate_failed_empty_text_without_ai_call():
