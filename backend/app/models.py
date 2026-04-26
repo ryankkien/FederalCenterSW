@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import TypeDecorator
 
@@ -731,6 +731,88 @@ class AuditEvent(Base):
         index=True,
     )
     metadata_json: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+
+
+class PrimitiveExtractionRun(Base):
+    __tablename__ = "primitive_extraction_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    contract_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("contracts.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    doc_upload_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("document_uploads.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    period_label: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
+    extracted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    model: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="success", nullable=False, index=True)
+
+
+class ContractPrimitiveDecision(Base):
+    __tablename__ = "contract_primitives_decisions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    extraction_run_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("primitive_extraction_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    contract_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("contracts.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    source_doc_ids: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True)
+    period_label: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
+    decision_type: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    mod_number: Mapped[Optional[str]] = mapped_column(String(40), nullable=True, index=True)
+    mod_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    value_change: Mapped[Optional[float]] = mapped_column(Numeric, nullable=True)
+    pop_change_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    scope_change_description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    decision_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    deciding_party: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+
+
+class CparsRating(Base):
+    __tablename__ = "cpars_ratings"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    contract_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("contracts.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    doc_upload_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("document_uploads.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    evaluation_period: Mapped[Optional[str]] = mapped_column(String(40), nullable=True, index=True)
+    evaluation_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    quality_rating: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    schedule_rating: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    cost_control_rating: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    management_rating: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    small_business_rating: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    regulatory_compliance_rating: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    overall_rating: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    narrative: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
 class ContractBaseline(Base):

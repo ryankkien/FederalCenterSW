@@ -16,8 +16,10 @@ Start local dependencies:
 bun run local:up
 ```
 
-This requires Docker Desktop and Azure CLI. The Azure CLI is used only to initialize the
-local Azurite blob container.
+This requires Docker Desktop plus either the backend Python dependencies or Azure CLI.
+The Python Azure Blob SDK is preferred for initializing the local Azurite blob
+container, with Azure CLI as a fallback. `local:up` retries Azurite container setup for
+up to `AZURITE_SETUP_RETRIES` attempts; the default is 90 seconds for slower CI runners.
 
 Stop local dependencies:
 

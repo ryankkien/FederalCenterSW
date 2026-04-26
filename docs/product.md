@@ -193,6 +193,12 @@ Baseline processing should maintain an interpreted current baseline per contract
 baseline obligations, and append-only revisions when source contract documents, task
 orders, modifications, or official direction change the baseline.
 
+Kind-specific document routing should preserve source semantics. CPARS-style
+evaluations should extract per-factor adjectival ratings into `cpars_ratings`;
+contract modifications should extract modification decision details and append
+baseline revisions; GAO/OIG reports should be linked as official external references
+about the contract, not as contractor-submitted contract artifacts.
+
 Weekly and monthly report processing should compare new evidence against the baseline,
 prior reports, prior decisions, active topics, and open hypotheses. Regression findings
 should be citation-backed and grouped into hypotheses only when the underlying evidence
