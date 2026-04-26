@@ -101,6 +101,8 @@ describe('App', () => {
 
     expect(await screen.findByRole('heading', { name: 'Contract Analysis Workspace' })).toBeInTheDocument();
     expect(await screen.findByRole('heading', { name: 'Contract Timeline And Cohort Patterns' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Cited Performance Explanation' })).toBeInTheDocument();
+    expect(screen.getByText('Measurement Axes')).toBeInTheDocument();
     expect(screen.getByText('Evidence index')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Grokipedia Index' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByText('Evidence index'));
@@ -283,6 +285,45 @@ const contractAnalysis = {
   positive_signals: [],
   execution_patterns: [],
   cpars_ratings: [],
+  analyst_brief: {
+    problem_statement: 'Explain the outcome with cited primitives.',
+    summary: 'Aging RFI appears across the timeline. [sig-1]',
+    outcome_context: [],
+    recurring_vs_one_off: [
+      {
+        title: 'One-off issues',
+        finding: 'Aging RFI appears once and should be treated as one-off until repeated.',
+        citations: [{ primitive_id: 'sig-1', primitive_type: 'report_fact', document_id: 'doc-1', label: 'Aging RFI', excerpt: 'RFI is 21 days open.' }],
+        confidence: 0.6,
+      },
+    ],
+    pre_degradation_signals: [],
+    success_or_recovery_signals: [],
+    execution_assessment: [],
+    government_vs_contractor: [],
+    limitations: ['Actual CPARS ratings are absent.'],
+  },
+  axes: [
+    {
+      axis: 'execution_and_risk',
+      status: 'measured',
+      target_value: { issue_signal_count: 1 },
+      cohort_distribution: { p10: 1, p25: 1, p50: 1, p75: 1, p90: 1 },
+      target_percentile: 100,
+      low_confidence: true,
+      rationale: 'Execution and risk is measured from issue signals.',
+      citations: [{ primitive_id: 'sig-1', primitive_type: 'report_fact', document_id: 'doc-1', label: 'Aging RFI', excerpt: 'RFI is 21 days open.' }],
+    },
+  ],
+  cpars_predicted: {
+    Management: {
+      factor: 'Management',
+      rating: 'Marginal',
+      not_extractable: false,
+      rationale: 'Target is high percentile for execution and risk.',
+      citations: [{ primitive_id: 'sig-1', primitive_type: 'report_fact', document_id: 'doc-1', label: 'Aging RFI', excerpt: 'RFI is 21 days open.' }],
+    },
+  },
   limitations: ['No CPARS ratings are available unless authorized CPARS exports have been imported.'],
 };
 
