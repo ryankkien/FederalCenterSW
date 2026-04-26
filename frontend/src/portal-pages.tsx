@@ -10,11 +10,14 @@ import {
 } from './portal-shell';
 import {
   createContract,
+  downloadDocumentBlob,
   getContractAnalysis,
+  getContractDeliverables,
+  getDocument,
+  getPortfolioThemes,
   listAllDocuments,
   listContractDocuments,
   listContracts,
-  listDeliverables,
   listRegressions,
   mockLogin,
   normalizeContract,
@@ -522,6 +525,8 @@ function HomePage({ user, onNav, onSelectContract }) {
   const nameParts = (user?.name || 'User').split(' ');
   const RANKS = new Set(['LCDR','LT','CDR','CAPT','CIV','ENS','ADM','RDML','VADM','LTJG']);
   const firstName = RANKS.has(nameParts[0]) ? (nameParts[1] || nameParts[0]) : nameParts[0];
+  const [portfolio, setPortfolio] = useState(null);
+  const [portfolioError, setPortfolioError] = useState(false);
 
   const [serviceCode, setServiceCode] = useState('All codes');
   const [component, setComponent] = useState('All');
@@ -529,8 +534,36 @@ function HomePage({ user, onNav, onSelectContract }) {
   const [period, setPeriod] = useState('Last 30 days');
   const [view, setView] = useState('All flagged');
 
+  useEffect(() => {
+    let cancelled = false;
+    getPortfolioThemes(periodParam(period))
+      .then(data => {
+        if (!cancelled) {
+          setPortfolio(data);
+          setPortfolioError(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setPortfolioError(true);
+      });
+    return () => { cancelled = true; };
+  }, [period]);
+
+  const sourceThemes = portfolio?.themes || [];
+  const kpis = portfolio?.kpis || {};
+  const flaggedCount = kpis.flagged ?? sourceThemes.reduce((sum, t) => sum + (t.flagged || 0), 0);
+  const totalContracts = kpis.total_contracts ?? 0;
+  const aggregateValue = kpis.aggregate_value_flagged != null
+    ? compactCurrency(kpis.aggregate_value_flagged)
+    : '—';
+  const healthyCount = Math.max(0, totalContracts - flaggedCount);
+
   // Filter themes by view
-  const visibleThemes = THEMES.filter(t => {
+  const visibleThemes = sourceThemes.filter(t => {
+    if (serviceCode !== 'All codes' && !themeMatchesServiceCode(t, serviceCode)) return false;
+    if (component !== 'All' && t.component !== component) return false;
+    if (severity === 'Critical only' && t.severity !== 'critical') return false;
+    if (severity === '≥ watch' && !['critical', 'watch'].includes(t.severity)) return false;
     if (view === 'All flagged') return true;
     if (view === 'Critical') return t.severity === 'critical';
     if (view === 'Watch') return t.severity === 'watch';
@@ -551,7 +584,7 @@ function HomePage({ user, onNav, onSelectContract }) {
           <div>
             <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.18em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)', marginBottom:6 }}>{today}</div>
             <h1 style={{ fontSize:24, fontWeight:700, letterSpacing:'-0.02em', color:'var(--ink)' }}>Portfolio Overview</h1>
-            <p style={{ fontSize:13, color:'var(--ink-mute)', marginTop:4 }}>{firstName} — themes and patterns across 47 active contracts</p>
+            <p style={{ fontSize:13, color:'var(--ink-mute)', marginTop:4 }}>{firstName} — themes and patterns across {totalContracts} active contracts</p>
           </div>
           <div style={{ textAlign:'right' }}>
             <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-faint)', fontFamily:'var(--mono)' }}>Reporting Period</div>
@@ -561,10 +594,10 @@ function HomePage({ user, onNav, onSelectContract }) {
 
         {/* KPI strip */}
         <div style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:0, marginBottom:18, border:'1px solid var(--border)', borderRadius:4, background:'var(--surface)' }}>
-          <KpiCell label="Flagged"            value={<span><span style={{color:'var(--flag)'}}>8</span><span style={{color:'var(--ink-faint)'}}> / 47</span></span>} sub="+3 vs prior week" />
-          <KpiCell label="Median CDRL slip"   value={<span style={{color:'var(--warn)'}}>12<span style={{fontSize:18, marginLeft:2}}>d</span></span>} sub="stable across portfolio" border />
-          <KpiCell label="Cross-contract themes" value={<span>{THEMES.length}</span>} sub="≥2 instances each" border />
-          <KpiCell label="Aggregate value flagged" value="$236M" sub="15% of portfolio" border />
+          <KpiCell label="Flagged"            value={<span><span style={{color:'var(--flag)'}}>{flaggedCount}</span><span style={{color:'var(--ink-faint)'}}> / {totalContracts}</span></span>} sub={portfolioError ? 'backend unavailable' : 'backend evidence'} />
+          <KpiCell label="Evidence Items"     value={<span style={{color:'var(--warn)'}}>{kpis.evidence_count ?? '—'}</span>} sub="findings, signals, facts" border />
+          <KpiCell label="Cross-contract themes" value={<span>{sourceThemes.length}</span>} sub="backend grouped" border />
+          <KpiCell label="Aggregate value flagged" value={aggregateValue} sub={totalContracts ? 'visible portfolio' : 'no contracts'} border />
         </div>
 
         {/* Filter / view bar */}
@@ -581,10 +614,10 @@ function HomePage({ user, onNav, onSelectContract }) {
 
           <div style={{ marginLeft:'auto', display:'flex', gap:4 }}>
             {[
-              { id:'All flagged', count:8, tone:'ink' },
-              { id:'Critical',    count:3, tone:'flag' },
-              { id:'Watch',       count:5, tone:'warn' },
-              { id:'Healthy',     count:39, tone:'good' },
+              { id:'All flagged', count:flaggedCount, tone:'ink' },
+              { id:'Critical',    count:sourceThemes.filter(t => t.severity === 'critical').length, tone:'flag' },
+              { id:'Watch',       count:sourceThemes.filter(t => t.severity === 'watch').length, tone:'warn' },
+              { id:'Healthy',     count:healthyCount, tone:'good' },
             ].map(v => {
               const active = v.id === view;
               const tones = { ink:'var(--ink)', flag:'var(--flag)', warn:'var(--warn)', good:'var(--good)' };
@@ -609,10 +642,12 @@ function HomePage({ user, onNav, onSelectContract }) {
         </div>
 
         <div style={{ display:'grid', gap:10 }}>
+          {!portfolio && !portfolioError && <Spinner label="Loading portfolio evidence…" />}
           {visibleThemes.map(theme => (
             <ThemeCard key={theme.id} theme={theme} onSelectContract={onSelectContract} />
           ))}
-          {visibleThemes.length === 0 && <EmptyState title="No themes match" sub="Adjust filters to see related patterns."/>}
+          {portfolio && visibleThemes.length === 0 && <EmptyState title="No backend themes yet" sub={(portfolio.limitations || [])[0] || 'Upload and process documents to generate cross-contract themes.'}/>}
+          {portfolioError && <EmptyState title="Portfolio evidence unavailable" sub="Backend portfolio evidence could not be loaded."/>}
         </div>
       </div>
     </div>
@@ -674,7 +709,11 @@ function FilterChip({ label, value, onChange, options }) {
 function ThemeCard({ theme, onSelectContract }) {
   const [expanded, setExpanded] = useState(false);
   const sev = SEVERITY_META[theme.severity];
-  const contracts = theme.contracts.map(id => MOCK_CONTRACTS.find(c => c.id === id)).filter(Boolean);
+  const contracts = (theme.contracts || []).map(item => (
+    typeof item === 'string'
+      ? { id:item, number:item, title:'Contract details unavailable', component:'—', value:'—', unavailable:true }
+      : normalizeThemeContract(item)
+  )).filter(Boolean);
 
   return (
     <div style={{
@@ -727,11 +766,16 @@ function ThemeCard({ theme, onSelectContract }) {
       {expanded && (
         <div style={{ borderTop:'1px solid var(--border)', background:'var(--surface-alt)', padding:'12px 20px 14px' }}>
           <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.12em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)', marginBottom:10 }}>Contracts in this theme</div>
+          {contracts.length === 0 && (
+            <div style={{ fontSize:11.5, color:'var(--ink-mute)' }}>
+              No contract records were returned for this theme.
+            </div>
+          )}
           {contracts.map((c, i) => (
-            <div key={c.id} onClick={() => onSelectContract(c)} style={{
+            <div key={c.id} onClick={() => !c.unavailable && onSelectContract(c)} style={{
               display:'grid', gridTemplateColumns:'160px 1fr 100px 100px 16px', gap:14, alignItems:'center',
               padding:'9px 0', borderBottom: i < contracts.length-1 ? '1px solid var(--border)' : 'none',
-              cursor:'pointer',
+              cursor: c.unavailable ? 'default' : 'pointer',
             }}>
               <span style={{ fontFamily:'var(--mono)', fontSize:11.5, fontWeight:600, color:'var(--accent)' }}>{c.number}</span>
               <span style={{ fontSize:13, color:'var(--ink)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{c.title}</span>
@@ -767,7 +811,7 @@ function ContractsPage({ onSelectContract }) {
     return () => { cancelled = true; };
   }, []);
 
-  const baseContracts = backendContracts && backendContracts.length > 0 ? backendContracts : MOCK_CONTRACTS;
+  const baseContracts = backendContracts || [];
   const allContracts = [...userContracts, ...baseContracts];
   const presentPscs = new Set(allContracts.map(c => c.psc));
   const pscOptions = PSC_CODES.map(p => ({
@@ -885,7 +929,13 @@ function ContractsPage({ onSelectContract }) {
             ))}
           </tbody>
         </table>
-        {filtered.length === 0 && <EmptyState title="No contracts match" sub="Try adjusting your filters or search term." />}
+        {backendContracts === null && <Spinner label="Loading contract records…" />}
+        {backendContracts !== null && filtered.length === 0 && (
+          <EmptyState
+            title={allContracts.length === 0 ? "No contract records visible" : "No contracts match"}
+            sub={allContracts.length === 0 ? "Create a contract record or request access to an existing record." : "Try adjusting your filters or search term."}
+          />
+        )}
       </div>
 
       {showLog && (
@@ -923,32 +973,42 @@ const DETAIL_TABS = ['Overview', 'Insights', 'Benchmarks', 'Documents'];
 
 function ContractDetailPage({ contract, onBack, onSelectContract }) {
   const [tab, setTab] = useState('Overview');
-  const [docs, setDocs] = useState(() => buildDocs(contract));
-  const [findings, setFindings] = useState(() => FINDINGS[contract.id] || FINDINGS.c1);
+  const [docs, setDocs] = useState([]);
+  const [findings, setFindings] = useState([]);
   const [analysis, setAnalysis] = useState(null);
+  const [deliverables, setDeliverables] = useState(null);
   const [showUpload, setShowUpload] = useState(false);
 
   const c = contract;
 
   useEffect(() => {
-    setDocs(buildDocs(c));
-    setFindings(FINDINGS[c.id] || FINDINGS.c1);
+    setDocs([]);
+    setFindings([]);
+    setAnalysis(null);
+    setDeliverables(null);
     let cancelled = false;
     listContractDocuments(c.id)
       .then(rows => {
-        if (!cancelled && rows.length > 0) setDocs(rows.map(row => normalizeDocument(row, c)));
+        if (!cancelled) setDocs(rows.map(row => normalizeDocument(row, c)));
       })
-      .catch(() => {});
+      .catch(() => { if (!cancelled) setDocs([]); });
     listRegressions(c.id)
       .then(rows => {
-        if (!cancelled && rows.length > 0) setFindings(rows.map(normalizeFinding));
+        if (!cancelled) setFindings(rows.map(normalizeFinding));
       })
-      .catch(() => {});
+      .catch(() => { if (!cancelled) setFindings([]); });
     getContractAnalysis(c.id)
       .then(row => {
         if (!cancelled) setAnalysis(row);
       })
       .catch(() => {});
+    getContractDeliverables(c.id)
+      .then(row => {
+        if (!cancelled) setDeliverables(row);
+      })
+      .catch(() => {
+        if (!cancelled) setDeliverables({ availability:'error', groups:[], limitations:['Deliverable evidence could not be loaded.'] });
+      });
     return () => { cancelled = true; };
   }, [c.id]);
 
@@ -995,7 +1055,7 @@ function ContractDetailPage({ contract, onBack, onSelectContract }) {
 
       {/* Body */}
       <div style={{ flex:1, overflowY:'auto' }}>
-        {tab === 'Overview'   && <OverviewTab contract={c} docs={docs} />}
+        {tab === 'Overview'   && <OverviewTab contract={c} docs={docs} deliverables={deliverables} />}
         {tab === 'Insights'   && <ContractInsightsTab contract={c} findings={findings} onSelectContract={onSelectContract} />}
         {tab === 'Benchmarks' && <BenchmarksTab contract={c} analysis={analysis} />}
         {tab === 'Documents'  && <DocumentsTab docs={docs} contract={c} onUpload={() => setShowUpload(true)} />}
@@ -1007,14 +1067,15 @@ function ContractDetailPage({ contract, onBack, onSelectContract }) {
 }
 
 // ─── OVERVIEW TAB ───────────────────────────────────────────────────────────
-function OverviewTab({ contract: c, docs }) {
+function OverviewTab({ contract: c, docs, deliverables }) {
   const authorized = c.authorized || DEFAULT_AUTHORIZED;
   const classification = c.classification || 'CUI';
-  const deliverables = buildDeliverables(c);
+  const deliverableGroups = normalizeBackendDeliverables(deliverables);
+  const deliverableAvailability = deliverables?.availability || 'loading';
 
   // Counts of upcoming vs filed
   const today = Date.now();
-  const allItems = deliverables.flatMap(d => d.items);
+  const allItems = deliverableGroups.flatMap(d => d.items);
   const filedCount = allItems.filter(i => i.filed).length;
   const upcomingCount = allItems.filter(i => !i.filed && new Date(i.due).getTime() > today).length;
 
@@ -1024,7 +1085,7 @@ function OverviewTab({ contract: c, docs }) {
       <div style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:12, marginBottom:24 }}>
         <MetricCard label="Contract Value" value={c.value}            sub="Total obligated"     mono />
         <MetricCard label="Period Elapsed" value={`${c.elapsed}%`}    sub={c.period}            mono />
-        <MetricCard label="Deliverables Filed" value={`${filedCount} / ${allItems.length}`} sub={`${upcomingCount} upcoming`} mono />
+        <MetricCard label="Deliverables Filed" value={deliverableAvailability === 'available' ? `${filedCount} / ${allItems.length}` : '—'} sub={deliverableAvailability === 'available' ? `${upcomingCount} upcoming` : availabilityLabel(deliverableAvailability)} mono />
         <MetricCard label="Last Activity"  value={c.lastActivity}     sub="Most recent filing"  mono />
       </div>
 
@@ -1125,7 +1186,11 @@ function OverviewTab({ contract: c, docs }) {
             <LegendDot color="var(--accent)"    label="Imported"/>
           </div>
         </div>
-        <ContractGantt contract={c} deliverables={deliverables} />
+        {deliverableAvailability === 'loading' && <Spinner label="Loading deliverable evidence…" />}
+        {deliverableAvailability === 'available' && <ContractGantt contract={c} deliverables={deliverableGroups} />}
+        {deliverableAvailability !== 'loading' && deliverableAvailability !== 'available' && (
+          <EmptyState title="No deliverable schedule available" sub={(deliverables?.limitations || [])[0] || availabilityLabel(deliverableAvailability)} />
+        )}
       </div>
     </div>
   );
@@ -1193,6 +1258,7 @@ function ContractGantt({ contract: c, deliverables }) {
             <div style={{ position:'absolute', inset:0 }}>
               {d.items.map(it => {
                 const t = new Date(it.due).getTime();
+                if (!Number.isFinite(t)) return null;
                 if (t < start || t > end) return null;
                 const pct = (t - start) / span * 100;
                 const isLate = it.late;
@@ -1257,6 +1323,42 @@ function LegendDot({ color, border, label }) {
       <span>{label}</span>
     </div>
   );
+}
+
+function availabilityLabel(value) {
+  const map = {
+    loading: 'Loading evidence',
+    available: 'backend evidence',
+    not_extracted: 'not extracted',
+    processing_pending: 'processing pending',
+    source_absent: 'source absent',
+    provider_unavailable: 'provider unavailable',
+    not_applicable: 'not applicable',
+    error: 'unavailable',
+  };
+  return map[value] || String(value || 'unavailable').replace(/_/g, ' ');
+}
+
+function normalizeBackendDeliverables(payload) {
+  if (!payload?.groups) return [];
+  return payload.groups.map(group => ({
+    id: group.key,
+    cdrl: group.cdrl_item || '—',
+    title: group.title || 'Deliverable',
+    kind: 'recurring',
+    cadence: 'Extracted evidence',
+    recipient: 'Contract file',
+    items: (group.items || []).map(item => {
+      const due = item.planned_due_date || item.actual_delivery_date || null;
+      return {
+        id: item.id,
+        due,
+        filed: Boolean(item.actual_delivery_date || item.status === 'reported' || item.status === 'on_time' || item.status === 'late'),
+        late: item.status === 'late' || Number(item.days_late || 0) > 0,
+        title: item.period_label || item.deliverable_name || group.title || 'Deliverable',
+      };
+    }),
+  })).filter(group => group.items.length > 0);
 }
 
 // ─── DOCUMENTS TAB ──────────────────────────────────────────────────────────
@@ -1397,33 +1499,19 @@ function DocumentsTab({ docs, contract, onUpload }) {
 }
 
 // ─── CONTRACT INSIGHTS TAB — findings → patterns → similar contracts ────────
-function ContractInsightsTab({ contract: c, findings: propFindings, onSelectContract }) {
-  const findings = propFindings || FINDINGS[c.id] || FINDINGS.c1;
-  const [pinnedSet, setPinnedSet] = useState(() => new Set(loadCustomInsights().map(i => i.id)));
-
-  function togglePin(finding) {
-    const key = `pinned-${c.id}-${finding.id}`;
-    if (pinnedSet.has(key)) {
-      unpinFindingFromLibrary(c, finding);
-      setPinnedSet(prev => { const n = new Set(prev); n.delete(key); return n; });
-    } else {
-      pinFindingToLibrary(c, finding);
-      setPinnedSet(prev => { const n = new Set(prev); n.add(key); return n; });
-    }
-  }
-
+function ContractInsightsTab({ contract: c, findings, onSelectContract }) {
   return (
     <div style={{ padding:'24px 24px 48px' }}>
       <SectionHeader
         title="Findings on this contract"
-        subtitle={`${findings.length} specific issues flagged from filed documents — pin any to your Insights Library to track across the portfolio`}
+        subtitle={`${findings.length} specific issues flagged from filed documents`}
       />
       <div style={{ display:'grid', gap:14 }}>
+        {findings.length === 0 && (
+          <EmptyState title="No extracted findings" sub="Run document processing or upload reports with extractable performance issues." />
+        )}
         {findings.map(f => {
           const sev = SEVERITY_META[f.severity];
-          const theme = THEMES.find(t => t.id === f.themeId);
-          const pinKey = `pinned-${c.id}-${f.id}`;
-          const isPinned = pinnedSet.has(pinKey);
           return (
             <div key={f.id} style={{
               background:'var(--surface)', border:'1px solid var(--border)',
@@ -1440,11 +1528,6 @@ function ContractInsightsTab({ contract: c, findings: propFindings, onSelectCont
                   <span style={{ fontSize:10, color:'var(--ink-faint)', fontFamily:'var(--mono)', letterSpacing:'0.06em' }}>
                     SOURCE → {f.sourceDoc}
                   </span>
-                  {isPinned && <Tag tone="accent">⚑ Pinned to library</Tag>}
-                  <BtnSecondary
-                    style={{ padding:'4px 10px', fontSize:11, marginLeft:'auto' }}
-                    onClick={() => togglePin(f)}
-                  >{isPinned ? '⚑ Unpin' : '⚑ Pin to library'}</BtnSecondary>
                 </div>
                 <div style={{ fontSize:15, fontWeight:600, color:'var(--ink)', lineHeight:1.4, marginBottom:8 }}>{f.claim}</div>
                 <div style={{ fontSize:12, color:'var(--ink-mute)', lineHeight:1.6 }}>
@@ -1453,34 +1536,18 @@ function ContractInsightsTab({ contract: c, findings: propFindings, onSelectCont
               </div>
 
               {/* Pattern link */}
-              {theme && (
-                <div style={{
-                  borderTop:'1px dashed var(--border-md)',
-                  background:'var(--surface-alt)',
-                  padding:'12px 22px',
-                }}>
-                  <div style={{ fontSize:9.5, fontWeight:700, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)', marginBottom:6 }}>↳ Matches portfolio theme</div>
-                  <div style={{ fontSize:13, fontWeight:600, color:'var(--ink)', marginBottom:4 }}>{theme.title}</div>
-                  <div style={{ fontSize:11.5, color:'var(--ink-mute)', lineHeight:1.5 }}>
-                    {theme.flagged} of {theme.total} {theme.psc} contracts show this pattern. {theme.insight}
-                  </div>
-                </div>
-              )}
-
               {/* Similar contracts */}
               {f.similar && f.similar.length > 0 && (
                 <div style={{ borderTop:'1px solid var(--border)', padding:'12px 22px 14px' }}>
                   <div style={{ fontSize:9.5, fontWeight:700, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)', marginBottom:8 }}>Other contracts informing this analysis</div>
                   {f.similar.map((s, i) => {
-                    const ctr = MOCK_CONTRACTS.find(c2 => c2.id === s.id);
                     return (
-                      <div key={s.id} onClick={() => ctr && onSelectContract && onSelectContract(ctr)} style={{
+                      <div key={s.id} style={{
                         display:'grid', gridTemplateColumns:'160px 1fr 16px', gap:14, alignItems:'center',
                         padding:'8px 0',
                         borderBottom: i < f.similar.length-1 ? '1px solid var(--border)' : 'none',
-                        cursor:'pointer',
                       }}>
-                        <span style={{ fontFamily:'var(--mono)', fontSize:11.5, fontWeight:600, color:'var(--accent)' }}>{ctr?.number || s.id}</span>
+                        <span style={{ fontFamily:'var(--mono)', fontSize:11.5, fontWeight:600, color:'var(--accent)' }}>{s.number || s.id}</span>
                         <div style={{ minWidth:0 }}>
                           <div style={{ fontSize:12.5, color:'var(--ink)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{s.label}</div>
                           <div style={{ fontSize:11, color:'var(--ink-mute)', marginTop:1 }}>{s.detail}</div>
@@ -1647,30 +1714,16 @@ function InsightsTab({ psc, naics, embedded, onSelectContract, customInsights = 
 }
 
 function InsightsPage({ onSelectContract }) {
-  const [customInsights, setCustomInsights] = useState(() => loadCustomInsights());
-
-  // Re-read pinned insights on focus / visibility change so the library stays
-  // in sync after the user pins something from a contract page in another tab
-  // or simply navigates back here.
+  const [portfolio, setPortfolio] = useState(null);
+  const [error, setError] = useState(false);
   useEffect(() => {
-    function refresh() { setCustomInsights(loadCustomInsights()); }
-    window.addEventListener('focus', refresh);
-    document.addEventListener('visibilitychange', refresh);
-    return () => {
-      window.removeEventListener('focus', refresh);
-      document.removeEventListener('visibilitychange', refresh);
-    };
+    let cancelled = false;
+    getPortfolioThemes('fy26')
+      .then(data => { if (!cancelled) { setPortfolio(data); setError(false); } })
+      .catch(() => { if (!cancelled) setError(true); });
+    return () => { cancelled = true; };
   }, []);
-
-  function unpinInsight(id) {
-    setCustomInsights(prev => {
-      const next = prev.filter(i => i.id !== id);
-      saveCustomInsights(next);
-      return next;
-    });
-  }
-
-  const totalCount = INSIGHTS.length + customInsights.length;
+  const themes = portfolio?.themes || [];
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
       <TopBar crumbs={['Insights']} />
@@ -1683,19 +1736,17 @@ function InsightsPage({ onSelectContract }) {
           <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.18em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)', marginBottom:6 }}>Cross-portfolio</div>
           <h1 style={{ fontSize:22, fontWeight:700, letterSpacing:'-0.02em', color:'var(--ink)' }}>Insights Library</h1>
           <p style={{ fontSize:12, color:'var(--ink-mute)', marginTop:4 }}>
-            {totalCount} findings{customInsights.length > 0 ? ` · ${customInsights.length} pinned from contracts` : ''} · pin findings from a contract's Insights tab to track them here
+            {themes.length} backend evidence themes · generated from processed findings, facts, signals, and hypotheses
           </p>
         </div>
-        <div style={{ display:'flex', gap:8 }}>
-          <BtnSecondary onClick={() => downloadInsightLibrary([...customInsights, ...INSIGHTS], loadFlaggedInsights())}>Export library (PDF)</BtnSecondary>
-        </div>
       </div>
-      <div style={{ flex:1, overflowY:'auto', background:'var(--bg)' }}>
-        <InsightsTab
-          onSelectContract={onSelectContract}
-          customInsights={customInsights}
-          onUnpin={unpinInsight}
-        />
+      <div style={{ flex:1, overflowY:'auto', background:'var(--bg)', padding:'20px 24px' }}>
+        {!portfolio && !error && <Spinner label="Loading backend insights…" />}
+        {themes.map(theme => <ThemeCard key={theme.id} theme={theme} onSelectContract={onSelectContract} />)}
+        {portfolio && themes.length === 0 && (
+          <EmptyState title="No backend insights yet" sub={(portfolio.limitations || [])[0] || 'Process contract documents to create evidence-backed themes.'} />
+        )}
+        {error && <EmptyState title="Insights unavailable" sub="Backend portfolio evidence could not be loaded." />}
       </div>
     </div>
   );
@@ -1711,16 +1762,6 @@ const BENCHMARK_AXIS_META = {
   regulatory_compliance:{ label: 'Compliance Signals',          primaryKey: 'compliance_signal_count',      lowerBetter: true },
   forecasting_accuracy:{ label: 'EAC Drift (× BAC)',            primaryKey: 'eac_drift',                    lowerBetter: true },
 };
-
-const BENCHMARK_MOCK_ROWS = [
-  { metric:'Cost Performance Index (CPI)',    value:'0.96', peer:'0.94', delta:'+0.02', tone:'good' },
-  { metric:'Schedule Performance Index (SPI)',value:'0.91', peer:'0.93', delta:'-0.02', tone:'warn' },
-  { metric:'Weekly Report On-Time Rate',      value:'78%',  peer:'85%',  delta:'-7pp',  tone:'flag' },
-  { metric:'Modification Cycle Time (days)',  value:'38',   peer:'31',   delta:'+7',    tone:'warn' },
-  { metric:'Invoice → Payment (days)',        value:'19',   peer:'24',   delta:'-5',    tone:'good' },
-  { metric:'CPARS Score (most recent)',       value:'4.1 / 5', peer:'3.8 / 5', delta:'+0.3', tone:'good' },
-  { metric:'Sub-tier Reporting Compliance',  value:'92%',  peer:'88%',  delta:'+4pp',  tone:'good' },
-];
 
 function _benchmarkRows(analysis) {
   if (!analysis) return null;
@@ -1776,16 +1817,18 @@ function _cparsRatingTone(rating) {
 
 function BenchmarksTab({ contract: c, analysis }) {
   const realRows = _benchmarkRows(analysis);
-  const rows = realRows || BENCHMARK_MOCK_ROWS;
-  const isMock = !realRows;
+  const rows = realRows || [];
   const toneClr = { good:'var(--good)', warn:'var(--warn)', flag:'var(--flag)' };
 
   return (
     <div style={{ padding:'24px 24px 48px' }}>
       <SectionHeader
         title={`Benchmarks for ${c.psc} · ${c.component}`}
-        subtitle={`Comparing against peer cohort of contracts with the same PSC and component`}
+        subtitle="Measured only from extracted backend primitives and visible cohort evidence"
       />
+      {!analysis && <Spinner label="Loading benchmark evidence…" />}
+      {analysis && rows.length === 0 && <EmptyState title="No benchmark axes available" sub="Run contract analysis after extracting report primitives." />}
+      {rows.length > 0 && (
       <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:4, overflow:'hidden' }}>
         <table style={{ width:'100%', borderCollapse:'collapse' }}>
           <thead>
@@ -1812,12 +1855,12 @@ function BenchmarksTab({ contract: c, analysis }) {
                   <td style={{ padding:'12px 16px', fontSize:12, fontFamily:'var(--mono)', color:'var(--ink-mute)', textAlign:'right' }}>{r.peer}</td>
                   <td style={{ padding:'12px 16px', fontSize:12, fontFamily:'var(--mono)', fontWeight:600, color:toneClr[r.tone], textAlign:'right' }}>{r.delta}</td>
                   <td style={{ padding:'12px 16px', minWidth:160 }}>
-                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                    {Number.isFinite(num) && Number.isFinite(peer) ? <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                       <div style={{ flex:1, height:8, background:'var(--surface-alt)', borderRadius:1, position:'relative', border:'1px solid var(--border)' }}>
                         <div style={{ position:'absolute', left:0, top:0, bottom:0, width:`${(num/max)*100}%`, background:toneClr[r.tone] }}/>
                         <div style={{ position:'absolute', left:`${(peer/max)*100}%`, top:-2, bottom:-2, width:1.5, background:'var(--ink)' }}/>
                       </div>
-                    </div>
+                    </div> : <span style={{ fontSize:11, color:'var(--ink-mute)' }}>{r.rationale}</span>}
                   </td>
                 </tr>
               );
@@ -1825,22 +1868,25 @@ function BenchmarksTab({ contract: c, analysis }) {
           </tbody>
         </table>
       </div>
-      {isMock && (
-        <div style={{ marginTop:8, fontSize:11, color:'var(--ink-faint)', fontFamily:'var(--mono)' }}>
-          Illustrative benchmarks shown — process documents to generate real comparisons.
-        </div>
       )}
-      {!isMock && rows.some(r => r.metric.endsWith('†')) && (
+      {rows.some(r => r.metric.endsWith('†')) && (
         <div style={{ marginTop:8, fontSize:11, color:'var(--ink-faint)', fontFamily:'var(--mono)' }}>
           † Low confidence — fewer than 20 peer contracts in cohort.
         </div>
       )}
       <div style={{ marginTop:14, fontSize:11, color:'var(--ink-faint)', fontFamily:'var(--mono)', letterSpacing:'0.04em', display:'flex', gap:18 }}>
         <span><span style={{display:'inline-block', width:10, height:6, background:'var(--ink)', verticalAlign:'middle', marginRight:4}}/>Peer median</span>
-        <span>Cohort: same PSC + component · last 36 months</span>
+        <span>{analysis?.limitations?.[0] || 'Cohort values come from visible backend contract records.'}</span>
       </div>
     </div>
   );
+}
+
+function summarizeAxisValue(value) {
+  const entries = Object.entries(value || {});
+  if (!entries.length) return 'measured';
+  const [key, val] = entries[0];
+  return `${key.replace(/_/g, ' ')}: ${String(val)}`;
 }
 
 // ─── DOCUMENTS PAGE (cross-contract) ────────────────────────────────────────
@@ -1867,10 +1913,7 @@ function DocumentsPage({ onSelectContract }) {
     return () => { cancelled = true; };
   }, []);
 
-  const docsByContract = backendGroups && backendGroups.length > 0 ? backendGroups : MOCK_CONTRACTS.map(c => ({
-    contract: c,
-    docs: buildDocs(c).slice(0, 5),
-  }));
+  const docsByContract = backendGroups || [];
   const totalDocs = docsByContract.reduce((n, g) => n + g.docs.length, 0);
 
   const [typeFilter, setTypeFilter] = useState('all');
@@ -1907,7 +1950,7 @@ function DocumentsPage({ onSelectContract }) {
       <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', padding:'18px 24px' }}>
         <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.18em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)', marginBottom:6 }}>Portfolio</div>
         <h1 style={{ fontSize:22, fontWeight:700, letterSpacing:'-0.02em', color:'var(--ink)' }}>All Documents</h1>
-        <p style={{ fontSize:12, color:'var(--ink-mute)', marginTop:4 }}>{totalDocs} documents across {MOCK_CONTRACTS.length} contracts · grouped by contract</p>
+        <p style={{ fontSize:12, color:'var(--ink-mute)', marginTop:4 }}>{totalDocs} documents across {docsByContract.length} contracts · grouped by contract</p>
       </div>
 
       <div style={{ padding:'12px 24px', display:'flex', alignItems:'center', gap:14, borderBottom:'1px solid var(--border)', background:'var(--surface)', flexWrap:'wrap' }}>
@@ -1926,8 +1969,12 @@ function DocumentsPage({ onSelectContract }) {
       </div>
 
       <div style={{ flex:1, overflowY:'auto', background:'var(--bg)', padding:'18px 24px 32px' }}>
-        {visibleGroups.length === 0 && (
-          <EmptyState title="No documents match" sub="Try a different filter combination."/>
+        {backendGroups === null && <Spinner label="Loading document records…" />}
+        {backendGroups !== null && visibleGroups.length === 0 && (
+          <EmptyState
+            title={totalDocs === 0 ? "No backend documents available" : "No documents match"}
+            sub={totalDocs === 0 ? "Upload or process documents to populate this view." : "Try a different filter combination."}
+          />
         )}
         <div style={{ display:'grid', gap:14 }}>
           {visibleGroups.map(({ contract: c, filteredDocs }) => {
@@ -2154,13 +2201,20 @@ function buildDocPreview(doc) {
   ].join('\n');
 }
 
-function downloadDocAsText(doc) {
-  const content = `${doc.title}\n${'─'.repeat(64)}\n\n${buildDocPreview(doc)}\n`;
-  const blob = new Blob([content], { type: 'text/plain' });
+async function downloadDocAsText(doc) {
+  let blob;
+  let filename = doc.filename || `${doc.id}.txt`;
+  try {
+    blob = await downloadDocumentBlob(doc.id);
+  } catch {
+    const content = `${doc.title}\n${'-'.repeat(64)}\n\nThe original file could not be downloaded from backend storage.\n`;
+    blob = new Blob([content], { type: 'text/plain' });
+    filename = filename.replace(/\.(pdf|docx?|xlsx?|xml)$/i, '.txt');
+  }
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = (doc.filename || `${doc.id}.txt`).replace(/\.(pdf|docx?|xlsx?|xml)$/i, '.txt');
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -2168,9 +2222,20 @@ function downloadDocAsText(doc) {
 }
 
 function DocumentViewerModal({ doc, onClose }) {
+  const [detail, setDetail] = useState(null);
+  const [detailError, setDetailError] = useState(false);
+  useEffect(() => {
+    if (!doc?.id) return undefined;
+    let cancelled = false;
+    getDocument(doc.id)
+      .then(row => { if (!cancelled) { setDetail(row); setDetailError(false); } })
+      .catch(() => { if (!cancelled) setDetailError(true); });
+    return () => { cancelled = true; };
+  }, [doc?.id]);
   if (!doc) return null;
   const meta = DOC_TYPE_META[doc.doc_type] || { abbr:'DOC', tone:'default' };
-  const preview = buildDocPreview(doc);
+  const pageText = detail?.pages?.map(p => p.text).filter(Boolean).join('\n\n');
+  const preview = pageText || (detailError ? 'Extracted text is not available for this document.' : 'Loading extracted text…');
   return (
     <div onClick={onClose} style={{
       position:'fixed', inset:0, background:'rgba(10,25,41,0.55)',
@@ -2389,33 +2454,10 @@ function ContractorHome({ user, onSelectContract }) {
       });
     return () => { cancelled = true; };
   }, []);
-  const myContracts = backendContracts && backendContracts.length > 0 ? backendContracts : contractsForContractor(user);
+  const myContracts = backendContracts || [];
   const today = new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' });
   const firstName = (user?.name || 'Contractor').split(' ')[0];
-  const [filedHere, setFiledHere] = useState(() => new Set());
   const [uploadTarget, setUploadTarget] = useState(null);
-
-  function pickOverdueForContract(c) {
-    const dels = buildDeliverables(c);
-    const now = Date.now();
-    const open = dels.flatMap(group => group.items
-      .filter(i => !i.filed && !filedHere.has(`${c.id}|${i.id}`))
-      .map(i => ({ group, item:i, due: new Date(i.due).getTime() })));
-    const overdue = open.filter(r => r.due < now).sort((a,b) => a.due - b.due);
-    if (overdue.length >= 2) return overdue.slice(0, 2);
-    // Top up with the soonest upcoming items so each contract has 2 rows.
-    const upcoming = open.filter(r => r.due >= now).sort((a,b) => a.due - b.due);
-    return [...overdue, ...upcoming].slice(0, 2);
-  }
-
-  function handleFiled(c, item) {
-    setFiledHere(prev => {
-      const next = new Set(prev);
-      next.add(`${c.id}|${item.id}`);
-      return next;
-    });
-    setUploadTarget(null);
-  }
 
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
@@ -2441,12 +2483,11 @@ function ContractorHome({ user, onSelectContract }) {
         {/* My contracts */}
         <div style={{ fontSize:11, fontWeight:700, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)', marginBottom:10 }}>My contracts</div>
         <div style={{ display:'grid', gap:14 }}>
+          {backendContracts === null && <Spinner label="Loading your contracts…" />}
+          {backendContracts !== null && myContracts.length === 0 && (
+            <EmptyState title="No visible contract records" sub="Your account does not currently have access to any contract records." />
+          )}
           {myContracts.map(c => {
-            const dels = buildDeliverables(c);
-            const all = dels.flatMap(d => d.items);
-            const filed = all.filter(i => i.filed).length;
-            const overdue = all.filter(i => !i.filed && new Date(i.due).getTime() < Date.now()).length;
-            const rows = pickOverdueForContract(c);
             return (
               <div key={c.id} style={{
                 background:'var(--surface)', border:'1px solid var(--border)', borderRadius:4,
@@ -2465,53 +2506,13 @@ function ContractorHome({ user, onSelectContract }) {
                     <div style={{ fontSize:14, fontWeight:600, color:'var(--ink)' }}>{c.title}</div>
                     <div style={{ fontSize:11, color:'var(--ink-mute)', marginTop:3, fontFamily:'var(--mono)' }}>{c.period} · CO {c.co}</div>
                   </div>
-                  <KpiMini label="Filed"   value={`${filed}/${all.length}`} />
-                  <KpiMini label="Overdue" value={overdue} flag={overdue > 0} />
+                  <KpiMini label="Docs"    value={c.docsCount || 0} />
                   <KpiMini label="Elapsed" value={`${c.elapsed}%`} />
+                  <BtnPrimary
+                    style={{ padding:'5px 12px', fontSize:11.5, justifySelf:'end' }}
+                    onClick={(e) => { e.stopPropagation(); setUploadTarget({ contract: c }); }}
+                  >Upload</BtnPrimary>
                   <IcoChevron/>
-                </div>
-
-                {/* Per-deliverable rows — upload only, no click-through */}
-                <div>
-                  {rows.length === 0 && (
-                    <div style={{ padding:'14px 22px', fontSize:11.5, color:'var(--ink-faint)', fontFamily:'var(--mono)', letterSpacing:'0.04em' }}>
-                      All deliverables filed.
-                    </div>
-                  )}
-                  {rows.map((row, i) => {
-                    const status = deliverableStatus(row.item);
-                    const meta = STATUS_META[status];
-                    return (
-                      <div key={row.item.id} style={{
-                        display:'grid', gridTemplateColumns:'130px 1fr 110px 110px 110px',
-                        gap:16, alignItems:'center',
-                        padding:'12px 22px',
-                        borderTop: i > 0 ? '1px solid var(--border)' : 'none',
-                        background:'var(--surface-alt)',
-                      }}>
-                        <div style={{ fontFamily:'var(--mono)', fontSize:11.5, fontWeight:600, color:'var(--accent)' }}>
-                          {row.group.cdrl !== '—' ? `CDRL ${row.group.cdrl}` : row.group.title.split(' ')[0]}
-                        </div>
-                        <div>
-                          <div style={{ fontSize:13, fontWeight:600, color:'var(--ink)' }}>{row.group.title}</div>
-                          <div style={{ fontSize:11, color:'var(--ink-mute)', marginTop:2, fontFamily:'var(--mono)' }}>{row.item.title}</div>
-                        </div>
-                        <div style={{ fontSize:11, fontFamily:'var(--mono)', color:'var(--ink-soft)' }}>
-                          DUE {new Date(row.item.due).toLocaleDateString('en-US',{day:'2-digit', month:'short'}).toUpperCase()}
-                        </div>
-                        <span style={{
-                          justifySelf:'start',
-                          fontSize:9.5, fontWeight:700, letterSpacing:'0.10em', textTransform:'uppercase',
-                          color:meta.color, background:meta.bg, border:`1px solid ${meta.border}`,
-                          padding:'2px 8px', borderRadius:2, fontFamily:'var(--mono)',
-                        }}>{meta.label}</span>
-                        <BtnPrimary
-                          style={{ padding:'5px 12px', fontSize:11.5, justifySelf:'end' }}
-                          onClick={() => setUploadTarget({ contract: c, group: row.group, item: row.item })}
-                        >Upload</BtnPrimary>
-                      </div>
-                    );
-                  })}
                 </div>
               </div>
             );
@@ -2523,7 +2524,7 @@ function ContractorHome({ user, onSelectContract }) {
         <UploadModal
           contract={uploadTarget.contract}
           onClose={() => setUploadTarget(null)}
-          onUploaded={() => handleFiled(uploadTarget.contract, uploadTarget.item)}
+          onUploaded={() => setUploadTarget(null)}
         />
       )}
     </div>
@@ -2571,33 +2572,27 @@ function _normalizeDeliverableGroups(rows) {
 // Two columns: contract particulars (left) + deliverables-as-upload-targets (right)
 function ContractorContractPage({ contract, user, onBack }) {
   const c = contract;
-  const [docs, setDocs] = useState(() => buildDocs(c));
-  const [deliverables, setDeliverables] = useState(() => buildDeliverables(c));
+  const [docs, setDocs] = useState([]);
+  const [deliverables, setDeliverables] = useState(null);
   const [uploadTarget, setUploadTarget] = useState(null);
   const [freeUpload, setFreeUpload] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    setDocs(buildDocs(c));
-    setDeliverables(buildDeliverables(c));
+    setDocs([]);
+    setDeliverables(null);
     listContractDocuments(c.id)
       .then(rows => {
-        if (!cancelled && rows.length > 0) setDocs(rows.map(row => normalizeDocument(row, c)));
+        if (!cancelled) setDocs(rows.map(row => normalizeDocument(row, c)));
       })
-      .catch(() => {});
-    listDeliverables(c.id)
-      .then(rows => {
-        if (!cancelled && rows.length > 0) setDeliverables(_normalizeDeliverableGroups(rows));
-      })
-      .catch(() => {});
+      .catch(() => { if (!cancelled) setDocs([]); });
+    getContractDeliverables(c.id)
+      .then(row => { if (!cancelled) setDeliverables(row); })
+      .catch(() => { if (!cancelled) setDeliverables({ availability:'error', groups:[], limitations:['Deliverable evidence could not be loaded.'] }); });
     return () => { cancelled = true; };
   }, [c.id]);
 
   function handleFiled(groupId, itemId, doc) {
-    setDeliverables(ds => ds.map(g => g.id === groupId
-      ? { ...g, items: g.items.map(i => i.id === itemId ? { ...i, filed:true, late:false } : i) }
-      : g
-    ));
     setDocs(prev => [doc, ...prev]);
     setUploadTarget(null);
   }
@@ -2677,13 +2672,17 @@ function ContractorContractPage({ contract, user, onBack }) {
             </div>
 
             <div style={{ marginTop:14, display:'grid', gap:14 }}>
-              {deliverables.map(group => (
+              {deliverables === null && <Spinner label="Loading deliverable evidence…" />}
+              {deliverables?.availability === 'available' && normalizeBackendDeliverables(deliverables).map(group => (
                 <DeliverableGroupCard
                   key={group.id}
                   group={group}
                   onClickItem={(it) => !it.filed && setUploadTarget({ group, item: it })}
                 />
               ))}
+              {deliverables && deliverables.availability !== 'available' && (
+                <EmptyState title="No deliverable schedule available" sub={(deliverables.limitations || [])[0] || availabilityLabel(deliverables.availability)} />
+              )}
             </div>
           </div>
         </div>
@@ -3088,9 +3087,8 @@ function PSCMultiSelect({ categories, codes, onChange, codeOptions, width = 260 
 }
 
 // ─── NEW-CONTRACT (LOG) MODAL ───────────────────────────────────────────────
-// Mock "upload contract → extract fields" flow. Drops in a file, simulates
-// extraction with a brief spinner, then surfaces editable fields the user
-// can confirm before adding to the portfolio.
+// Uses filename hints to prefill editable fields, then lets inline backend
+// processing extract the real source-contract evidence after upload.
 function NewContractModal({ onClose, onCreated }) {
   const [stage, setStage] = useState('drop'); // drop → extracting → review
   const [file, setFile] = useState(null);
@@ -3157,7 +3155,7 @@ function NewContractModal({ onClose, onCreated }) {
         <div style={{ padding:'16px 22px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
           <div>
             <div style={{ fontSize:10, fontWeight:700, color:'var(--ink-mute)', letterSpacing:'0.14em', textTransform:'uppercase', fontFamily:'var(--mono)' }}>Log Contract</div>
-            <div style={{ fontSize:14, fontWeight:600, color:'var(--ink)', marginTop:2 }}>Upload contract document — fields will be extracted</div>
+            <div style={{ fontSize:14, fontWeight:600, color:'var(--ink)', marginTop:2 }}>Upload contract document — review filename hints</div>
           </div>
           <button type="button" onClick={onClose} style={{ background:'none', border:'none', color:'var(--ink-mute)', cursor:'pointer' }}><IcoClose/></button>
         </div>
@@ -3178,7 +3176,7 @@ function NewContractModal({ onClose, onCreated }) {
               <input ref={fileRef} type="file" style={{ display:'none' }} onChange={e => pickFile(e.target.files[0])}/>
               <div style={{ marginBottom:10, color:'var(--ink-faint)' }}><IcoUpload/></div>
               <div style={{ fontSize:13, fontWeight:600, color:'var(--ink)' }}>Drop the contract PDF or click to browse</div>
-              <div style={{ fontSize:11, color:'var(--ink-mute)', marginTop:4, fontFamily:'var(--mono)' }}>We'll extract the contract number, CO, PSC, NAICS, value, and period.</div>
+              <div style={{ fontSize:11, color:'var(--ink-mute)', marginTop:4, fontFamily:'var(--mono)' }}>Filename hints prefill the form; backend processing extracts source evidence after upload.</div>
             </div>
           </div>
         )}
@@ -3186,7 +3184,7 @@ function NewContractModal({ onClose, onCreated }) {
         {stage === 'extracting' && (
           <div style={{ padding:'40px 22px', textAlign:'center' }}>
             <Spinner />
-            <div style={{ fontSize:13, fontWeight:600, color:'var(--ink)', marginTop:14 }}>Extracting contract metadata…</div>
+            <div style={{ fontSize:13, fontWeight:600, color:'var(--ink)', marginTop:14 }}>Preparing filename hints…</div>
             <div style={{ fontSize:11, color:'var(--ink-mute)', marginTop:6, fontFamily:'var(--mono)' }}>{file?.name}</div>
           </div>
         )}
@@ -3194,7 +3192,7 @@ function NewContractModal({ onClose, onCreated }) {
         {stage === 'review' && (
           <form onSubmit={commit}>
             <div style={{ padding:'18px 22px' }}>
-              <div style={{ fontSize:10, fontWeight:700, color:'var(--ink-mute)', letterSpacing:'0.14em', textTransform:'uppercase', fontFamily:'var(--mono)', marginBottom:10 }}>Extracted from {file?.name}</div>
+              <div style={{ fontSize:10, fontWeight:700, color:'var(--ink-mute)', letterSpacing:'0.14em', textTransform:'uppercase', fontFamily:'var(--mono)', marginBottom:10 }}>Filename hints from {file?.name}</div>
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
                 {[
                   ['number',     'Contract Number *', false],
@@ -3244,9 +3242,46 @@ function parseMoney(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function compactCurrency(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '$0';
+  if (numeric >= 1_000_000_000) return `$${(numeric / 1_000_000_000).toFixed(1)}B`;
+  if (numeric >= 1_000_000) return `$${Math.round(numeric / 1_000_000)}M`;
+  if (numeric >= 1_000) return `$${Math.round(numeric / 1_000)}K`;
+  return `$${Math.round(numeric)}`;
+}
+
+function normalizeThemeContract(row) {
+  return {
+    ...row,
+    id: row.id,
+    number: row.number || row.contract_number || row.id,
+    title: row.title || row.number || row.id,
+    psc: row.psc || row.psc_code || 'UNK',
+    component: row.component || row.office_name || row.agency_name || 'Unassigned',
+    value: row.value || compactCurrency(row.obligated_value || 0),
+    start: row.start || row.period_start || '2026-01-01',
+    end: row.end || row.period_end || '2027-12-31',
+    docsCount: row.document_count || row.evidence_count || 0,
+    contractor: row.vendor_name || row.contractor || 'TBD',
+    co: row.contracting_officer || row.co || 'TBD',
+    classification: row.security_level || row.classification || 'STANDARD',
+  };
+}
+
+function themeMatchesServiceCode(theme, serviceCode) {
+  if (!theme?.psc) return false;
+  if (serviceCode.endsWith('-codes')) return String(theme.psc).startsWith(serviceCode[0]);
+  return theme.psc === serviceCode;
+}
+
+function periodParam(period) {
+  return String(period || '').toLowerCase().replace(/\s+/g, '_');
+}
+
 function extractFromFilename(name) {
-  // Mock extraction. Try to pull a contract-number-shaped token from the name;
-  // otherwise return a plausible default set the user can edit.
+  // Filename hinting only. The uploaded document is processed by the backend
+  // after the contract record is created.
   const numMatch = name.match(/[Nn]\d{5}-\d{2}-[A-Z]-\d{4}/);
   const number = numMatch ? numMatch[0].toUpperCase() : 'N00024-26-C-' + Math.floor(1000 + Math.random() * 9000);
   return {

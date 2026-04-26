@@ -287,7 +287,7 @@ def _store_deliverables(
     rows = []
     for item in items:
         rows.append((
-            str(uuid.uuid4()), run_id, doc_id,
+            str(uuid.uuid4()), run_id, contract_id,
             json.dumps([doc_id]),
             None,  # period_label set on run, not repeated here
             item.get("deliverable_name"),
@@ -321,7 +321,7 @@ def _store_financial(
     rows = []
     for item in items:
         rows.append((
-            str(uuid.uuid4()), run_id, doc_id,
+            str(uuid.uuid4()), run_id, contract_id,
             json.dumps([doc_id]),
             None,
             _parse_date(item.get("period_end_date")),
@@ -363,7 +363,7 @@ def _store_decisions(
     rows = []
     for item in items:
         rows.append((
-            str(uuid.uuid4()), run_id, doc_id,
+            str(uuid.uuid4()), run_id, contract_id,
             json.dumps([doc_id]),
             None,
             item.get("decision_type"),
@@ -398,7 +398,7 @@ def _store_issues(
     rows = []
     for item in items:
         rows.append((
-            str(uuid.uuid4()), run_id, doc_id,
+            str(uuid.uuid4()), run_id, contract_id,
             json.dumps([doc_id]),
             None,
             item.get("issue_id"),
@@ -434,7 +434,7 @@ def _store_personnel(
     rows = []
     for item in items:
         rows.append((
-            str(uuid.uuid4()), run_id, doc_id,
+            str(uuid.uuid4()), run_id, contract_id,
             json.dumps([doc_id]),
             None,
             item.get("role"),

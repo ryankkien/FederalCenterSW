@@ -69,6 +69,14 @@ export async function getDocument(documentId: string) {
   return request(`/api/documents/${encodeURIComponent(documentId)}`);
 }
 
+export async function downloadDocumentBlob(documentId: string) {
+  const response = await fetch(`/api/documents/${encodeURIComponent(documentId)}/download`, {
+    headers: authHeaders(),
+  });
+  if (!response.ok) throw new Error(`Request failed with ${response.status}`);
+  return response.blob();
+}
+
 export async function uploadDocument({
   contractId,
   title,
@@ -110,8 +118,19 @@ export async function getContractAnalysis(contractId: string) {
   return request(`/api/analysis/contracts/${encodeURIComponent(contractId)}`);
 }
 
+export async function getContractDeliverables(contractId: string) {
+  return request(`/api/contracts/${encodeURIComponent(contractId)}/deliverables`);
+}
+
 export async function getContractCohort(contractId: string) {
   return request(`/api/contracts/${encodeURIComponent(contractId)}/cohort`);
+}
+
+export async function getPortfolioThemes(period?: string) {
+  const params = new URLSearchParams();
+  if (period) params.set('period', period);
+  const suffix = params.toString() ? `?${params}` : '';
+  return request(`/api/portfolio/themes${suffix}`);
 }
 
 export function normalizeContract(row: any) {

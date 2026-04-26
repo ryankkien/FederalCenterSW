@@ -254,6 +254,15 @@ bun run infra:deploy
   can create contract records through `POST /api/contracts` and may request
   `process_inline=true` on upload when the portal needs immediate extraction-backed
   behavior for source contract logging or report review.
+- The official home page uses `/api/portfolio/themes` for backend-computed portfolio
+  KPIs and cross-contract themes. Theme counts and linked contracts should come from
+  processed regression findings, hypotheses, report facts, and performance signals;
+  prototype UI theme fixtures must not be presented as real backend evidence.
+- Contract and contractor deliverable schedules use
+  `GET /api/contracts/{contract_id}/deliverables`. The endpoint returns availability
+  states such as `available`, `processing_pending`, `not_extracted`, and
+  `source_absent`; the frontend should show those limitations rather than generating
+  CDRL rows when backend evidence is missing.
 - Contract hard-link parentage lives on `document_uploads.contract_id`. Cross-contract
   and cross-document pattern relationships live in semantic link tables and must not
   rewrite the hard parent contract.
@@ -270,6 +279,10 @@ bun run infra:deploy
   `cpars_ratings`, modifications populate `contract_primitives_decisions` and append
   `baseline_revisions`, and GAO/OIG reports are linked as official
   `external_source_refs` rather than treated as contract artifacts.
+- Completed processing runs trigger deterministic typed-primitive backfill from
+  existing baselines, report facts, regression findings, and extracted text. For
+  already processed local data, use `bun run data:backfill-primitives`; documents that
+  cannot produce evidence-grounded primitives should remain visibly unavailable.
 - The knowledge wiki index stores local fixture/synthetic ingestion runs, source
   records, wiki nodes, edges, citations, and contractor evidence profiles. The
   frontend uses `/api/wiki/*` for the Grokipedia workspace; it should not rebuild the
