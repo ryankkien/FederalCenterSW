@@ -388,7 +388,10 @@ CREATE TABLE contract_hypotheses (
     metadata_json JSON,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT uq_contract_hypothesis_key UNIQUE (contract_id, hypothesis_key)
+    CONSTRAINT uq_contract_hypothesis_key UNIQUE (contract_id, hypothesis_key),
+    CONSTRAINT ck_contract_hypotheses_status CHECK (
+        status IN ('proposed','investigating','supported','contradicted','closed')
+    )
 );
 
 CREATE TABLE investigation_runs (
@@ -437,7 +440,10 @@ CREATE TABLE hypothesis_evidence (
     confidence FLOAT,
     evidence_hash VARCHAR(64),
     metadata_json JSON,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT ck_hypothesis_evidence_evidence_type CHECK (
+        evidence_type IN ('supporting','contradicting')
+    )
 );
 
 CREATE TABLE contract_similarity_links (
@@ -782,7 +788,10 @@ CREATE TABLE primitive_extraction_runs (
     period_label VARCHAR(20),
     extracted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     model VARCHAR(160),
-    status VARCHAR(20) NOT NULL DEFAULT 'success'
+    status VARCHAR(20) NOT NULL DEFAULT 'success',
+    CONSTRAINT ck_primitive_extraction_runs_status CHECK (
+        status IN ('pending','success','partial','failed','no_rows')
+    )
 );
 
 CREATE INDEX ix_primitive_extraction_runs_contract_id ON primitive_extraction_runs (contract_id);
@@ -918,7 +927,10 @@ CREATE TABLE analysis_runs (
     completed_at TIMESTAMPTZ,
     model VARCHAR(160),
     result JSON,
-    analyzed_doc_ids JSON
+    analyzed_doc_ids JSON,
+    CONSTRAINT ck_analysis_runs_status CHECK (
+        status IN ('pending','queued','running','complete','failed')
+    )
 );
 
 CREATE INDEX ix_analysis_runs_run_type ON analysis_runs (run_type);

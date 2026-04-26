@@ -435,6 +435,43 @@ def _dispatch_tool(
     return {"error": f"unknown_tool:{name}"}
 
 
+def _serialize_tool_result(result: Any, max_chars: int) -> str:
+    """Serialize a tool result to JSON, capped to ``max_chars``.
+
+    Cuts at the item boundary (for lists) or the key boundary (for dicts) so
+    the model never receives a truncated mid-string payload that would break
+    JSON parsing on the next iteration.
+    """
+    encoded = json.dumps(result, default=str)
+    if len(encoded) <= max_chars:
+        return encoded
+
+    if isinstance(result, list):
+        kept: list[Any] = []
+        running = 2  # account for "[]"
+        for item in result:
+            chunk = json.dumps(item, default=str)
+            if running + len(chunk) + 2 > max_chars:
+                break
+            kept.append(item)
+            running += len(chunk) + 2
+        return json.dumps(
+            {"items": kept, "truncated": True, "total_items": len(result)},
+            default=str,
+        )
+
+    if isinstance(result, dict):
+        truncated = {"truncated": True}
+        for key, value in result.items():
+            candidate = {**truncated, key: value}
+            if len(json.dumps(candidate, default=str)) > max_chars:
+                continue
+            truncated = candidate
+        return json.dumps(truncated, default=str)
+
+    return json.dumps({"truncated": True, "preview": str(result)[: max_chars - 64]}, default=str)
+
+
 def _summarize_tool_calls(tool_calls) -> list[dict]:
     summary = []
     for call in tool_calls or []:
@@ -517,11 +554,12 @@ def run_cross_contract_agent(
                         visible_contract_ids=visible_list,
                         investigated=investigated,
                     )
+                tool_content = _serialize_tool_result(tool_result, max_chars=8000)
                 messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": call.id,
-                        "content": json.dumps(tool_result, default=str)[:8000],
+                        "content": tool_content,
                     }
                 )
                 transcript.append(

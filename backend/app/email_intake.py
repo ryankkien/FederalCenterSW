@@ -430,10 +430,13 @@ def _inline_extracted_text(storage: BlobStorage, text_blob_path: str) -> str:
     return text
 
 
+_IMAP_TIMEOUT_SECONDS = 30
+
+
 def run_once(config: EmailIntakeConfig, limit: Optional[int] = None) -> int:
     processed_count = 0
 
-    with imaplib.IMAP4_SSL(config.host, config.port) as client:
+    with imaplib.IMAP4_SSL(config.host, config.port, timeout=_IMAP_TIMEOUT_SECONDS) as client:
         client.login(config.username, config.password)
         _check_ok(client.select(config.mailbox), f"select mailbox {config.mailbox}")
         uids = _search_uids(client, config.search_criteria)
