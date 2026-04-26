@@ -16,10 +16,8 @@ Start local dependencies:
 bun run local:up
 ```
 
-This requires Docker Desktop plus either the backend Python dependencies or Azure CLI.
-The Python Azure Blob SDK is preferred for initializing the local Azurite blob
-container, with Azure CLI as a fallback. `local:up` retries Azurite container setup for
-up to `AZURITE_SETUP_RETRIES` attempts; the default is 90 seconds for slower CI runners.
+This requires Docker Desktop. The startup script initializes the local Azurite blob
+container directly through the emulator's Blob REST endpoint.
 
 Stop local dependencies:
 
@@ -113,9 +111,13 @@ AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=http;AccountName=devsto
 
 On slow Docker hosts or cold CI runners, `local-up.sh` waits for PostgreSQL and Azurite
 before creating the blob container. Override `POSTGRES_READY_ATTEMPTS` or
-`AZURITE_SETUP_RETRIES` only when the default readiness window is not long enough.
-Compose starts Azurite with `--skipApiVersionCheck` so newer Azure CLI storage clients
-can still talk to the pinned local emulator image.
+`AZURITE_READY_ATTEMPTS` only when the default readiness window is not long enough.
+Compose starts Azurite with `--skipApiVersionCheck` so newer Blob API clients can still
+talk to the pinned local emulator image.
+
+`local-up.sh` creates the container against the emulator account explicitly. Override
+`AZURITE_ACCOUNT_NAME`, `AZURITE_ACCOUNT_KEY`, `AZURITE_BLOB_ENDPOINT`, or
+`AZURITE_API_VERSION` only when running a non-default Azurite instance.
 
 Portal uploads, fixture PDFs, and committed email attachments use the same local blob
 layout as Azure:

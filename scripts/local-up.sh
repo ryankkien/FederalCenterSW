@@ -5,60 +5,24 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$ROOT_DIR/backend/.env.local"
 ENV_EXAMPLE="$ROOT_DIR/backend/.env.local.example"
 CONTAINER_NAME="${AZURE_STORAGE_CONTAINER:-app-assets}"
+AZURITE_ACCOUNT_NAME="${AZURITE_ACCOUNT_NAME:-devstoreaccount1}"
+AZURITE_ACCOUNT_KEY="${AZURITE_ACCOUNT_KEY:-Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==}"
+AZURITE_BLOB_ENDPOINT="${AZURITE_BLOB_ENDPOINT:-http://127.0.0.1:10000/devstoreaccount1}"
+AZURITE_API_VERSION="${AZURITE_API_VERSION:-2021-12-02}"
 POSTGRES_READY_ATTEMPTS="${POSTGRES_READY_ATTEMPTS:-60}"
-AZURITE_SETUP_RETRIES="${AZURITE_SETUP_RETRIES:-90}"
-AZURITE_ACCOUNT_KEY="Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
-AZURITE_CONNECTION_STRING="DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=${AZURITE_ACCOUNT_KEY};BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;"
-PYTHON_BIN=""
+AZURITE_READY_ATTEMPTS="${AZURITE_READY_ATTEMPTS:-${AZURITE_SETUP_RETRIES:-90}}"
 
 if ! docker info >/dev/null 2>&1; then
   echo "Docker is not running. Start Docker Desktop, then run bun run local:up again." >&2
   exit 1
 fi
 
-if [ -x "$ROOT_DIR/.venv/bin/python" ]; then
-  PYTHON_BIN="$ROOT_DIR/.venv/bin/python"
-elif command -v python3 >/dev/null 2>&1; then
-  PYTHON_BIN="$(command -v python3)"
-elif command -v python >/dev/null 2>&1; then
-  PYTHON_BIN="$(command -v python)"
-fi
-
-_create_azurite_container() {
-  if [ -n "$PYTHON_BIN" ]; then
-    "$PYTHON_BIN" - "$AZURITE_CONNECTION_STRING" "$CONTAINER_NAME" <<'PY'
-import sys
-
-try:
-    from azure.core.exceptions import ResourceExistsError
-    from azure.storage.blob import BlobServiceClient
-except ImportError:
-    sys.exit(90)
-
-connection_string, container_name = sys.argv[1], sys.argv[2]
-service = BlobServiceClient.from_connection_string(connection_string)
-try:
-    service.create_container(container_name)
-except ResourceExistsError:
-    pass
-PY
-    status=$?
-    if [ "$status" -ne 90 ]; then
-      return "$status"
-    fi
+for command_name in curl openssl xxd; do
+  if ! command -v "$command_name" >/dev/null 2>&1; then
+    echo "$command_name is required to initialize the Azurite blob container." >&2
+    exit 1
   fi
-
-  if command -v az >/dev/null 2>&1; then
-    az storage container create \
-      --name "$CONTAINER_NAME" \
-      --connection-string "$AZURITE_CONNECTION_STRING" \
-      --only-show-errors >/dev/null
-    return $?
-  fi
-
-  echo "Install backend Python dependencies or Azure CLI to initialize the Azurite blob container." >&2
-  return 1
-}
+done
 
 docker compose up -d postgres azurite
 
@@ -74,12 +38,28 @@ for _ in $(seq 1 "$POSTGRES_READY_ATTEMPTS"); do
 done
 
 LAST_AZURITE_ERROR=""
-for _ in $(seq 1 "$AZURITE_SETUP_RETRIES"); do
-  if _create_azurite_container 2>/tmp/fcsw-azurite-setup.err; then
+for _ in $(seq 1 "$AZURITE_READY_ATTEMPTS"); do
+  # Sign the Blob REST call directly so local startup does not depend on Azure CLI behavior.
+  REQUEST_DATE="$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S GMT')"
+  STRING_TO_SIGN="$(printf 'PUT\n\n\n\n\n\n\n\n\n\n\n\nx-ms-date:%s\nx-ms-version:%s\n/%s/%s\nrestype:container' \
+    "$REQUEST_DATE" \
+    "$AZURITE_API_VERSION" \
+    "$AZURITE_ACCOUNT_NAME" \
+    "$CONTAINER_NAME")"
+  ACCOUNT_KEY_HEX="$(printf '%s' "$AZURITE_ACCOUNT_KEY" | openssl enc -A -d -base64 | xxd -p -c 256)"
+  SIGNATURE="$(printf '%s' "$STRING_TO_SIGN" | openssl dgst -sha256 -mac HMAC -macopt "hexkey:$ACCOUNT_KEY_HEX" -binary | openssl enc -A -base64)"
+  STATUS_CODE="$(curl -sS -o /tmp/fcsw-azurite-create.out -w '%{http_code}' -X PUT \
+    -H "Authorization: SharedKey ${AZURITE_ACCOUNT_NAME}:${SIGNATURE}" \
+    -H "x-ms-date: ${REQUEST_DATE}" \
+    -H "x-ms-version: ${AZURITE_API_VERSION}" \
+    "${AZURITE_BLOB_ENDPOINT%/}/${CONTAINER_NAME}?restype=container" \
+    2>"/tmp/fcsw-azurite-create.err" || true)"
+  if [ "$STATUS_CODE" = "201" ] || [ "$STATUS_CODE" = "409" ]; then
     echo "Local services are ready. Env file: backend/.env.local"
     exit 0
   fi
-  LAST_AZURITE_ERROR="$(tail -n 5 /tmp/fcsw-azurite-setup.err 2>/dev/null || true)"
+  LAST_AZURITE_ERROR="$(cat /tmp/fcsw-azurite-create.err /tmp/fcsw-azurite-create.out 2>/dev/null || true)
+HTTP status: $STATUS_CODE"
   sleep 1
 done
 
