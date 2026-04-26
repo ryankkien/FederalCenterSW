@@ -116,6 +116,19 @@ def get_ai_request_timeout_seconds() -> float:
         return 30.0
 
 
+def get_feature_extractor_url() -> Optional[str]:
+    value = os.getenv("FEATURE_EXTRACTOR_URL", "").strip()
+    return value.rstrip("/") if value else None
+
+
+def get_feature_extractor_request_timeout_seconds() -> float:
+    value = os.getenv("FEATURE_EXTRACTOR_REQUEST_TIMEOUT_SECONDS", "120")
+    try:
+        return max(1.0, float(value))
+    except ValueError:
+        return 120.0
+
+
 def get_ai_max_retries() -> int:
     value = os.getenv("AI_MAX_RETRIES", "2")
     try:

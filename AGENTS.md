@@ -267,7 +267,10 @@ bun run infra:deploy
 - The optional `feature_extractor/` service reads canonical `contracts/{document_id}/text.json`
   artifacts, writes `contracts/{document_id}/summary.json`, extracts structured primitives
   (deliverable, financial, decisions, issue, personnel) into the DB, and may provide
-  supplemental PSC/NAICS classification evidence. It is not the canonical analyst
+  supplemental PSC/NAICS classification evidence. When `FEATURE_EXTRACTOR_URL` is
+  configured, completed backend processing runs call `/summarize` and then
+  `/extract-primitives`; extractor failures are recorded in `processing_run_steps` and
+  must not roll back the upstream processing run. It is not the canonical analyst
   store.
 - `bun run corpus:build-synthetic` creates an ignored file corpus under
   `backend/data/corpus/navy-service-v1/` from the WWR, AGOR, and Natalie fixture
