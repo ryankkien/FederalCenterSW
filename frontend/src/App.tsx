@@ -8,6 +8,7 @@ import {
   ContractDetailPage,
   InsightsPage,
   DocumentsPage,
+  AdminPage,
   PlaceholderPage,
   ContractorHome,
   ContractorContractPage,
@@ -127,7 +128,7 @@ export function App() {
     ),
     insights: <InsightsPage onSelectContract={handleSelectContract} />,
     documents: <DocumentsPage onSelectContract={handleSelectContract} />,
-    admin: <PlaceholderPage title="Admin" crumbs={['Admin']} />,
+    admin: <AdminPage onSelectContract={handleSelectContract} />,
   };
 
   const contractorPages = {
