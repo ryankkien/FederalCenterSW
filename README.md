@@ -141,6 +141,9 @@ bun run infra:deploy
 ```
 
 See [docs/infra.md](docs/infra.md) for the Bicep/GitHub Actions workflow and drift policy.
+Azure secrets are stored in Key Vault and consumed by the Function App and summarizer
+Container App through user-assigned managed-identity Key Vault references, not raw app
+setting values.
 
 ## Pull Request Notifications
 
@@ -158,8 +161,8 @@ uses a pgvector-enabled image so embeddings can live beside contract-scoped meta
 
 AI processing defaults on when `OPENAI_API_KEY` is set and the AI flags are omitted.
 Configure `AI_PROVIDER`, `OPENAI_API_KEY`, `OPENAI_LLM_MODEL`, and
-`OPENAI_EMBEDDING_MODEL` in an ignored env file or Azure app settings before running
-OpenAI-backed extraction. Set `AI_PROCESSING_ENABLED=false` or
+`OPENAI_EMBEDDING_MODEL` in an ignored env file or Azure Key Vault-backed app setting
+before running OpenAI-backed extraction. Set `AI_PROCESSING_ENABLED=false` or
 `AI_INLINE_PROCESSING_ENABLED=false` to force-disable either path. Upload and email
 intake workflows continue to store documents when AI processing is disabled or blocked.
 

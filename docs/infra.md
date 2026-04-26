@@ -30,17 +30,46 @@ The Bicep template currently adopts the resources that already exist in Azure:
 
 - App Blob Storage account `fcswdevcwm2xrlu`
 - Private Blob container `app-assets`
+- Azure Key Vault `fcsw-dev-kv-e7e9f2`
+- Function App managed identity `fcsw-email-intake-dev-mi`
 - Azure Functions runtime/package storage account `fcswemailfunce7e9f2`
 - Azure Functions package container `app-package-fcswemailintakee7e9f2-3009836`
 - Flex Consumption plan `ASP-federalcenterswdev-818f`
 - Email intake Function App `fcsw-email-intake-e7e9f2`
 - PostgreSQL Flexible Server `federal-center-sw-dev-pg-jal50w`
 - PostgreSQL database `federal_center_sw`
+- Summarizer managed identity `fcsw-summarizer-dev-mi`
 
-Function App app settings are not fully managed by Bicep yet because the current settings
-include mailbox passwords and storage connection strings. Do not add those secrets directly
-to Bicep parameter files. The next step should be moving secrets into Azure Key Vault and
-then referencing them from app settings.
+Secret-bearing app settings are managed as Azure Key Vault references. Do not add raw
+passwords, API keys, storage keys, database URLs, or connection strings to Bicep parameter
+files, GitHub workflow YAML, or plain app settings.
+
+Key Vault uses Azure RBAC. The Function App and summarizer Container App use
+user-assigned managed identities with the `Key Vault Secrets User` role scoped to the dev
+vault so they can resolve secret references at runtime.
+
+Required dev Key Vault secret names:
+
+| Secret | Used by |
+| --- | --- |
+| `app-storage-connection-string` | Backend document storage and feature extractor Blob access. |
+| `function-storage-connection-string` | Azure Functions runtime and Flex deployment storage. |
+| `database-url` | Backend and feature extractor PostgreSQL connection string. |
+| `email-intake-host` | IMAP email intake host. |
+| `email-intake-username` | IMAP email intake username. |
+| `email-intake-password` | IMAP email intake worker. |
+| `openai-api-key` | Backend AI processing and feature extractor OpenAI fallback. |
+| `resend-api-key` | Email intake auto-reply sends when enabled. |
+| `internal-service-token` | Shared backend/feature-extractor internal trigger token. |
+
+Set or rotate those values with Azure CLI:
+
+```sh
+az keyvault secret set \
+  --vault-name fcsw-dev-kv-e7e9f2 \
+  --name database-url \
+  --value "<postgres-connection-string>"
+```
 
 ## GitHub Actions
 
@@ -84,13 +113,13 @@ Configure these GitHub repository secrets for deployment and notifications:
 
 | Secret | Purpose |
 | --- | --- |
-| `AZURE_FUNCTION_DATABASE_URL` | PostgreSQL connection string written to the Function App as `DATABASE_URL`. |
-| `AZURE_FUNCTION_STORAGE_CONNECTION_STRING` | Blob Storage connection string written to the Function App as `AZURE_STORAGE_CONNECTION_STRING`. |
 | `DISCORD_PULL_REQUEST_WEBHOOK_URL` | Discord webhook URL for the pull request notification channel. |
 
 The Azure identity needs permission to run resource group deployments in
-`federal-center-sw-dev` and deploy to the Function App. Use least privilege when possible;
-Contributor at the resource group is the simple starting point.
+`federal-center-sw-dev` and deploy to the Function App. It also needs permission to create
+role assignments for the managed identities when Key Vault access is deployed. Use least
+privilege when possible; Contributor plus User Access Administrator at the resource group
+is the simple starting point for this dev environment.
 
 The Azure app registration or managed identity also needs federated credentials that match
 the GitHub workflow subjects. The deploy workflows use the `azure-dev` GitHub environment,

@@ -230,9 +230,10 @@ the run when an `analysis_runs` row for that contract is newer than the latest
 successful or partial primitive extraction. Low-N cohorts still run and are tagged
 `low_confidence`.
 
-Configure `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENAI_LLM_MODEL`, and
-`MODEL_PREFERENCE` only in ignored local env files or shell exports. The backend
-default LLM model is `gpt-5.5`.
+Configure `OPENAI_API_KEY` and `OPENAI_LLM_MODEL` only in ignored local env files or
+shell exports. `backend/.env.example`, `backend/.env.local.example`, and
+`feature_extractor/.env.example` intentionally carry the same ordered variable names so
+local backend and optional feature-extractor config do not drift.
 
 ## Boundaries
 

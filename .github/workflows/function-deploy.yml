@@ -49,18 +49,10 @@ jobs:
         id: deploy_config
         env:
           AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-          AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_FUNCTION_STORAGE_CONNECTION_STRING }}
-          DATABASE_URL: ${{ secrets.AZURE_FUNCTION_DATABASE_URL }}
         run: |
           missing=""
           if [ -z "$AZURE_CLIENT_ID" ]; then
             missing="$missing AZURE_CLIENT_ID"
-          fi
-          if [ -z "$AZURE_STORAGE_CONNECTION_STRING" ]; then
-            missing="$missing AZURE_FUNCTION_STORAGE_CONNECTION_STRING"
-          fi
-          if [ -z "$DATABASE_URL" ]; then
-            missing="$missing AZURE_FUNCTION_DATABASE_URL"
           fi
 
           if [ -n "$missing" ]; then
@@ -90,26 +82,6 @@ jobs:
               EMAIL_INTAKE_DEFAULT_DOCUMENT_TYPE="$EMAIL_INTAKE_DEFAULT_DOCUMENT_TYPE" \
               DOCUMENT_PROCESSING_TIMER_SCHEDULE="$DOCUMENT_PROCESSING_TIMER_SCHEDULE" \
               DOCUMENT_PROCESSING_LIMIT="$DOCUMENT_PROCESSING_LIMIT"
-
-      - name: Configure Blob Storage Function App setting
-        if: steps.deploy_config.outputs.deploy_ready == 'true'
-        env:
-          AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_FUNCTION_STORAGE_CONNECTION_STRING }}
-        run: |
-          az functionapp config appsettings set \
-            --resource-group "$AZURE_RESOURCE_GROUP" \
-            --name "$AZURE_FUNCTION_APP_NAME" \
-            --settings AZURE_STORAGE_CONNECTION_STRING="$AZURE_STORAGE_CONNECTION_STRING"
-
-      - name: Configure database Function App setting
-        if: steps.deploy_config.outputs.deploy_ready == 'true'
-        env:
-          DATABASE_URL: ${{ secrets.AZURE_FUNCTION_DATABASE_URL }}
-        run: |
-          az functionapp config appsettings set \
-            --resource-group "$AZURE_RESOURCE_GROUP" \
-            --name "$AZURE_FUNCTION_APP_NAME" \
-            --settings DATABASE_URL="$DATABASE_URL"
 
       - name: Deploy Function App
         if: steps.deploy_config.outputs.deploy_ready == 'true'
