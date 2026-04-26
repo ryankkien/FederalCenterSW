@@ -30,6 +30,7 @@ from app.blob_storage import BlobStorage, get_blob_storage
 from app.database import SessionLocal, create_db_schema
 from app.document_assets import store_contract_document
 from app.document_files import ALLOWED_CONTENT_TYPES, ALLOWED_EXTENSIONS, clean_filename
+from app.document_intake_decisions import apply_inline_intake_decisions
 from app.models import DocumentProcessingJob, DocumentUpload
 
 
@@ -336,28 +337,28 @@ def save_email_documents(
                 data=attachment.data,
                 source="email",
             )
-            db.add(
-                DocumentUpload(
-                    id=document_id,
-                    title=_document_title(record, attachment),
-                    document_type=config.default_document_type,
-                    document_kind="email_context",
-                    intake_source="email",
-                    notes=_document_notes(record),
-                    original_filename=attachment.filename,
-                    content_type=stored.content_type,
-                    size_bytes=len(attachment.data),
-                    blob_path=stored.blob_path,
-                    text_blob_path=stored.text_blob_path,
-                    source_sha256=hashlib.sha256(attachment.data).hexdigest(),
-                    email_message_id=record.message_id,
-                    match_status="pending",
-                    processing_status="queued",
-                    uploader_id=config.default_uploader_id,
-                    uploader_role="contractor",
-                    created_at=_record_datetime(record) or datetime.now(timezone.utc),
-                )
+            document = DocumentUpload(
+                id=document_id,
+                title=_document_title(record, attachment),
+                document_type=config.default_document_type,
+                document_kind="other",
+                intake_source="email",
+                notes=_document_notes(record),
+                original_filename=attachment.filename,
+                content_type=stored.content_type,
+                size_bytes=len(attachment.data),
+                blob_path=stored.blob_path,
+                text_blob_path=stored.text_blob_path,
+                source_sha256=hashlib.sha256(attachment.data).hexdigest(),
+                email_message_id=record.message_id,
+                match_status="pending",
+                processing_status="queued",
+                uploader_id=config.default_uploader_id,
+                uploader_role="contractor",
+                created_at=_record_datetime(record) or datetime.now(timezone.utc),
             )
+            db.add(document)
+            apply_inline_intake_decisions(db, document)
             db.add(
                 DocumentProcessingJob(
                     id=str(uuid5(NAMESPACE_URL, f"processing:{document_id}")),

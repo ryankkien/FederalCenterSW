@@ -236,6 +236,11 @@ bun run infra:deploy
   immutable document artifact folders:
   `contracts/{document_id}/main.{ext}` and `contracts/{document_id}/text.json`.
   The hard parent contract is stored in Postgres on `document_uploads.contract_id`.
+- Portal uploads and committed email attachments run inline deterministic intake
+  classification and contract matching against filename/title/notes/type cues before
+  async processing. The decisions are recorded in
+  `document_classification_decisions` and `document_match_decisions`; OCR, full text
+  classification, and AI fallback matching remain processing-job work.
 - Contract hard-link parentage lives on `document_uploads.contract_id`. Cross-contract
   and cross-document pattern relationships live in semantic link tables and must not
   rewrite the hard parent contract.

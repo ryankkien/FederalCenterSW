@@ -86,6 +86,7 @@ def classify_document(document: object, text: str = "") -> Tuple[str, Optional[s
             _string_attr(document, "original_filename"),
             _string_attr(document, "title"),
             _string_attr(document, "document_type"),
+            _string_attr(document, "notes", "description"),
             existing_kind,
             text[:5000],
         )

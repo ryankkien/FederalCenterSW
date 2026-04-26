@@ -247,13 +247,19 @@ processing.
 For PDFs with embedded text, extraction uses the PDF text layer. For scanned PDFs and
 uploaded images, extraction falls back to OCR when Tesseract is installed.
 
+Portal uploads run cheap deterministic intake decisions before the async processor:
+filename, title, notes, and type cues update `document_kind`, `match_status`, and
+`contract_id` when a known contract number is found. The upload response includes
+`detected_kind` and `matched_contract_id`; full text classification and AI-assisted
+matching still run later through processing jobs.
+
 For local development without Azure env values, the backend falls back to ignored
 local storage under `backend/data/`. For Azure-backed runs, fill in `DATABASE_URL`,
 `AUTH_SECRET_KEY`, and the `AZURE_STORAGE_*` variables in `backend/.env`.
 
 ## Email Intake
 
-The backend includes an IMAP intake worker that parses unread mailbox messages into JSONL audit records. In commit mode, supported attachments are uploaded to the same contract-folder storage used by the portal and become visible to the mock contractor portal and official analyst workspace. It can also send an optional receipt auto-reply. Configure it with `EMAIL_INTAKE_*` environment variables, then run:
+The backend includes an IMAP intake worker that parses unread mailbox messages into JSONL audit records. In commit mode, supported attachments are uploaded to the same contract-folder storage used by the portal, run the same deterministic intake decisions, and become visible to the mock contractor portal and official analyst workspace. It can also send an optional receipt auto-reply. Configure it with `EMAIL_INTAKE_*` environment variables, then run:
 
 ```sh
 bun run email:intake -- --limit 5
