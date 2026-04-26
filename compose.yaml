@@ -36,9 +36,9 @@ services:
     volumes:
       - fcsw_azurite_data:/data
 
-  summarizer:
-    build: ./summarizer
-    container_name: fcsw-summarizer-local
+  feature_extractor:
+    build: ./feature_extractor
+    container_name: fcsw-feature-extractor-local
     ports:
       - "8001:8000"
     environment:
