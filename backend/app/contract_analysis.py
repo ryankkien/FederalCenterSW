@@ -26,7 +26,7 @@ from app.models import (
 
 
 BASELINE_DOCUMENT_KINDS = {"source_contract", "task_order", "modification", "email_context"}
-REPORT_DOCUMENT_KINDS = {"weekly_report", "monthly_report"}
+REPORT_DOCUMENT_KINDS = {"weekly_report", "monthly_report", "status_report"}
 OFFICIAL_DOMAIN_SUFFIXES = (".gov", ".mil")
 OFFICIAL_DOMAINS = {
     "acquisition.gov",
@@ -97,6 +97,8 @@ def classify_document(document: object, text: str = "") -> Tuple[str, Optional[s
         document_kind = "weekly_report"
     elif _contains_any(haystack, ("monthly status report", "monthly report", "_msr", " msr")):
         document_kind = "monthly_report"
+    elif _contains_any(haystack, ("status report", "progress report")):
+        document_kind = "status_report"
     elif _contains_any(haystack, ("rfp", "request for proposal", "source contract", "pws", "sow")):
         document_kind = "source_contract"
     elif _contains_any(haystack, ("task order", "to 000", "delivery order")):
@@ -115,6 +117,7 @@ def classify_document(document: object, text: str = "") -> Tuple[str, Optional[s
         "modification",
         "weekly_report",
         "monthly_report",
+        "status_report",
         "gao_oig_report",
         "policy_or_regulation",
         "email_context",
