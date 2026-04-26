@@ -32,7 +32,6 @@ from app.models import (
     BaselineRevision,
     Contract,
     ContractAccessGrant,
-    AuditEvent,
     ContractHypothesis,
     ContractPrimitiveDecision,
     ContractSimilarityLink,
