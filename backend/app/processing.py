@@ -177,15 +177,77 @@ def process_one_queued_job(
             ),
         )
 
-    job = _next_queued_job(session, job_model)
-    if job is None:
-        return ProcessingResult(
-            document_id="",
-            status="idle",
-            text_gate=TextGateResult(status="pending_ocr", reason="No queued processing job"),
-        )
+    for job in _queued_jobs(session, job_model):
+        if _job_is_waiting_for_text(session, models, job, storage):
+            continue
+        return _process_job_with_status(session, models, job, storage, ai_provider)
 
-    return _process_job_with_status(session, models, job, storage, ai_provider)
+    return ProcessingResult(
+        document_id="",
+        status="idle",
+        text_gate=TextGateResult(status="pending_ocr", reason="No queued processing job is ready"),
+    )
+
+
+def queued_processing_job_count(session: Session) -> int:
+    models = importlib.import_module("app.models")
+    job_model = _first_model(models, "DocumentProcessingJob", "ProcessingJob", "AIProcessingJob")
+    if job_model is None:
+        return 0
+    return len(_queued_jobs(session, job_model))
+
+
+def waiting_for_text_processing_job_count(session: Session, storage: BlobStorage) -> int:
+    models = importlib.import_module("app.models")
+    job_model = _first_model(models, "DocumentProcessingJob", "ProcessingJob", "AIProcessingJob")
+    if job_model is None:
+        return 0
+    return sum(
+        1
+        for job in _queued_jobs(session, job_model)
+        if _job_is_waiting_for_text(session, models, job, storage)
+    )
+
+
+def _queued_jobs(session: Session, job_model: object) -> List[object]:
+    statement = _queued_job_statement(job_model)
+    return list(session.scalars(statement).all())
+
+
+def _next_queued_job(session: Session, job_model: object) -> Optional[object]:
+    rows = _queued_jobs(session, job_model)
+    return rows[0] if rows else None
+
+
+def _queued_job_statement(job_model: object):
+    statement = select(job_model)
+    status_column = getattr(job_model, "status", None)
+    if status_column is None:
+        status_column = getattr(job_model, "state", None)
+    if status_column is not None:
+        statement = statement.where(status_column.in_(("queued", "pending")))
+    created_at = getattr(job_model, "created_at", None)
+    if created_at is not None:
+        statement = statement.order_by(created_at.asc())
+    return statement
+
+
+def _job_is_waiting_for_text(
+    session: Session,
+    models: object,
+    job: object,
+    storage: BlobStorage,
+) -> bool:
+    try:
+        document = _document_for_job(session, models, job)
+        document_id = _string_attr(document, "id", "document_id", "documentId")
+        text_blob_path = _document_text_blob_path(document, document_id)
+    except (RuntimeError, ValueError):
+        return False
+
+    payload, load_error = load_text_json(storage, document_id=document_id, text_blob_path=text_blob_path)
+    gate = gate_text_payload(payload, load_error)
+    return gate.status == "pending_ocr"
 
 
 def process_processing_job(

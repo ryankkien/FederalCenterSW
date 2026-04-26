@@ -1,13 +1,12 @@
-from __future__ import annotations
-
 """Build cohort definitions for contract performance analysis.
 
 Given a target contract, finds comparable contracts using NAICS prefix, contract type,
 obligated value band, POP length band, agency, and competition type.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
-from datetime import date
 
 from sqlalchemy.orm import Session
 

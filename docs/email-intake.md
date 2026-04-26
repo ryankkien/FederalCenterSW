@@ -80,7 +80,7 @@ If a message has no `Message-ID` header, the worker uses a SHA-256 hash of the r
 
 ## Azure Function Timer
 
-The preferred deployment is an Azure Function timer trigger, not a VM. The function lives in `backend/function_app.py` and uses the same `app.email_intake` worker.
+The preferred deployment is an Azure Function timer trigger, not a VM. The function lives in `backend/function_app.py` and uses the same `app.email_intake` worker. The same Function App also hosts the queued document processing timer so emailed attachments and portal uploads can move from `queued` to analyzed without a manual CLI run.
 
 Create a Linux Python Function App, configure the `EMAIL_INTAKE_*` app settings, then deploy the `backend/` folder. The repo deploys this automatically from `.github/workflows/function-deploy.yml` after backend changes land on `main`, and the workflow can also be run manually.
 
@@ -92,14 +92,17 @@ The deployment workflow uses the `azure-dev` GitHub environment plus these repos
 - `AZURE_RESOURCE_GROUP`
 - `AZURE_FUNCTION_APP_NAME`
 - `AZURE_FUNCTION_DATABASE_URL` as a GitHub secret
+- `AZURE_FUNCTION_STORAGE_CONNECTION_STRING` as a GitHub secret
 
 The timer schedule uses Azure Functions NCRONTAB format:
 
 ```env
 EMAIL_INTAKE_TIMER_SCHEDULE=0 */5 * * * *
+DOCUMENT_PROCESSING_TIMER_SCHEDULE=0 */5 * * * *
+DOCUMENT_PROCESSING_LIMIT=25
 ```
 
-That example runs every five minutes. Use `0 */1 * * * *` for every minute.
+Those examples run every five minutes. Use `0 */1 * * * *` for every minute. The document processing timer drains queued jobs that already have extracted text and leaves `extraction_status="pending_ocr"` jobs queued until `text.json` is ready.
 
 For serverless deployment, enable the durable JSON stub so parsed records go to Azure Blob Storage instead of an ephemeral local file:
 
@@ -110,7 +113,7 @@ EMAIL_INTAKE_STUB_BLOB_CONTAINER=app-assets
 EMAIL_INTAKE_STUB_BLOB_PREFIX=email-intake
 ```
 
-The Function App still needs `AZURE_STORAGE_CONNECTION_STRING` or `EMAIL_INTAKE_STUB_BLOB_CONNECTION_STRING` so it can write the JSON audit record to Blob Storage. It also needs `DATABASE_URL` for emailed attachments to appear in the portal; the deploy workflow writes this from the `AZURE_FUNCTION_DATABASE_URL` GitHub secret.
+The Function App still needs `AZURE_STORAGE_CONNECTION_STRING` or `EMAIL_INTAKE_STUB_BLOB_CONNECTION_STRING` so it can write the JSON audit record to Blob Storage and read document artifacts for processing. It also needs `DATABASE_URL` for emailed attachments to appear in the portal and for queued jobs to be drained; the deploy workflow writes this from the `AZURE_FUNCTION_DATABASE_URL` GitHub secret.
 
 Useful Azure CLI shape:
 

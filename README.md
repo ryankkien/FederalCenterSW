@@ -107,7 +107,9 @@ bun run processing:run -- --limit 200
 Fixture seeding is idempotent. Document IDs are deterministic from fixture path and
 file hash, PDFs are copied to `contracts/{document_id}/main.pdf`, extracted text is
 stored at `contracts/{document_id}/text.json`, and processing jobs are queued for
-new or reset documents.
+new or reset documents. In Azure, the backend Function App drains queued document
+processing jobs on `DOCUMENT_PROCESSING_TIMER_SCHEDULE`; locally, use
+`bun run processing:run -- --limit 200` for an immediate drain.
 
 An optional local feature extractor service lives in `feature_extractor/`. It can read
 `contracts/{document_id}/text.json`, generate a layered summary, classify PSC/NAICS,
@@ -152,6 +154,11 @@ AI processing is feature-flagged off by default. Configure `AI_PROVIDER`,
 `OPENAI_LLM_MODEL`, and `OPENAI_EMBEDDING_MODEL` in an ignored env file or Azure app
 settings before running OpenAI-backed extraction. Upload and email intake workflows
 continue to store documents when AI processing is disabled or blocked.
+
+Queued document processing runs automatically in Azure through the timer trigger in
+`backend/function_app.py`. The worker skips jobs whose `text.json` still has
+`extraction_status="pending_ocr"` so OCR-delayed documents stay queued until extracted
+text is available.
 
 The contract analyst pipeline extends the processing foundation with page-level
 extraction, deterministic v1 classification, hard-link matching, extracted entities

@@ -5,6 +5,7 @@ import os
 import azure.functions as func
 
 from app.email_intake import EmailIntakeConfig, run_once
+from app.processing_worker import drain_queued_processing_jobs
 
 
 app = func.FunctionApp()
@@ -33,3 +34,27 @@ def email_intake_timer(timer: func.TimerRequest) -> None:
         raise
 
     logging.info("Email intake processed %s email(s).", count)
+
+
+@app.timer_trigger(
+    schedule="%DOCUMENT_PROCESSING_TIMER_SCHEDULE%",
+    arg_name="timer",
+    run_on_startup=False,
+    use_monitor=True,
+)
+def document_processing_timer(timer: func.TimerRequest) -> None:
+    if timer.past_due:
+        logging.warning("Document processing timer is past due.")
+
+    limit = int(os.getenv("DOCUMENT_PROCESSING_LIMIT", "25"))
+    summary = drain_queued_processing_jobs(limit=limit)
+
+    logging.info(
+        "Document processing worker processed %s job(s): %s completed, %s failed, "
+        "%s waiting for text, %s still queued.",
+        summary.processed,
+        summary.completed,
+        summary.failed,
+        summary.waiting_for_text,
+        summary.queued_remaining,
+    )

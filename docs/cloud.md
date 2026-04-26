@@ -32,7 +32,7 @@ Everything for this project should live in the single resource group `federal-ce
 | Function package storage account | `fcswemailfunce7e9f2` | `eastus` | Standard LRS StorageV2 account used by Azure Functions Flex Consumption deployment storage. |
 | Function package container | `app-package-fcswemailintakee7e9f2-3009836` | `eastus` | Private container for Function App package deployment. |
 | Function App plan | `ASP-federalcenterswdev-818f` | `eastus` | Flex Consumption plan. |
-| Email intake Function App | `fcsw-email-intake-e7e9f2` | `eastus` | Timer-trigger Function App for email intake. |
+| Backend worker Function App | `fcsw-email-intake-e7e9f2` | `eastus` | Timer-trigger Function App for email intake and queued document processing. |
 
 ## Portal Links
 
@@ -249,6 +249,8 @@ Current env variables used by the backend:
 | `EMAIL_INTAKE_OUTPUT_PATH` | Local JSONL audit output path. |
 | `EMAIL_INTAKE_DEFAULT_UPLOADER_ID` | Contractor id assigned to emailed attachments until real contractor accounts exist. |
 | `EMAIL_INTAKE_DEFAULT_DOCUMENT_TYPE` | Document type assigned to emailed attachments. |
+| `DOCUMENT_PROCESSING_TIMER_SCHEDULE` | Azure Functions NCRONTAB schedule for draining queued document processing jobs. |
+| `DOCUMENT_PROCESSING_LIMIT` | Maximum queued document jobs to drain per timer tick. |
 | `DOCUMENT_OCR_TESSERACT_CMD` | Optional OCR command path, default `tesseract`. |
 | `DOCUMENT_OCR_LANGUAGE` | Optional OCR language code, default `eng`. |
 | `DOCUMENT_OCR_MAX_PAGES` | Optional max scanned PDF pages to OCR synchronously, default `25`; use `0` for no limit. |

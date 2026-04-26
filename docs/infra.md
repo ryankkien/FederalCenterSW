@@ -50,8 +50,10 @@ The repo includes three Azure-facing workflows:
   that touch infrastructure files, and can also be run manually.
 - `.github/workflows/infra-deploy.yml` runs Bicep build and deploy manually against the
   `azure-dev` GitHub environment.
-- `.github/workflows/function-deploy.yml` deploys the email intake Function App from
+- `.github/workflows/function-deploy.yml` deploys the backend worker Function App from
   `backend/` on pushes to `main` that touch backend files, and can also be run manually.
+  The Function App currently hosts the email intake timer and the queued document
+  processing timer.
 
 The repo also includes `.github/workflows/discord-pr-notifications.yml`, which posts
 pull request lifecycle events to Discord. Create a Discord channel such as
@@ -69,14 +71,18 @@ The Azure workflows use Azure OIDC login. Configure these GitHub repository vari
 | `AZURE_SUBSCRIPTION_ID` | `99596387-8247-4e94-9917-cf8bc695f106` |
 | `AZURE_RESOURCE_GROUP` | `federal-center-sw-dev` |
 | `AZURE_FUNCTION_APP_NAME` | `fcsw-email-intake-e7e9f2` |
+| `AZURE_STORAGE_CONTAINER` | Optional override; defaults to `app-assets`. |
 | `EMAIL_INTAKE_DEFAULT_UPLOADER_ID` | Optional override; defaults to `contractor-demo`. |
 | `EMAIL_INTAKE_DEFAULT_DOCUMENT_TYPE` | Optional override; defaults to `Email Attachment`. |
+| `DOCUMENT_PROCESSING_TIMER_SCHEDULE` | Optional Azure Functions NCRONTAB schedule; defaults to every five minutes. |
+| `DOCUMENT_PROCESSING_LIMIT` | Optional queued document jobs to drain per timer tick; defaults to `25`. |
 
 Configure these GitHub repository secrets for deployment and notifications:
 
 | Secret | Purpose |
 | --- | --- |
 | `AZURE_FUNCTION_DATABASE_URL` | PostgreSQL connection string written to the Function App as `DATABASE_URL`. |
+| `AZURE_FUNCTION_STORAGE_CONNECTION_STRING` | Blob Storage connection string written to the Function App as `AZURE_STORAGE_CONNECTION_STRING`. |
 | `DISCORD_PULL_REQUEST_WEBHOOK_URL` | Discord webhook URL for the pull request notification channel. |
 
 The Azure identity needs permission to run resource group deployments in
