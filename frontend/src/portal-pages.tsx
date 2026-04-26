@@ -1020,9 +1020,14 @@ function AdminPage({ onSelectContract }) {
   const [lifecycleError, setLifecycleError] = useState(false);
   const [creating, setCreating] = useState(false);
   const [uploading, setUploading] = useState({});
+  const [packetUploading, setPacketUploading] = useState(false);
+  const [packetDragging, setPacketDragging] = useState(false);
+  const [packetFiles, setPacketFiles] = useState([]);
+  const [packetUploaded, setPacketUploaded] = useState([]);
   const [files, setFiles] = useState({});
   const [uploaded, setUploaded] = useState({});
   const [error, setError] = useState('');
+  const packetInputRef = useRef(null);
   const [fields, setFields] = useState({
     number:'',
     title:'',
@@ -1096,6 +1101,50 @@ function AdminPage({ onSelectContract }) {
       setError(err?.message || 'Contract record could not be created.');
     } finally {
       setCreating(false);
+    }
+  }
+
+  function setPacketSelection(fileList) {
+    const selected = Array.from(fileList || [])
+      .filter(file => file && file.name && !file.name.startsWith('.'));
+    setPacketFiles(selected);
+  }
+
+  async function handlePacketDrop(e) {
+    e.preventDefault();
+    setPacketDragging(false);
+    const dropped = await filesFromDataTransfer(e.dataTransfer);
+    setPacketSelection(dropped);
+  }
+
+  async function uploadPacket() {
+    if (!activeContract?.id || packetFiles.length === 0) return;
+    setPacketUploading(true);
+    setError('');
+    const completed = [];
+    try {
+      for (const file of packetFiles) {
+        const path = packetFilePath(file);
+        const inferred = inferSetupDocumentType(path);
+        const doc = await uploadDocument({
+          contractId: activeContract.id,
+          title: `${activeContract.number} - ${stripExtension(path.split('/').pop() || file.name)}`,
+          documentType: inferred.documentType,
+          notes: `Baseline packet upload. AI intake should classify, match, and link this artifact. Hint: ${inferred.label}.`,
+          file,
+          processInline: true,
+        });
+        completed.push(doc);
+      }
+      setPacketUploaded(prev => [...completed, ...prev]);
+      setPacketFiles([]);
+      await refreshLifecycle(activeContract.id);
+    } catch (err) {
+      setPacketUploaded(prev => [...completed, ...prev]);
+      setError(err?.message || 'Packet upload failed before all files completed.');
+      await refreshLifecycle(activeContract.id);
+    } finally {
+      setPacketUploading(false);
     }
   }
 
@@ -1199,9 +1248,58 @@ function AdminPage({ onSelectContract }) {
               <div style={{ padding:'16px 18px', borderBottom:'1px solid var(--border)', display:'flex', justifyContent:'space-between', gap:12, alignItems:'center' }}>
                 <div>
                   <div style={{ fontSize:11, fontWeight:700, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)' }}>2. Baseline Evidence Packet</div>
-                  <div style={{ fontSize:11, color:'var(--ink-faint)', marginTop:4 }}>{activeContract ? activeContract.number : 'Create or select a contract before uploading evidence.'}</div>
+                  <div style={{ fontSize:11, color:'var(--ink-faint)', marginTop:4 }}>{activeContract ? `${activeContract.number} · drop a folder or use the manual slots below` : 'Create or select a contract before uploading evidence.'}</div>
                 </div>
                 {activeContract && <BtnSecondary onClick={() => onSelectContract(activeContract)}>Open Workspace</BtnSecondary>}
+              </div>
+              <div style={{ padding:'16px 18px', borderBottom:'1px solid var(--border)' }}>
+                <div
+                  onClick={() => activeContract && !packetUploading && packetInputRef.current?.click()}
+                  onDragOver={e => { e.preventDefault(); if (activeContract) setPacketDragging(true); }}
+                  onDragLeave={() => setPacketDragging(false)}
+                  onDrop={handlePacketDrop}
+                  style={{
+                    border:`1.5px dashed ${packetDragging ? 'var(--accent)' : 'var(--border-md)'}`,
+                    borderRadius:3,
+                    padding:'18px 16px',
+                    background: packetDragging ? 'var(--accent-soft)' : 'var(--surface-alt)',
+                    cursor: activeContract && !packetUploading ? 'pointer' : 'default',
+                    opacity: activeContract ? 1 : 0.55,
+                  }}
+                >
+                  <input
+                    ref={packetInputRef}
+                    type="file"
+                    multiple
+                    webkitdirectory=""
+                    directory=""
+                    style={{ display:'none' }}
+                    disabled={!activeContract || packetUploading}
+                    onChange={e => setPacketSelection(e.target.files)}
+                  />
+                  <div style={{ display:'grid', gridTemplateColumns:'auto 1fr auto', alignItems:'center', gap:14 }}>
+                    <div style={{ color:'var(--ink-faint)' }}><IcoUpload /></div>
+                    <div>
+                      <div style={{ fontSize:13, color:'var(--ink)', fontWeight:600 }}>Drop a contract packet folder</div>
+                      <div style={{ fontSize:11, color:'var(--ink-mute)', marginTop:3 }}>
+                        Uploads every file to the selected contract; AI intake and processing classify/link source contracts, CDRLs, mods, reports, CPARS, and IPMDAR artifacts.
+                      </div>
+                      {packetFiles.length > 0 && (
+                        <div style={{ fontSize:10.5, color:'var(--accent)', marginTop:6, fontFamily:'var(--mono)' }}>
+                          {packetFiles.length} selected · {packetFiles.slice(0, 3).map(packetFilePath).join(', ')}{packetFiles.length > 3 ? '…' : ''}
+                        </div>
+                      )}
+                      {packetUploaded.length > 0 && (
+                        <div style={{ fontSize:10.5, color:'var(--good)', marginTop:4, fontFamily:'var(--mono)' }}>
+                          {packetUploaded.length} packet files uploaded in this setup session.
+                        </div>
+                      )}
+                    </div>
+                    <BtnSecondary disabled={!activeContract || packetFiles.length === 0 || packetUploading} onClick={(e) => { e.stopPropagation(); uploadPacket(); }}>
+                      {packetUploading ? 'Uploading…' : 'Upload Packet'}
+                    </BtnSecondary>
+                  </div>
+                </div>
               </div>
               <table style={{ width:'100%', borderCollapse:'collapse' }}>
                 <thead>
@@ -1329,6 +1427,83 @@ function lifecycleReadiness(lifecycle) {
     issues: (lifecycle.issue_register || []).length,
     gaps: (lifecycle.limitations || []).length + (lifecycle.not_proven || []).length,
   };
+}
+
+async function filesFromDataTransfer(dataTransfer) {
+  const items = Array.from(dataTransfer?.items || []);
+  const entries = items
+    .map(item => (item.webkitGetAsEntry ? item.webkitGetAsEntry() : null))
+    .filter(Boolean);
+  if (entries.length === 0) return Array.from(dataTransfer?.files || []);
+  const nested = await Promise.all(entries.map(entry => readDroppedEntry(entry, '')));
+  return nested.flat();
+}
+
+function readDroppedEntry(entry, path) {
+  if (entry.isFile) {
+    return new Promise(resolve => {
+      entry.file(file => {
+        try {
+          Object.defineProperty(file, 'relativePath', { value: `${path}${file.name}` });
+        } catch {}
+        resolve([file]);
+      });
+    });
+  }
+  if (!entry.isDirectory) return Promise.resolve([]);
+  const reader = entry.createReader();
+  return new Promise(resolve => {
+    const entries = [];
+    function readBatch() {
+      reader.readEntries(async batch => {
+        if (!batch.length) {
+          const nested = await Promise.all(entries.map(child => readDroppedEntry(child, `${path}${entry.name}/`)));
+          resolve(nested.flat());
+          return;
+        }
+        entries.push(...batch);
+        readBatch();
+      });
+    }
+    readBatch();
+  });
+}
+
+function packetFilePath(file) {
+  return file.relativePath || file.webkitRelativePath || file.name;
+}
+
+function stripExtension(name) {
+  return String(name || '').replace(/\.[^/.]+$/, '');
+}
+
+function inferSetupDocumentType(path) {
+  const value = String(path || '').toLowerCase();
+  if (value.includes('cdrl') || value.includes('dd1423') || value.includes('exhibit')) {
+    return { documentType:'CDRL', label:'CDRL' };
+  }
+  if (value.includes('solicitation') || value.includes('source') || value.includes('award') || value.includes('contract')) {
+    return { documentType:'Source Contract', label:'source contract' };
+  }
+  if (value.includes('mod') || /\bp\d{4}\b/.test(value) || value.includes('option')) {
+    return { documentType:'Modification', label:'modification' };
+  }
+  if (value.includes('ipmdar') || value.includes('cpd') || value.includes('spd') || value.includes('pnr')) {
+    return { documentType:'IPMDAR', label:'IPMDAR' };
+  }
+  if (value.includes('cpar')) {
+    return { documentType:'CPARS', label:'CPARS' };
+  }
+  if (value.includes('monthly') || value.includes('status') || value.includes('report')) {
+    return { documentType:'Monthly Report', label:'status report' };
+  }
+  if (value.includes('cwbs') || value.includes('ims') || value.includes('baseline') || value.includes('schedule')) {
+    return { documentType:'Program Baseline', label:'baseline evidence' };
+  }
+  if (value.includes('invoice')) {
+    return { documentType:'Invoice', label:'invoice' };
+  }
+  return { documentType:'Supporting Evidence', label:'supporting evidence' };
 }
 
 // ─── CONTRACT DETAIL PAGE ───────────────────────────────────────────────────
