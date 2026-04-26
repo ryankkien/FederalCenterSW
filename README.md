@@ -248,6 +248,17 @@ processing.
 For PDFs with embedded text, extraction uses the PDF text layer. For scanned PDFs and
 uploaded images, extraction falls back to OCR when Tesseract is installed.
 
+Contractor uploads include a visible contract selector. The selected contract is stored
+as `document_uploads.contract_id`, so new reports immediately become child documents of
+the contract while semantic cross-document and cross-contract relationships remain
+separate.
+
+Government officials see a contract-first analysis workspace. The current v1 view uses
+existing extracted primitives and wiki records to show a cited contract brief,
+chronological report signals, recurring versus one-off issues, early warnings before
+degradation, positive signals, contractor execution patterns, CPARS outcome context
+when imported, and cohort-level pattern comparisons.
+
 For local development without Azure env values, the backend falls back to ignored
 local storage under `backend/data/`. For Azure-backed runs, fill in `DATABASE_URL`,
 `AUTH_SECRET_KEY`, and the `AZURE_STORAGE_*` variables in `backend/.env`.

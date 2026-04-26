@@ -69,12 +69,7 @@ describe('App', () => {
   });
 
   it('routes contractors to upload and status after login', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse({ access_token: 'contractor-token', user: contractorUser }))
-      .mockResolvedValueOnce(jsonResponse([]))
-      .mockResolvedValueOnce(jsonResponse(documentRecord, 201))
-      .mockResolvedValueOnce(jsonResponse([documentRecord]));
+    const fetchMock = contractorFetch();
     vi.stubGlobal('fetch', fetchMock);
 
     render(<App />);
@@ -82,6 +77,7 @@ describe('App', () => {
 
     expect(await screen.findByRole('heading', { name: 'Contractor Document Portal' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Upload Document' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Contract')).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Monthly progress report' } });
     fireEvent.change(screen.getByLabelText('Document type'), { target: { value: 'Progress Report' } });
@@ -103,8 +99,12 @@ describe('App', () => {
     fireEvent.change(screen.getByLabelText('Role'), { target: { value: 'official' } });
     fireEvent.submit(screen.getByRole('button', { name: 'Continue' }).closest('form')!);
 
-    expect(await screen.findByRole('heading', { name: 'Grokipedia Workspace' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Grokipedia Index' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Contract Analysis Workspace' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Contract Timeline And Cohort Patterns' })).toBeInTheDocument();
+    expect(screen.getByText('Evidence index')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Grokipedia Index' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Evidence index'));
+    expect(await screen.findByRole('heading', { name: 'Grokipedia Index' })).toBeInTheDocument();
     expect(
       await screen.findByRole('button', { name: /contract result Environmental Compliance/ }),
     ).toBeInTheDocument();
@@ -118,6 +118,7 @@ describe('App', () => {
     render(<App />);
     fireEvent.change(screen.getByLabelText('Role'), { target: { value: 'official' } });
     fireEvent.submit(screen.getByRole('button', { name: 'Continue' }).closest('form')!);
+    fireEvent.click(await screen.findByText('Evidence index'));
 
     fireEvent.change(await screen.findByLabelText('Search knowledge index'), { target: { value: 'Aging RFI' } });
     fireEvent.click(await screen.findByRole('button', { name: /regression result Aging RFI/ }));
@@ -128,6 +129,25 @@ describe('App', () => {
   });
 });
 
+function contractorFetch() {
+  return vi.fn((input: Parameters<typeof fetch>[0]) => {
+    const url = String(input);
+    if (url === '/api/auth/mock-login') {
+      return Promise.resolve(jsonResponse({ access_token: 'contractor-token', user: contractorUser }));
+    }
+    if (url === '/api/contracts') {
+      return Promise.resolve(jsonResponse([contractRecord]));
+    }
+    if (url === '/api/documents') {
+      return Promise.resolve(jsonResponse([documentRecord]));
+    }
+    if (url === '/api/documents/upload') {
+      return Promise.resolve(jsonResponse(documentRecord, 201));
+    }
+    return Promise.resolve(jsonResponse({}));
+  });
+}
+
 function officialFetch() {
   return vi.fn((input: Parameters<typeof fetch>[0]) => {
     const url = String(input);
@@ -136,6 +156,12 @@ function officialFetch() {
     }
     if (url === '/api/contracts') {
       return Promise.resolve(jsonResponse([contractRecord]));
+    }
+    if (url === '/api/analysis/contracts/N40080-24-D-1042') {
+      return Promise.resolve(jsonResponse(contractAnalysis));
+    }
+    if (url === '/api/analysis/cohort') {
+      return Promise.resolve(jsonResponse(cohortAnalysis));
     }
     if (url.startsWith('/api/wiki/search')) {
       if (url.includes('Aging+RFI')) {
@@ -223,6 +249,63 @@ const wikiContractorArticle = {
   related_nodes: [wikiContractNode],
   limitations: ['Labels are evidence counters.'],
   metadata: {},
+};
+
+const contractAnalysis = {
+  contract_id: 'N40080-24-D-1042',
+  contract_title: 'Environmental Compliance and Permitting Support Services',
+  timeline: [
+    {
+      document_id: 'doc-1',
+      title: 'Monthly progress report',
+      document_kind: 'monthly_report',
+      period_label: '2026-04-25',
+      created_at: '2026-04-25T18:00:00Z',
+      processing_status: 'processed',
+      signals: [
+        {
+          id: 'sig-1',
+          category: 'issue',
+          label: 'Aging RFI',
+          summary: 'RFI is 21 days open.',
+          polarity: 'negative',
+          severity: 'medium',
+          document_id: 'doc-1',
+          responsible_party: 'government',
+          recurrence_key: 'issue-aging-rfi',
+        },
+      ],
+    },
+  ],
+  recurring_issues: [],
+  one_off_issues: [{ key: 'issue-aging-rfi', title: 'Aging RFI', count: 1, document_count: 1, examples: ['RFI is 21 days open.'] }],
+  early_warning_signals: [],
+  positive_signals: [],
+  execution_patterns: [],
+  cpars_ratings: [],
+  limitations: ['No CPARS ratings are available unless authorized CPARS exports have been imported.'],
+};
+
+const cohortAnalysis = {
+  contract_count: 1,
+  contracts: [
+    {
+      contract_id: 'N40080-24-D-1042',
+      contract_title: 'Environmental Compliance and Permitting Support Services',
+      performance_band: 'mixed',
+      document_count: 1,
+      recurring_issue_count: 0,
+      positive_signal_count: 0,
+      execution_pattern_count: 0,
+      cpars_rating_count: 0,
+    },
+  ],
+  poor_contract_common_patterns: [],
+  well_performing_common_patterns: [],
+  delta_lessons: [],
+  qualitative_quantitative_correlations: [],
+  execution_correlations: [],
+  limitations: ['Cohort analysis needs at least two visible contracts to compare patterns.'],
 };
 
 function jsonResponse(body: unknown, status = 200) {

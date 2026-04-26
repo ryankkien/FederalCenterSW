@@ -103,6 +103,20 @@ links to contractor and topic pages. Contractor pages should present evidence la
 such as schedule variance events, funding variance events, unresolved issues, and
 contradiction counts rather than unsupported character judgments.
 
+The official analysis workspace should treat CPARS or EVM degradation as the outcome to
+explain, not the whole insight. For a selected contract, show period-labeled report
+signals in chronological order alongside imported CPARS ratings when available, then
+distinguish recurring issues from one-offs, pre-degradation warning signs, positive
+signals, and contractor execution patterns such as sequencing, subcontractor
+management, quality control, staffing, and adherence to the project management plan.
+Across comparable contracts, compare the single-contract outputs to surface specific
+qualitative causes behind schedule, cost, quality, or management outcomes.
+
+Contract structure analysis is a separate high-value input. CLIN structure, contract
+type, incentive fees, government-furnished equipment obligations, period of
+performance, approval workflows, and option structure require ingested contract
+documents and should not be inferred from recurring reports alone.
+
 For CPARS, treat unclassified records as a high-value qualitative source. Candidate
 ingestion should start from contract numbers, potentially discovered through SAM.gov
 where Navy-scoped API access is available, then parse authenticated CPARS HTML from

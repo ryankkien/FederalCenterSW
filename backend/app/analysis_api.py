@@ -1,7 +1,9 @@
-from datetime import datetime
-from typing import Dict, List, Optional
+from collections import Counter, defaultdict
+from datetime import date, datetime
+import re
+from typing import Dict, List, Optional, Sequence, Tuple
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -9,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.ai.providers import get_ai_provider
 from app.analysis_orchestrator import get_analysis_run, run_cohort_analysis, run_per_contract_analysis
 from app.auth import CurrentUser, get_current_user
-from app.authz import require_contract_view
+from app.authz import require_contract_view, visible_contract_ids
 from app.blob_storage import BlobStorage, get_blob_storage
 from app.cohort_builder import build_cohort
 from app.contract_analysis import create_investigation_run
@@ -17,15 +19,20 @@ from app.database import get_db
 from app.models import (
     BaselineObligation,
     BaselineRevision,
+    Contract,
     ContractBaseline,
     ContractHypothesis,
     ContractSimilarityLink,
+    DocumentChunk,
     DocumentProcessingJob,
+    DocumentReportFact,
     DocumentSemanticLink,
     DocumentUpload,
     ExternalSourceRef,
     HypothesisEvidence,
     InvestigationRun,
+    KnowledgeSourceRecord,
+    PerformanceSignal,
     ProcessingRun,
     RegressionFinding,
 )
@@ -188,6 +195,85 @@ class ProcessingJobRunResponse(BaseModel):
     error: Optional[str] = None
 
 
+class TimelineSignalResponse(BaseModel):
+    id: str
+    category: str
+    label: str
+    summary: str
+    polarity: str
+    severity: Optional[str] = None
+    confidence: Optional[float] = None
+    document_id: Optional[str] = None
+    quote: Optional[str] = None
+    responsible_party: Optional[str] = None
+    recurrence_key: str
+
+
+class TimelineReportResponse(BaseModel):
+    document_id: str
+    title: str
+    document_kind: str
+    period_label: str
+    report_period_start: Optional[str] = None
+    report_period_end: Optional[str] = None
+    created_at: datetime
+    processing_status: str
+    signals: List[TimelineSignalResponse] = []
+
+
+class ContractPatternResponse(BaseModel):
+    key: str
+    title: str
+    count: int
+    document_count: int
+    first_period_label: Optional[str] = None
+    last_period_label: Optional[str] = None
+    examples: List[str] = []
+
+
+class CparsRatingResponse(BaseModel):
+    label: str
+    rating: str
+    period_label: Optional[str] = None
+    summary: Optional[str] = None
+    source: str
+
+
+class ContractTimelineAnalysisResponse(BaseModel):
+    contract_id: str
+    contract_title: str
+    timeline: List[TimelineReportResponse]
+    recurring_issues: List[ContractPatternResponse]
+    one_off_issues: List[ContractPatternResponse]
+    early_warning_signals: List[TimelineSignalResponse]
+    positive_signals: List[TimelineSignalResponse]
+    execution_patterns: List[TimelineSignalResponse]
+    cpars_ratings: List[CparsRatingResponse]
+    limitations: List[str] = []
+
+
+class CohortContractBriefResponse(BaseModel):
+    contract_id: str
+    contract_title: str
+    performance_band: str
+    document_count: int
+    recurring_issue_count: int
+    positive_signal_count: int
+    execution_pattern_count: int
+    cpars_rating_count: int
+
+
+class CohortAnalysisResponse(BaseModel):
+    contract_count: int
+    contracts: List[CohortContractBriefResponse]
+    poor_contract_common_patterns: List[ContractPatternResponse]
+    well_performing_common_patterns: List[ContractPatternResponse]
+    delta_lessons: List[str]
+    qualitative_quantitative_correlations: List[str]
+    execution_correlations: List[str]
+    limitations: List[str] = []
+
+
 @router.post("/processing/jobs/{job_id}/run", response_model=ProcessingJobRunResponse)
 def run_processing_job(
     job_id: str,
@@ -217,6 +303,32 @@ def run_processing_job(
         output_blob_path=result.output_blob_path,
         error=result.error,
     )
+
+
+@router.get("/analysis/contracts/{contract_id}", response_model=ContractTimelineAnalysisResponse)
+def get_single_contract_analysis(
+    contract_id: str,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ContractTimelineAnalysisResponse:
+    _require_official_analysis(user)
+    require_contract_view(user, db, contract_id)
+    return _contract_timeline_analysis(db, contract_id)
+
+
+@router.get("/analysis/cohort", response_model=CohortAnalysisResponse)
+def get_cohort_analysis(
+    contract_ids: List[str] = Query(default_factory=list),
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> CohortAnalysisResponse:
+    _require_official_analysis(user)
+    visible_ids = visible_contract_ids(user, db)
+    selected_ids = contract_ids or visible_ids
+    for contract_id in selected_ids:
+        require_contract_view(user, db, contract_id)
+    analyses = [_contract_timeline_analysis(db, contract_id) for contract_id in selected_ids]
+    return _cohort_analysis(analyses)
 
 
 @router.get("/contracts/{contract_id}/baseline", response_model=ContractBaselineResponse)
@@ -609,7 +721,7 @@ def get_per_contract_analysis(
     response_model=AnalysisRunResponse,
     status_code=status.HTTP_202_ACCEPTED,
 )
-def create_cohort_analysis(
+def create_cohort_analysis_run(
     payload: CohortAnalysisRequest,
     user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -635,7 +747,7 @@ def create_cohort_analysis(
 
 
 @router.get("/analysis/cohort-runs/{run_id}", response_model=AnalysisRunResponse)
-def get_cohort_analysis(
+def get_cohort_analysis_run(
     run_id: str,
     user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -655,6 +767,587 @@ def get_cohort_analysis(
         created_at=run.get("created_at"),
         completed_at=run.get("completed_at"),
     )
+
+
+def _contract_timeline_analysis(db: Session, contract_id: str) -> ContractTimelineAnalysisResponse:
+    contract = db.get(Contract, contract_id)
+    documents = _timeline_documents(db, contract_id)
+    signals_by_document = _timeline_signals_by_document(db, contract_id)
+    timeline = [
+        TimelineReportResponse(
+            document_id=document.id,
+            title=document.title,
+            document_kind=_display_document_kind(document),
+            period_label=_period_label(db, document),
+            report_period_start=str(_report_period(db, document)[0]) if _report_period(db, document)[0] else None,
+            report_period_end=str(_report_period(db, document)[1]) if _report_period(db, document)[1] else None,
+            created_at=document.created_at,
+            processing_status=document.processing_status,
+            signals=signals_by_document.get(document.id, []),
+        )
+        for document in documents
+    ]
+    all_signals = [signal for report in timeline for signal in report.signals]
+    recurring, one_off = _issue_patterns(timeline)
+    cpars_ratings = _cpars_ratings(db, contract_id)
+    limitations = []
+    if not timeline:
+        limitations.append("No child reports are linked to this contract yet.")
+    if not cpars_ratings:
+        limitations.append("No CPARS ratings are available unless authorized CPARS exports have been imported.")
+    if not all_signals:
+        limitations.append("No report signals are available yet; run document processing after ingesting report text.")
+
+    return ContractTimelineAnalysisResponse(
+        contract_id=contract_id,
+        contract_title=contract.title if contract is not None else contract_id,
+        timeline=timeline,
+        recurring_issues=recurring,
+        one_off_issues=one_off,
+        early_warning_signals=_early_warning_signals(timeline, cpars_ratings),
+        positive_signals=[signal for signal in all_signals if signal.polarity == "positive"][:20],
+        execution_patterns=[signal for signal in all_signals if signal.category == "execution_pattern"][:20],
+        cpars_ratings=cpars_ratings,
+        limitations=limitations,
+    )
+
+
+def _require_official_analysis(user: CurrentUser) -> None:
+    if user.role != "official":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Official access required")
+
+
+def _cohort_analysis(analyses: Sequence[ContractTimelineAnalysisResponse]) -> CohortAnalysisResponse:
+    briefs = [_cohort_brief(analysis) for analysis in analyses]
+    poor_ids = {brief.contract_id for brief in briefs if brief.performance_band == "poor"}
+    well_ids = {brief.contract_id for brief in briefs if brief.performance_band in {"well_performing", "recovered"}}
+    poor_patterns = _cohort_common_patterns(
+        [analysis for analysis in analyses if analysis.contract_id in poor_ids],
+        include_positive=False,
+    )
+    well_patterns = _cohort_common_patterns(
+        [analysis for analysis in analyses if analysis.contract_id in well_ids],
+        include_positive=True,
+    )
+    limitations = []
+    if len(analyses) < 2:
+        limitations.append("Cohort analysis needs at least two visible contracts to compare patterns.")
+    if not any(analysis.cpars_ratings for analysis in analyses):
+        limitations.append("CPARS quantitative correlation is limited because no CPARS ratings are imported.")
+
+    return CohortAnalysisResponse(
+        contract_count=len(analyses),
+        contracts=briefs,
+        poor_contract_common_patterns=poor_patterns,
+        well_performing_common_patterns=well_patterns,
+        delta_lessons=_delta_lessons(poor_patterns, well_patterns),
+        qualitative_quantitative_correlations=_qualitative_quantitative_correlations(analyses),
+        execution_correlations=_execution_correlations(analyses),
+        limitations=limitations,
+    )
+
+
+def _timeline_documents(db: Session, contract_id: str) -> List[DocumentUpload]:
+    rows = list(
+        db.scalars(
+            select(DocumentUpload).where(
+                or_(DocumentUpload.contract_id == contract_id, DocumentUpload.id == contract_id)
+            )
+        ).all()
+    )
+    return sorted(
+        rows,
+        key=lambda item: (
+            _report_period(db, item)[0] or _report_period(db, item)[1] or item.created_at.date(),
+            item.created_at,
+            item.title,
+        ),
+    )
+
+
+def _timeline_signals_by_document(db: Session, contract_id: str) -> Dict[str, List[TimelineSignalResponse]]:
+    by_document: Dict[str, List[TimelineSignalResponse]] = defaultdict(list)
+    for finding in db.scalars(select(RegressionFinding).where(RegressionFinding.contract_id == contract_id)).all():
+        evidence_text = " ".join(item for item in (finding.title, finding.summary, finding.quote or "") if item)
+        label = _specific_signal_label(finding.title, evidence_text)
+        signal = TimelineSignalResponse(
+            id=finding.id,
+            category="issue",
+            label=label,
+            summary=finding.summary,
+            polarity="negative",
+            severity=finding.severity,
+            confidence=finding.confidence,
+            document_id=finding.document_upload_id,
+            quote=finding.quote,
+            responsible_party=_responsible_party(evidence_text),
+            recurrence_key=_recurrence_key(finding.finding_type, label),
+        )
+        if finding.document_upload_id:
+            by_document[finding.document_upload_id].append(signal)
+
+    for fact in db.scalars(select(DocumentReportFact).where(DocumentReportFact.contract_id == contract_id)).all():
+        evidence_text = f"{fact.label} {fact.value_text} {fact.quote}"
+        polarity = _polarity(evidence_text)
+        category = "execution_pattern" if _is_execution_text(evidence_text) else "report_fact"
+        label = _specific_signal_label(fact.label, evidence_text)
+        responsible_party = "government" if fact.fact_type == "rfi_age" else _responsible_party(evidence_text)
+        signal = TimelineSignalResponse(
+            id=fact.id,
+            category=category,
+            label=label,
+            summary=fact.value_text,
+            polarity=polarity,
+            confidence=fact.confidence,
+            document_id=fact.document_upload_id,
+            quote=fact.quote,
+            responsible_party=responsible_party,
+            recurrence_key=_recurrence_key(fact.fact_type, label),
+        )
+        if fact.document_upload_id:
+            by_document[fact.document_upload_id].append(signal)
+
+    for signal_row in db.scalars(select(PerformanceSignal).where(PerformanceSignal.contract_id == contract_id)).all():
+        evidence_text = " ".join(item for item in (signal_row.label or "", signal_row.summary) if item)
+        category = "execution_pattern" if _is_execution_text(signal_row.summary) else signal_row.signal_type
+        label = _specific_signal_label(signal_row.label or signal_row.signal_type, evidence_text)
+        signal = TimelineSignalResponse(
+            id=signal_row.id,
+            category=category,
+            label=label,
+            summary=signal_row.summary,
+            polarity=_polarity(signal_row.summary),
+            severity=signal_row.severity,
+            confidence=signal_row.confidence,
+            document_id=signal_row.document_upload_id,
+            quote=_metadata_quote(signal_row.metadata_json),
+            responsible_party=_responsible_party(evidence_text),
+            recurrence_key=_recurrence_key(signal_row.signal_type, label),
+        )
+        if signal_row.document_upload_id:
+            by_document[signal_row.document_upload_id].append(signal)
+
+    for chunk in _execution_chunks(db, contract_id):
+        signal = TimelineSignalResponse(
+            id=f"execution:{chunk.id}",
+            category="execution_pattern",
+            label=_execution_label(chunk.text),
+            summary=_execution_summary(chunk.text),
+            polarity=_polarity(chunk.text),
+            confidence=0.55,
+            document_id=chunk.document_upload_id,
+            quote=None,
+            responsible_party=_responsible_party(chunk.text),
+            recurrence_key=_recurrence_key("execution", _execution_label(chunk.text)),
+        )
+        by_document[chunk.document_upload_id].append(signal)
+
+    return {key: sorted(value, key=lambda item: (item.category, item.label)) for key, value in by_document.items()}
+
+
+def _execution_chunks(db: Session, contract_id: str) -> List[DocumentChunk]:
+    document_ids = list(
+        db.scalars(select(DocumentUpload.id).where(DocumentUpload.contract_id == contract_id)).all()
+    )
+    if not document_ids:
+        return []
+    chunks = list(db.scalars(select(DocumentChunk).where(DocumentChunk.document_upload_id.in_(document_ids))).all())
+    return [chunk for chunk in chunks if _is_execution_text(chunk.text)][:40]
+
+
+def _issue_patterns(timeline: Sequence[TimelineReportResponse]) -> Tuple[List[ContractPatternResponse], List[ContractPatternResponse]]:
+    grouped: Dict[str, List[Tuple[TimelineReportResponse, TimelineSignalResponse]]] = defaultdict(list)
+    for report in timeline:
+        for signal in report.signals:
+            if signal.polarity == "positive" or signal.category == "execution_pattern":
+                continue
+            grouped[signal.recurrence_key].append((report, signal))
+    patterns = [_pattern_response(key, values) for key, values in grouped.items()]
+    recurring = sorted([item for item in patterns if item.document_count >= 2], key=lambda item: (-item.document_count, item.title))
+    one_off = sorted([item for item in patterns if item.document_count == 1], key=lambda item: item.title)
+    return recurring[:20], one_off[:20]
+
+
+def _pattern_response(
+    key: str,
+    values: Sequence[Tuple[TimelineReportResponse, TimelineSignalResponse]],
+) -> ContractPatternResponse:
+    reports = [report for report, _signal in values]
+    signals = [signal for _report, signal in values]
+    periods = [report.period_label for report in reports]
+    return ContractPatternResponse(
+        key=key,
+        title=signals[0].label,
+        count=len(signals),
+        document_count=len({report.document_id for report in reports}),
+        first_period_label=periods[0] if periods else None,
+        last_period_label=periods[-1] if periods else None,
+        examples=[signal.summary for signal in signals[:3]],
+    )
+
+
+def _early_warning_signals(
+    timeline: Sequence[TimelineReportResponse],
+    cpars_ratings: Sequence[CparsRatingResponse],
+) -> List[TimelineSignalResponse]:
+    degradation_index = None
+    for index, report in enumerate(timeline):
+        if any(signal.severity == "high" or signal.category in {"cost_regression", "schedule_regression"} for signal in report.signals):
+            degradation_index = index
+            break
+    if degradation_index is None and any(_is_weak_cpars_rating(item.rating) for item in cpars_ratings):
+        degradation_index = max(1, len(timeline) - 1)
+    if degradation_index is None:
+        return []
+    warnings = []
+    for report in timeline[:degradation_index]:
+        warnings.extend(
+            signal
+            for signal in report.signals
+            if signal.polarity in {"negative", "mixed"} and signal.category != "execution_pattern"
+        )
+    return warnings[:20]
+
+
+def _cpars_ratings(db: Session, contract_id: str) -> List[CparsRatingResponse]:
+    ratings: List[CparsRatingResponse] = []
+    records = list(
+        db.scalars(
+            select(KnowledgeSourceRecord).where(
+                KnowledgeSourceRecord.contract_id == contract_id,
+                KnowledgeSourceRecord.source_name.ilike("%cpars%"),
+            )
+        ).all()
+    )
+    for record in records:
+        raw = record.raw_json or {}
+        for label in ("quality", "schedule", "cost_control", "management", "regulatory_compliance", "overall"):
+            rating = raw.get(label) or raw.get(f"{label}_rating")
+            if rating:
+                ratings.append(
+                    CparsRatingResponse(
+                        label=label.replace("_", " ").title(),
+                        rating=str(rating),
+                        period_label=str(raw.get("period") or raw.get("evaluation_period") or ""),
+                        summary=record.text or record.title,
+                        source=record.source_name,
+                    )
+                )
+    facts = list(
+        db.scalars(
+            select(DocumentReportFact).where(
+                DocumentReportFact.contract_id == contract_id,
+                DocumentReportFact.fact_type.ilike("%cpars%"),
+            )
+        ).all()
+    )
+    for fact in facts:
+        ratings.append(
+            CparsRatingResponse(
+                label=fact.label,
+                rating=fact.value_text,
+                summary=fact.quote,
+                source="document_fact",
+            )
+        )
+    return ratings[:20]
+
+
+def _cohort_brief(analysis: ContractTimelineAnalysisResponse) -> CohortContractBriefResponse:
+    all_signals = [signal for report in analysis.timeline for signal in report.signals]
+    has_high = any(signal.severity == "high" for signal in all_signals)
+    has_weak_cpars = any(_is_weak_cpars_rating(item.rating) for item in analysis.cpars_ratings)
+    has_recovered = any("recover" in signal.summary.lower() or "resolved" in signal.summary.lower() for signal in all_signals)
+    if has_recovered and (analysis.positive_signals or analysis.recurring_issues):
+        band = "recovered"
+    elif has_high or has_weak_cpars or len(analysis.recurring_issues) >= 2:
+        band = "poor"
+    elif analysis.positive_signals and not analysis.recurring_issues:
+        band = "well_performing"
+    else:
+        band = "mixed"
+    return CohortContractBriefResponse(
+        contract_id=analysis.contract_id,
+        contract_title=analysis.contract_title,
+        performance_band=band,
+        document_count=len(analysis.timeline),
+        recurring_issue_count=len(analysis.recurring_issues),
+        positive_signal_count=len(analysis.positive_signals),
+        execution_pattern_count=len(analysis.execution_patterns),
+        cpars_rating_count=len(analysis.cpars_ratings),
+    )
+
+
+def _cohort_common_patterns(
+    analyses: Sequence[ContractTimelineAnalysisResponse],
+    include_positive: bool,
+) -> List[ContractPatternResponse]:
+    grouped: Dict[str, List[Tuple[ContractTimelineAnalysisResponse, TimelineSignalResponse]]] = defaultdict(list)
+    for analysis in analyses:
+        signals = [signal for report in analysis.timeline for signal in report.signals]
+        for signal in signals:
+            if include_positive:
+                if signal.polarity != "positive" and signal.category != "execution_pattern":
+                    continue
+            elif signal.polarity == "positive":
+                continue
+            grouped[signal.recurrence_key].append((analysis, signal))
+    patterns = []
+    for key, values in grouped.items():
+        contract_count = len({analysis.contract_id for analysis, _signal in values})
+        if contract_count < 2 and len(analyses) > 1:
+            continue
+        signals = [signal for _analysis, signal in values]
+        patterns.append(
+            ContractPatternResponse(
+                key=key,
+                title=signals[0].label,
+                count=len(signals),
+                document_count=contract_count,
+                examples=[signal.summary for signal in signals[:3]],
+            )
+        )
+    return sorted(patterns, key=lambda item: (-item.document_count, -item.count, item.title))[:20]
+
+
+def _delta_lessons(
+    poor_patterns: Sequence[ContractPatternResponse],
+    well_patterns: Sequence[ContractPatternResponse],
+) -> List[str]:
+    poor_keys = {item.key for item in poor_patterns}
+    well_keys = {item.key for item in well_patterns}
+    lessons = [
+        f"Poor-performing contracts show recurring '{item.title}' signals that are not present in the well-performing set."
+        for item in poor_patterns
+        if item.key not in well_keys
+    ]
+    lessons.extend(
+        f"Well-performing or recovered contracts show '{item.title}' signals that are missing from the poor-performing set."
+        for item in well_patterns
+        if item.key not in poor_keys
+    )
+    return lessons[:12]
+
+
+def _qualitative_quantitative_correlations(
+    analyses: Sequence[ContractTimelineAnalysisResponse],
+) -> List[str]:
+    correlations = []
+    for analysis in analyses:
+        weak_labels = [item.label for item in analysis.cpars_ratings if _is_weak_cpars_rating(item.rating)]
+        if weak_labels and analysis.recurring_issues:
+            correlations.append(
+                f"{analysis.contract_title}: weak CPARS areas ({', '.join(weak_labels[:3])}) align with recurring report signals such as {analysis.recurring_issues[0].title}."
+            )
+    if not correlations:
+        poor_issue_counts = [
+            (analysis.contract_title, len(analysis.recurring_issues))
+            for analysis in analyses
+            if len(analysis.recurring_issues) >= 2
+        ]
+        correlations = [
+            f"{title}: recurring qualitative issue count is {count}; import CPARS ratings to test quantitative degradation."
+            for title, count in poor_issue_counts[:5]
+        ]
+    return correlations[:10]
+
+
+def _execution_correlations(analyses: Sequence[ContractTimelineAnalysisResponse]) -> List[str]:
+    labels = Counter(
+        signal.label
+        for analysis in analyses
+        for signal in analysis.execution_patterns
+    )
+    return [
+        f"Execution pattern '{label}' appears across {count} contract signal(s); compare this against performance bands before treating it as a lesson."
+        for label, count in labels.most_common(10)
+    ]
+
+
+def _period_label(db: Session, document: DocumentUpload) -> str:
+    start, end = _report_period(db, document)
+    if start and end:
+        return f"{start} to {end}"
+    if start:
+        return str(start)
+    if end:
+        return str(end)
+    return document.created_at.strftime("%Y-%m-%d")
+
+
+def _report_period(db: Session, document: DocumentUpload) -> Tuple[Optional[date], Optional[date]]:
+    if document.report_period_start or document.report_period_end:
+        return document.report_period_start, document.report_period_end
+    text = _document_text_sample(db, document.id)
+    match = re.search(
+        r"Reporting Period:\s*([0-9]{1,2}\s+[A-Za-z]+\s+[0-9]{4})\s*[–-]\s*([0-9]{1,2}\s+[A-Za-z]+\s+[0-9]{4})",
+        text,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None, None
+    return _parse_day_month_year(match.group(1)), _parse_day_month_year(match.group(2))
+
+
+def _document_text_sample(db: Session, document_id: str) -> str:
+    chunks = list(
+        db.scalars(
+            select(DocumentChunk)
+            .where(DocumentChunk.document_upload_id == document_id)
+            .order_by(DocumentChunk.chunk_index.asc())
+            .limit(3)
+        ).all()
+    )
+    return "\n".join(chunk.text for chunk in chunks)
+
+
+def _parse_day_month_year(value: str) -> Optional[date]:
+    normalized = value.strip()
+    for pattern in ("%d %B %Y", "%d %b %Y"):
+        try:
+            return datetime.strptime(normalized, pattern).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _display_document_kind(document: DocumentUpload) -> str:
+    haystack = f"{document.original_filename} {document.title} {document.document_kind}".lower()
+    if "_wsr-" in haystack or " wsr-" in haystack or "weekly status report" in haystack:
+        return "weekly_report"
+    if "_msr" in haystack or " msr" in haystack or "monthly status report" in haystack:
+        return "monthly_report"
+    return document.document_kind
+
+
+def _recurrence_key(category: str, label: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", f"{category}-{label}".lower()).strip("-")[:120] or "signal"
+
+
+def _polarity(text: str) -> str:
+    lower = text.lower()
+    if _contains_any(lower, ("delay", "risk", "late", "overrun", "variance", "unbudgeted", "unauthorized", "defect", "missing", "open", "slip", "rework")):
+        return "negative"
+    if _contains_any(lower, ("resolved", "recovered", "on schedule", "ahead of schedule", "accepted", "approved", "completed", "effective", "worked well", "expedited")):
+        return "positive"
+    return "neutral"
+
+
+def _is_execution_text(text: str) -> bool:
+    return _contains_any(
+        text.lower(),
+        (
+            "sequence",
+            "sequencing",
+            "phase",
+            "phasing",
+            "subcontractor",
+            "quality control",
+            "qc",
+            "project management plan",
+            "pmp",
+            "staffing",
+            "labor mix",
+            "work package",
+        ),
+    )
+
+
+def _execution_label(text: str) -> str:
+    lower = text.lower()
+    if "subcontractor" in lower:
+        return "Subcontractor management"
+    if "quality control" in lower or "qc" in lower:
+        return "Quality control"
+    if "sequence" in lower or "sequencing" in lower or "phase" in lower:
+        return "Work sequencing"
+    if "project management plan" in lower or "pmp" in lower:
+        return "Project management plan adherence"
+    if "staffing" in lower or "labor mix" in lower:
+        return "Staffing and labor mix"
+    return "Execution approach"
+
+
+def _specific_signal_label(default: str, text: str) -> str:
+    lower = text.lower()
+    if _contains_any(lower, ("gfe", "government furnished equipment", "government-furnished equipment")):
+        return "GFE availability delay"
+    if _contains_any(lower, ("government action", "pending government", "cor approval", "ko approval", "government decision")):
+        return "Government action delay"
+    if _contains_any(lower, ("rfi", "request for information")):
+        return "Aging RFI"
+    if _contains_any(lower, ("subcontractor", "subcontract")):
+        return "Subcontractor execution issue"
+    if _contains_any(lower, ("quality control", "qc", "defect", "rework", "rejection")):
+        return "Quality control or rework"
+    if _contains_any(lower, ("staffing", "labor mix", "vacancy", "unfilled")):
+        return "Staffing or labor mix"
+    if _contains_any(lower, ("funding", "incremental funding", "funds")):
+        return "Funding availability"
+    return default
+
+
+def _responsible_party(text: str) -> str:
+    lower = text.lower()
+    if _contains_any(lower, ("government action", "pending government", "gfe", "cor approval", "ko approval", "government decision")):
+        return "government"
+    if _contains_any(lower, ("subcontractor", "staffing", "quality control", "qc", "defect", "rework")):
+        return "contractor"
+    if _contains_any(lower, ("weather", "supply chain", "third-party", "third party")):
+        return "external"
+    return "unclear"
+
+
+def _snippet_for_execution(text: str) -> str:
+    lower = text.lower()
+    for keyword in ("subcontractor", "quality control", "qc", "sequencing", "sequence", "phase", "project management plan", "pmp", "staffing", "labor mix"):
+        index = lower.find(keyword)
+        if index >= 0:
+            return text[max(0, index - 160) : index + 360].strip()
+    return text[:500]
+
+
+def _execution_summary(text: str) -> str:
+    label = _execution_label(text)
+    lower = text.lower()
+    if label == "Subcontractor management":
+        if "authority" in lower or "authorized" in lower or "rfi" in lower:
+            return "Subcontractor labor or authority depended on written government clarification."
+        return "Subcontractor activity appears in the report history and may need review with schedule/cost outcomes."
+    if label == "Quality control":
+        if _polarity(text) == "positive":
+            return "Quality control activity appears to support acceptance or recovery."
+        return "Quality control, defect, or rework language appears in the report history."
+    if label == "Work sequencing":
+        return "Work sequencing or phasing depended on access, approvals, or planned next-period activity."
+    if label == "Project management plan adherence":
+        return "Program management or PMP-related activity appears in the report history."
+    if label == "Staffing and labor mix":
+        return "Staffing or labor mix appears as an execution factor in the report history."
+    return "Execution approach appears in the report history."
+
+
+def _metadata_quote(metadata: Optional[Dict[str, object]]) -> Optional[str]:
+    if not metadata:
+        return None
+    evidence = metadata.get("evidence")
+    if isinstance(evidence, list) and evidence:
+        return str(evidence[0])
+    if isinstance(evidence, str):
+        return evidence
+    return None
+
+
+def _is_weak_cpars_rating(value: str) -> bool:
+    return value.strip().lower() in {"unsatisfactory", "marginal", "poor", "red", "1", "2"}
+
+
+def _contains_any(value: str, needles: Sequence[str]) -> bool:
+    return any(needle in value for needle in needles)
+
+
+def _trim(value: str, limit: int) -> str:
+    return value if len(value) <= limit else f"{value[: limit - 3].rstrip()}..."
 
 
 def _get_hypothesis(db: Session, contract_id: str, hypothesis_id: str) -> ContractHypothesis:

@@ -187,6 +187,238 @@ h3 {
   margin: 0 auto;
 }
 
+.official-stack {
+  display: grid;
+  gap: 16px;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+.secondary-knowledge-index {
+  border: 1px solid #cdd6e1;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.secondary-knowledge-index > summary {
+  cursor: pointer;
+  padding: 12px 16px;
+  color: #344054;
+  font-weight: 800;
+}
+
+.secondary-knowledge-index[open] {
+  padding-bottom: 16px;
+}
+
+.secondary-knowledge-index[open] > summary {
+  border-bottom: 1px solid #e3e8ef;
+}
+
+.secondary-knowledge-index .wiki-layout {
+  margin: 16px;
+}
+
+.analysis-workspace,
+.wiki-layout {
+  min-width: 0;
+}
+
+.analysis-workspace {
+  display: grid;
+  gap: 14px;
+  border: 1px solid #cdd6e1;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 16px;
+}
+
+.analysis-header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.compact-field {
+  display: grid;
+  gap: 6px;
+  min-width: min(100%, 360px);
+  color: #344054;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.compact-field select {
+  min-height: 38px;
+  border: 1px solid #a8b5c5;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #101828;
+  padding: 7px 10px;
+  font-weight: 650;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.contract-brief {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #e3e8ef;
+  border-radius: 8px;
+  background: #fbfcfe;
+  padding: 14px;
+}
+
+.brief-section-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.brief-section {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  border-top: 1px solid #d8e0ea;
+  padding-top: 10px;
+}
+
+.brief-section p {
+  margin: 0;
+  color: #344054;
+  line-height: 1.45;
+}
+
+.brief-citations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.brief-citations span {
+  border-radius: 999px;
+  background: #eef2f6;
+  color: #344054;
+  padding: 5px 9px;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.metric-card {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  align-items: center;
+  gap: 4px 10px;
+  min-height: 76px;
+  border: 1px solid #e3e8ef;
+  border-radius: 8px;
+  background: #fbfcfe;
+  padding: 12px;
+}
+
+.metric-card span {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 6px;
+  background: #e8f7ef;
+  color: #067647;
+  grid-row: span 2;
+}
+
+.metric-card strong {
+  color: #101828;
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.metric-card small {
+  color: #667085;
+  font-weight: 750;
+}
+
+.analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.analysis-panel {
+  min-width: 0;
+  border: 1px solid #e3e8ef;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 14px;
+}
+
+.timeline-list,
+.pattern-list,
+.signal-list,
+.text-list {
+  display: grid;
+  gap: 8px;
+}
+
+.timeline-row,
+.pattern-row,
+.signal-row {
+  display: grid;
+  gap: 5px;
+  border: 1px solid #e3e8ef;
+  border-radius: 6px;
+  background: #fbfcfe;
+  padding: 9px 10px;
+}
+
+.timeline-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.timeline-row div {
+  display: grid;
+  gap: 3px;
+}
+
+.timeline-row span,
+.pattern-row span,
+.signal-row p,
+.text-list p {
+  margin: 0;
+  color: #344054;
+  line-height: 1.45;
+}
+
+.timeline-row small,
+.pattern-row small,
+.signal-row small {
+  color: #667085;
+  font-weight: 650;
+}
+
+.limitations-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-top: 1px solid #e3e8ef;
+  padding-top: 12px;
+}
+
+.limitations-row span {
+  border-radius: 999px;
+  background: #fff7e6;
+  color: #a15c07;
+  padding: 5px 9px;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
 .wiki-layout {
   display: grid;
   grid-template-columns: 250px 340px minmax(0, 1fr) 310px;
@@ -474,7 +706,8 @@ h3 {
 .status.supported,
 .status.processed,
 .status.completed,
-.status.active {
+.status.active,
+.status.positive {
   background: #e8f7ef;
   color: #067647;
 }
@@ -514,6 +747,14 @@ td strong,
 }
 
 @media (max-width: 1320px) {
+  .analysis-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .brief-section-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .wiki-layout {
     grid-template-columns: 250px minmax(0, 1fr) 300px;
     grid-template-areas:
@@ -524,6 +765,18 @@ td strong,
 }
 
 @media (max-width: 960px) {
+  .analysis-grid,
+  .metric-grid,
+  .brief-section-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .analysis-header,
+  .timeline-row {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
   .wiki-layout {
     grid-template-columns: 1fr;
     grid-template-areas:

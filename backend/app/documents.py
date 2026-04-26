@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import CurrentUser, get_current_user, require_contractor
-from app.authz import require_unmatched_admin
+from app.authz import can_upload_to_contract, require_unmatched_admin
 from app.blob_storage import BlobStorage, get_blob_storage
 from app.database import get_db
 from app.document_assets import store_contract_document
@@ -84,6 +84,7 @@ async def upload_document(
     title: str = Form(...),
     document_type: str = Form(...),
     notes: Optional[str] = Form(default=None),
+    contract_id: Optional[str] = Form(default=None),
     file: UploadFile = File(...),
     user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -94,6 +95,9 @@ async def upload_document(
     filename = clean_filename(file.filename or "document")
     content_type = file.content_type or "application/octet-stream"
     _validate_file(filename, content_type)
+    linked_contract_id = contract_id.strip() if contract_id else None
+    if linked_contract_id and not can_upload_to_contract(user, db, linked_contract_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contract not found")
 
     data = await file.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
@@ -111,6 +115,7 @@ async def upload_document(
 
     document = DocumentUpload(
         id=document_id,
+        contract_id=linked_contract_id,
         title=title.strip(),
         document_type=document_type.strip(),
         document_kind="status_report",
@@ -122,7 +127,7 @@ async def upload_document(
         blob_path=stored.blob_path,
         text_blob_path=stored.text_blob_path,
         source_sha256=hashlib.sha256(data).hexdigest(),
-        match_status="pending",
+        match_status="matched" if linked_contract_id else "pending",
         processing_status="queued",
         uploader_id=user.id,
         uploader_role=user.role,
