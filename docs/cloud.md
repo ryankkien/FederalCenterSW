@@ -36,6 +36,7 @@ Everything for this project should live in the single resource group `federal-ce
 | Azure Container Registry | `fcswdevacr` | `eastus` | Stores deployable pipeline service images. |
 | Container Apps environment | `fcsw-dev-aca-env` | `eastus` | Managed environment for optional pipeline services. |
 | Feature extractor Container App | `fcsw-feature-extractor-dev` | `eastus` | Optional service image built from `feature_extractor/`. This rename from the prior dev app name requires a delete/create cutover. |
+| GitHub Actions OIDC app registration | `fcsw-github-actions` | Entra ID | Client ID `4650ab5a-7546-45cd-8694-83fc65ae586c`; assigned Contributor on `federal-center-sw-dev` and federated to the GitHub `azure-dev` environment. |
 
 ## Portal Links
 

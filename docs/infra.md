@@ -62,11 +62,12 @@ repository secret `DISCORD_PULL_REQUEST_WEBHOOK_URL`. The workflow uses
 `pull_request_target` so forked pull requests can still notify Discord, but it does not
 check out or run pull request code.
 
-The Azure workflows use Azure OIDC login. Configure these GitHub repository variables:
+The Azure workflows use Azure OIDC login. Configure these GitHub `azure-dev`
+environment variables:
 
 | Variable | Value |
 | --- | --- |
-| `AZURE_CLIENT_ID` | Client ID for the Azure app registration or managed identity used by GitHub Actions. |
+| `AZURE_CLIENT_ID` | `4650ab5a-7546-45cd-8694-83fc65ae586c` |
 | `AZURE_TENANT_ID` | `c821732f-0ded-4db0-96c8-cf2013d16974` |
 | `AZURE_SUBSCRIPTION_ID` | `99596387-8247-4e94-9917-cf8bc695f106` |
 | `AZURE_RESOURCE_GROUP` | `federal-center-sw-dev` |
