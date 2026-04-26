@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Data Source Integration</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Georgia', serif;
+    background: #F7F6F3;
+    color: #1a1a18;
+    padding: 3rem 2rem;
+    max-width: 900px;
+    margin: 0 auto;
+    line-height: 1.6;
+  }
+
+  .page-label {
+    font-family: 'Courier New', monospace;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: #888780;
+    margin-bottom: 2.5rem;
+  }
+
+  .source-block {
+    margin-bottom: 3rem;
+  }
+
+  .source-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1.5px solid #1a1a18;
+  }
+
+  .source-name {
+    font-family: 'Courier New', monospace;
+    font-size: 22px;
+    font-weight: bold;
+    letter-spacing: 0.04em;
+    color: #1a1a18;
+  }
+
+  .badge {
+    font-family: 'Courier New', monospace;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 3px 10px;
+    border-radius: 2px;
+    font-weight: bold;
+  }
+
+  .badge-teal { background: #d0f0e4; color: #0a5c42; border: 1px solid #9ddec6; }
+  .badge-purple { background: #e8e6fb; color: #3a2fa0; border: 1px solid #c4bff5; }
+  .badge-amber { background: #fdf0d5; color: #7a4e0a; border: 1px solid #f5d08a; }
+  .badge-red { background: #fde8e8; color: #8a1c1c; border: 1px solid #f5b8b8; }
+
+  .why-box {
+    background: #fff;
+    border-left: 3px solid #1a1a18;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1.25rem;
+    font-size: 14px;
+    color: #444441;
+    font-style: italic;
+  }
+
+  .step-list {
+    list-style: none;
+    margin-bottom: 1.25rem;
+  }
+
+  .step-list li {
+    display: flex;
+    gap: 14px;
+    font-size: 13.5px;
+    padding: 0.4rem 0;
+    border-bottom: 0.5px solid #e0ded8;
+    align-items: flex-start;
+  }
+
+  .step-list li:last-child { border-bottom: none; }
+
+  .step-num {
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    color: #888780;
+    min-width: 22px;
+    padding-top: 2px;
+    flex-shrink: 0;
+  }
+
+  code {
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    background: #eeecea;
+    padding: 1px 5px;
+    border-radius: 2px;
+    border: 0.5px solid #cccac4;
+  }
+
+  .warning-note {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    font-size: 12.5px;
+    color: #5F5E5A;
+    background: #fff9ee;
+    border: 1px solid #f5d08a;
+    border-radius: 2px;
+    padding: 0.6rem 0.85rem;
+    margin-top: 0.75rem;
+  }
+
+  .warning-icon { flex-shrink: 0; font-size: 13px; margin-top: 1px; }
+
+  .ref-box {
+    background: #eeedf9;
+    border: 1px solid #c4bff5;
+    border-radius: 2px;
+    padding: 0.65rem 0.9rem;
+    font-size: 12px;
+    color: #3a2fa0;
+    margin-top: 0.75rem;
+    font-family: 'Courier New', monospace;
+  }
+
+  .sub-heading {
+    font-family: 'Courier New', monospace;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #888780;
+    margin: 1.25rem 0 0.5rem;
+  }
+
+  .formats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-top: 0.25rem;
+  }
+
+  .format-card {
+    background: #fff;
+    border: 1px solid #d3d1c7;
+    border-radius: 2px;
+    padding: 0.75rem;
+  }
+
+  .format-label {
+    font-family: 'Courier New', monospace;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #888780;
+    margin-bottom: 4px;
+  }
+
+  .format-name {
+    font-size: 13px;
+    font-weight: bold;
+    color: #1a1a18;
+    margin-bottom: 4px;
+  }
+
+  .format-desc {
+    font-size: 12px;
+    color: #5F5E5A;
+    line-height: 1.5;
+  }
+
+  .source-divider {
+    border: none;
+    border-top: 0.5px dashed #b4b2a9;
+    margin: 2.5rem 0;
+  }
+
+  a { color: #3a2fa0; }
+  a:hover { text-decoration: underline; }
+
+  .update-tag {
+    font-family: 'Courier New', monospace;
+    font-size: 10px;
+    color: #888780;
+    background: #f1efe8;
+    border: 0.5px solid #d3d1c7;
+    padding: 2px 7px;
+    border-radius: 2px;
+  }
+</style>
+</head>
+<body>
+
+<p class="page-label">Data source integration — working doc</p>
+
+<!-- CPARS -->
+<div class="source-block">
+  <div class="source-header">
+    <span class="source-name">CPARS</span>
+    <span class="badge badge-teal">Unclassified only</span>
+  </div>
+
+  <div class="why-box">
+    Contains CO/COR performance narratives and contractor response comments — the best qualitative summaries of how a contract actually went.
+  </div>
+
+  <ul class="step-list">
+    <li>
+      <span class="step-num">1.</span>
+      <span>Pull service contract numbers from <code>SAM.gov API</code> — confirm API availability for Navy-scoped contract list</span>
+    </li>
+    <li>
+      <span class="step-num">2.</span>
+      <span>For each contract number, pull evaluation as HTML via authenticated session (Focal Point role) → parse into JSON</span>
+    </li>
+    <li>
+      <span class="step-num">3.</span>
+      <span>Extract: ratings (quality, schedule, cost control, management, regulatory compliance), CO/COR narrative, contractor response narrative, period of performance, eval type (interim / final)</span>
+    </li>
+    <li>
+      <span class="step-num">4.</span>
+      <span>Join to contract master record via <code>contract_id</code></span>
+    </li>
+    <li>
+      <span class="step-num">5.</span>
+      <span>Run narratives through LLM analysis layer; collect structured ratings</span>
+    </li>
+  </ul>
+
+  <div class="warning-note">
+    <span class="warning-icon">⚠</span>
+    <span>Does not apply to classified contracts — CPARS is unclassified only. Those contracts rely solely on IPMDAR + weekly reports.</span>
+  </div>
+
+  <div class="ref-box">
+    Reference: <a href="https://www.acq.osd.mil/asda/dpc/cp/cc/docs/corhb/ref/CPAR-Quality-Checklist.pdf" target="_blank">CPAR Quality Checklist (DoW COR Handbook)</a> — for generating example CPARS reports to test pipeline.<br>
+    Fields: contract/order number · DUNS/PSC/NAICS · eval type · narrative quality criteria · rating definitions (Exceptional → Unsatisfactory)
+  </div>
+</div>
+
+<hr class="source-divider">
+
+<!-- IPMDAR -->
+<div class="source-block">
+  <div class="source-header">
+    <span class="source-name">IPMDAR</span>
+    <span class="badge badge-purple">Monthly cadence</span>
+  </div>
+
+  <div class="why-box">
+    Where most structured contract performance data lives — cost, schedule, EVM metrics — plus the Performance Narrative Report, a rich qualitative document produced per reporting period.
+  </div>
+
+  <ul class="step-list">
+    <li>
+      <span class="step-num">1.</span>
+      <span><strong>Primary:</strong> Route all contractor IPMDAR submissions to <code>reporting@navy.mil</code> equivalent via CDRL — bypasses EVM-CR entirely for new contracts, files arrive directly as JSON + Word/PDF</span>
+    </li>
+    <li>
+      <span class="step-num">1b.</span>
+      <span><strong>Backfill / historical:</strong> PMO Analyst-role user downloads submission packages (CPD + SPD + narrative) from EVM-CR portal and drops into system — no public API exists</span>
+    </li>
+    <li>
+      <span class="step-num">2.</span>
+      <span>Join to contract master record via <code>contract_id</code></span>
+    </li>
+  </ul>
+
+  <div class="sub-heading">What comes in and how</div>
+
+  <div class="formats-grid">
+    <div class="format-card">
+      <div class="format-label">CPD</div>
+      <div class="format-name">Contract Performance Dataset</div>
+      <div class="format-desc">JSON — BCWS, BCWP, ACWP, ETC, EAC by control account. Direct ingestion, no OCR.</div>
+    </div>
+    <div class="format-card">
+      <div class="format-label">SPD</div>
+      <div class="format-name">Schedule Performance Dataset</div>
+      <div class="format-desc">JSON — milestones, critical path, planned vs. actual dates.</div>
+    </div>
+    <div class="format-card">
+      <div class="format-label">Narrative</div>
+      <div class="format-name">Performance Narrative Report</div>
+      <div class="format-desc">Word / PDF, defined in DID. OCR → NER → LLM pipeline.</div>
+    </div>
+  </div>
+
+  <div class="warning-note" style="margin-top: 1rem;">
+    <span class="warning-icon">ℹ</span>
+    <span>EVM-CR has no programmatic read API — it is a web portal for credentialed DoW users. The "authorized API" framing should be dropped. Email intake is the correct primary path.</span>
+  </div>
+
+  <div class="ref-box" style="margin-top: 0.75rem;">
+    Source: <a href="https://blog.humphreys-assoc.com/introduction-ipmdar-data-deliverable/" target="_blank">Humphreys & Associates — Introduction to the IPMDAR Data Deliverable</a>
+  </div>
+</div>
+
+</body>
+</html>
