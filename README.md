@@ -170,12 +170,13 @@ Storage, while Postgres is the canonical store for contract records, processing 
 chunks, embeddings, signals, topics, evidence links, and audit history. Local Postgres
 uses a pgvector-enabled image so embeddings can live beside contract-scoped metadata.
 
-AI processing defaults on when `OPENAI_API_KEY` is set and the AI flags are omitted.
-Configure `AI_PROVIDER`, `OPENAI_API_KEY`, `OPENAI_LLM_MODEL`, and
+AI processing is the primary extraction path when `OPENAI_API_KEY` is set and AI is
+enabled. Configure `AI_PROVIDER`, `OPENAI_API_KEY`, `OPENAI_LLM_MODEL`, and
 `OPENAI_EMBEDDING_MODEL` in an ignored env file or Azure Key Vault-backed app setting
 before running OpenAI-backed extraction. Set `AI_PROCESSING_ENABLED=false` or
 `AI_INLINE_PROCESSING_ENABLED=false` to force-disable either path. Upload and email intake
-workflows continue to store documents when AI processing is disabled or blocked.
+workflows continue to store documents when AI processing is disabled or blocked, and
+rule-based extraction is retained only as a fallback.
 
 Queued document processing runs automatically in Azure through the timer trigger in
 `backend/function_app.py`. The worker skips jobs whose `text.json` still has
@@ -183,7 +184,7 @@ Queued document processing runs automatically in Azure through the timer trigger
 text is available.
 
 The contract analyst pipeline extends the processing foundation with page-level
-extraction, deterministic v1 classification, hard-link matching, extracted entities
+extraction, AI-first classification, hard-link matching, extracted entities
 and report facts, interpreted baselines, regression findings, hypotheses,
 investigation logs, official external-source references, semantic links, and
 step-level run logs. Hard parentage stays on `document_uploads.contract_id`;
@@ -292,11 +293,11 @@ as `document_uploads.contract_id`, so new reports immediately become child docum
 the contract while semantic cross-document and cross-contract relationships remain
 separate.
 
-Portal uploads run cheap deterministic intake decisions before the async processor:
-filename, title, notes, and type cues update `document_kind`, `match_status`, and
-`contract_id` when a known contract number is found. The upload response includes
-`detected_kind` and `matched_contract_id`; full text classification and AI-assisted
-matching still run later through processing jobs.
+Portal uploads run inline intake before the async processor. When inline AI is enabled
+and extracted text is available, the LLM classifies the document and suggests contract
+matches immediately; otherwise filename, title, notes, and type cues provide fallback
+decisions. The upload response includes `detected_kind` and `matched_contract_id`; the
+queued processor still runs the full AI-first analysis path later.
 
 Email or portal uploads that cannot match an existing contract remain unmatched unless
 processing can safely scaffold a new parent. Auto-scaffolding only runs for high
@@ -318,7 +319,7 @@ local storage under `backend/data/`. For Azure-backed runs, fill in `DATABASE_UR
 
 ## Email Intake
 
-The backend includes an IMAP intake worker that parses unread mailbox messages into JSONL audit records. In commit mode, supported attachments are uploaded to the same contract-folder storage used by the portal, run the same deterministic intake decisions, and become visible to the mock contractor portal and official analyst workspace. It can also send an optional receipt auto-reply. Configure it with `EMAIL_INTAKE_*` environment variables, then run:
+The backend includes an IMAP intake worker that parses unread mailbox messages into JSONL audit records. In commit mode, supported attachments are uploaded to the same contract-folder storage used by the portal, run the same AI-first inline intake path when enabled, and become visible to the mock contractor portal and official analyst workspace. It can also send an optional receipt auto-reply. Configure it with `EMAIL_INTAKE_*` environment variables, then run:
 
 ```sh
 bun run email:intake -- --limit 5

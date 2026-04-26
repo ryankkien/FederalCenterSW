@@ -1,12 +1,13 @@
 import json
 
-from app.ai.providers import NullAIProvider, get_ai_provider
+from app.ai.providers import AIContractHint, NullAIProvider, StructuredAnalysisResult, get_ai_provider
 from app.chunking import chunk_text
 from app.config import (
     get_ai_inline_processing_enabled,
     get_ai_processing_enabled,
     get_openai_llm_model,
 )
+from app.contract_analysis import classify_document
 from app.contract_matching import ContractMatchContext, match_contract
 from app.processing import TextJsonPayload, gate_text_payload, process_document_upload
 
@@ -38,14 +39,56 @@ class CountingProvider(NullAIProvider):
         return super().extract_document_signals(request)
 
 
-def test_default_ai_provider_is_null_when_disabled(monkeypatch):
+class ClassificationProvider(NullAIProvider):
+    def __init__(self):
+        super().__init__("test")
+        self.classify_calls = 0
+        self._status.available = True
+        self._status.enabled = True
+        self._status.name = "classification-test"
+
+    def classify_document(self, payload):
+        self.classify_calls += 1
+        return StructuredAnalysisResult(
+            provider=self.status.name,
+            data={
+                "document_kind": "ipmdar_pnr",
+                "confidence": 0.91,
+                "rationale": "The document is an IPMDAR narrative report.",
+            },
+        )
+
+
+class MatchProvider(NullAIProvider):
+    def __init__(self):
+        super().__init__("test")
+        self._status.available = True
+        self._status.enabled = True
+        self._status.name = "match-test"
+
+    def suggest_contract_matches(self, context, candidate_contract_numbers):
+        return [
+            AIContractHint(
+                contract_number="N00014-12-C-0305",
+                confidence=0.93,
+                rationale="The report narrative names the AGOR contract family.",
+            )
+        ]
+
+
+def test_ai_defaults_enabled_but_unavailable_without_openai_key(monkeypatch):
     monkeypatch.delenv("AI_PROCESSING_ENABLED", raising=False)
+    monkeypatch.delenv("AI_INLINE_PROCESSING_ENABLED", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     provider = get_ai_provider()
 
+    assert get_ai_processing_enabled() is True
+    assert get_ai_inline_processing_enabled() is True
     assert provider.status.name == "null"
+    assert provider.status.enabled is False
     assert provider.status.available is False
+    assert provider.status.reason == "OPENAI_API_KEY is not configured"
 
 
 def test_ai_flags_default_on_when_openai_key_is_present(monkeypatch):
@@ -81,6 +124,39 @@ def test_contract_matching_finds_wwr_contract_from_filename():
     assert result.status == "matched"
     assert result.source == "deterministic"
     assert result.matched_contract_id == "wwr"
+
+
+def test_contract_matching_uses_ai_before_regex_fallback():
+    result = match_contract(
+        contracts=[
+            {"id": "wwr", "contract_number": "M0026426R0001"},
+            {"id": "agor", "contract_number": "N00014-12-C-0305"},
+        ],
+        context=ContractMatchContext(filename="D.1+RFP+M0026426R0001 (2).pdf"),
+        ai_provider=MatchProvider(),
+    )
+
+    assert result.status == "matched"
+    assert result.source == "ai"
+    assert result.matched_contract_id == "agor"
+
+
+def test_document_classification_uses_ai_and_reuses_result():
+    provider = ClassificationProvider()
+    document = {
+        "original_filename": "IPMDAR_PNR_Submission1_Month06_Mar2025.docx",
+        "title": "Submission 1",
+        "document_kind": "other",
+        "metadata_json": {},
+    }
+
+    first = classify_document(document, "Integrated Program Management Data and Analysis Report", provider)
+    second = classify_document(document, "Integrated Program Management Data and Analysis Report", provider)
+
+    assert first == ("ipmdar_pnr", None)
+    assert second == ("ipmdar_pnr", None)
+    assert provider.classify_calls == 1
+    assert document["metadata_json"]["classification"]["source"] == "ai"
 
 
 def test_contract_matching_finds_agor_contract_from_text():
