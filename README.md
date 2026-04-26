@@ -100,11 +100,12 @@ bun run test
 
 ## Local Analyst Fixtures
 
-Seed the bundled WWR, AGOR, and Natalie contract/report fixtures into the local
-database and blob backend:
+Seed the bundled WWR, AGOR, Natalie, and full-sample lifecycle contract/report
+fixtures into the local database and blob backend:
 
 ```sh
 bun run fixtures:seed -- --fixtures all
+bun run fixtures:seed -- --fixtures full_sample --reset-analysis
 bun run fixtures:seed -- --fixtures wwr,natalie --reset-analysis
 bun run processing:run -- --limit 200
 ```
@@ -324,6 +325,22 @@ Contract detail and contractor upload views read `/api/contracts/{contract_id}/d
 for schedule evidence. The endpoint returns an explicit availability state such as
 `available`, `processing_pending`, `not_extracted`, or `source_absent`, so the portal
 can show missing evidence honestly instead of substituting fixture deliverables.
+
+The full contract lifecycle view is exposed at
+`/api/contracts/{contract_id}/lifecycle`. It returns one frontend-ready payload with
+contract header data, source packet inventory, CDRLs, monthly report rows, IPMDAR
+earned-value metrics, issue register, CPARS ratings, lifecycle events, staffing
+signals, and a `not_proven` list for evidence the packet cannot support. The
+`full_sample` fixture is the regression packet for this response shape. The official
+contract detail UI uses this lifecycle packet as its evidence spine for the Overview,
+Lifecycle, and contract-specific Insights tabs.
+
+Officials can stage a new production contract packet from the Admin page. The setup
+flow creates the contract record, accepts a drag-and-drop packet folder or manual
+source contract/CDRL/modification/baseline/status uploads, then reads the lifecycle
+endpoint to show readiness and evidence gaps before analysts move into the contract
+workspace. Folder uploads use filename hints only to set an initial document type; AI
+intake and processing still classify, match, and link the artifacts.
 
 Email or portal uploads that cannot match an existing contract remain unmatched unless
 processing can safely scaffold a new parent. Auto-scaffolding only runs for high

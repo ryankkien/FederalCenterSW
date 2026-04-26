@@ -13,12 +13,13 @@ from sqlalchemy.orm import Session
 from app.auth import CurrentUser, get_current_user
 from app.authz import require_contract_view, seeded_contract, visible_contract_ids
 from app.database import get_db
+from app.lifecycle import build_contract_lifecycle
 from app.models import (
+    BaselineObligation,
     Contract,
     ContractAccessGrant,
     ContractHypothesis,
     ContractPrimitiveDeliverable,
-    BaselineObligation,
     DocumentProcessingJob,
     DocumentUpload,
     RegressionFinding,
@@ -180,6 +181,16 @@ def get_contract(
 ) -> ContractResponse:
     require_contract_view(user, db, contract_id)
     return _contract_response(contract_id, db)
+
+
+@router.get("/contracts/{contract_id}/lifecycle", response_model=dict)
+def get_contract_lifecycle(
+    contract_id: str,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    require_contract_view(user, db, contract_id)
+    return build_contract_lifecycle(db, contract_id)
 
 
 @router.get("/contracts/{contract_id}/topics", response_model=List[TopicResponse])

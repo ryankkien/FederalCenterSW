@@ -118,6 +118,10 @@ export async function getContractAnalysis(contractId: string) {
   return request(`/api/analysis/contracts/${encodeURIComponent(contractId)}`);
 }
 
+export async function getContractLifecycle(contractId: string) {
+  return request(`/api/contracts/${encodeURIComponent(contractId)}/lifecycle`);
+}
+
 export async function getContractDeliverables(contractId: string) {
   return request(`/api/contracts/${encodeURIComponent(contractId)}/deliverables`);
 }

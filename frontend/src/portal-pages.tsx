@@ -14,6 +14,7 @@ import {
   getContractAnalysis,
   getContractAnalysisLog,
   getContractDeliverables,
+  getContractLifecycle,
   getDocument,
   getPortfolioGenerateStatus,
   getPortfolioThemes,
@@ -971,8 +972,545 @@ function FilterPills({ options, value, onChange }) {
   );
 }
 
+// ─── ADMIN PAGE ─────────────────────────────────────────────────────────────
+const SETUP_EVIDENCE_SLOTS = [
+  {
+    id: 'source_contract',
+    label: 'Source Contract',
+    documentType: 'Source Contract',
+    title: 'Base contract / award document',
+    notes: 'Baseline contract evidence for lifecycle extraction.',
+    required: true,
+  },
+  {
+    id: 'cdrl',
+    label: 'CDRL Exhibit',
+    documentType: 'CDRL',
+    title: 'Contract Data Requirements List',
+    notes: 'Deliverable obligations and reporting cadence.',
+    required: true,
+  },
+  {
+    id: 'modification',
+    label: 'Mods / Options',
+    documentType: 'Modification',
+    title: 'Modification or option exercise',
+    notes: 'Period, funding, option, or baseline revision evidence.',
+    required: false,
+  },
+  {
+    id: 'baseline',
+    label: 'Baseline Evidence',
+    documentType: 'Program Baseline',
+    title: 'Program baseline / IMS / CWBS evidence',
+    notes: 'Supporting baseline, schedule, or work breakdown evidence.',
+    required: false,
+  },
+  {
+    id: 'status_report',
+    label: 'First Status Report',
+    documentType: 'Monthly Report',
+    title: 'Initial monthly status report',
+    notes: 'Recurring status evidence to begin lifecycle tracking.',
+    required: false,
+  },
+];
+
+function AdminPage({ onSelectContract }) {
+  const [contracts, setContracts] = useState(null);
+  const [activeContract, setActiveContract] = useState(null);
+  const [lifecycle, setLifecycle] = useState(null);
+  const [lifecycleError, setLifecycleError] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [uploading, setUploading] = useState({});
+  const [packetUploading, setPacketUploading] = useState(false);
+  const [packetDragging, setPacketDragging] = useState(false);
+  const [packetFiles, setPacketFiles] = useState([]);
+  const [packetUploaded, setPacketUploaded] = useState([]);
+  const [files, setFiles] = useState({});
+  const [uploaded, setUploaded] = useState({});
+  const [error, setError] = useState('');
+  const packetInputRef = useRef(null);
+  const [fields, setFields] = useState({
+    number:'',
+    title:'',
+    contractor:'',
+    co:'',
+    psc:'R499',
+    naics:'541611',
+    component:'',
+    value:'',
+    start:'',
+    end:'',
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    listContracts()
+      .then(rows => { if (!cancelled) setContracts(rows.map(normalizeContract)); })
+      .catch(() => { if (!cancelled) setContracts([]); });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!activeContract?.id) {
+      setLifecycle(null);
+      return;
+    }
+    refreshLifecycle(activeContract.id);
+  }, [activeContract?.id]);
+
+  function updateField(key, value) {
+    setFields(prev => ({ ...prev, [key]: value }));
+  }
+
+  async function refreshLifecycle(contractId = activeContract?.id) {
+    if (!contractId) return;
+    setLifecycleError(false);
+    try {
+      const row = await getContractLifecycle(contractId);
+      setLifecycle(row);
+    } catch {
+      setLifecycleError(true);
+    }
+  }
+
+  async function createRecord(e) {
+    e.preventDefault();
+    setError('');
+    if (!fields.number || !fields.title) {
+      setError('Contract number and title are required.');
+      return;
+    }
+    try {
+      setCreating(true);
+      const created = await createContract({
+        contract_number: fields.number,
+        title: fields.title,
+        vendor_name: fields.contractor || null,
+        contracting_officer: fields.co || null,
+        psc_code: fields.psc || null,
+        naics_code: fields.naics || null,
+        office_name: fields.component || null,
+        obligated_value: parseMoney(fields.value),
+        period_start: fields.start || null,
+        period_end: fields.end || null,
+      });
+      const normalized = normalizeContract(created);
+      setActiveContract(normalized);
+      setContracts(prev => [normalized, ...(prev || []).filter(c => c.id !== normalized.id)]);
+      setUploaded({});
+    } catch (err) {
+      setError(err?.message || 'Contract record could not be created.');
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  function setPacketSelection(fileList) {
+    const selected = Array.from(fileList || [])
+      .filter(file => file && file.name && !file.name.startsWith('.'));
+    setPacketFiles(selected);
+  }
+
+  async function handlePacketDrop(e) {
+    e.preventDefault();
+    setPacketDragging(false);
+    const dropped = await filesFromDataTransfer(e.dataTransfer);
+    setPacketSelection(dropped);
+  }
+
+  async function uploadPacket() {
+    if (!activeContract?.id || packetFiles.length === 0) return;
+    setPacketUploading(true);
+    setError('');
+    const completed = [];
+    try {
+      for (const file of packetFiles) {
+        const path = packetFilePath(file);
+        const inferred = inferSetupDocumentType(path);
+        const doc = await uploadDocument({
+          contractId: activeContract.id,
+          title: `${activeContract.number} - ${stripExtension(path.split('/').pop() || file.name)}`,
+          documentType: inferred.documentType,
+          notes: `Baseline packet upload. AI intake should classify, match, and link this artifact. Hint: ${inferred.label}.`,
+          file,
+          processInline: true,
+        });
+        completed.push(doc);
+      }
+      setPacketUploaded(prev => [...completed, ...prev]);
+      setPacketFiles([]);
+      await refreshLifecycle(activeContract.id);
+    } catch (err) {
+      setPacketUploaded(prev => [...completed, ...prev]);
+      setError(err?.message || 'Packet upload failed before all files completed.');
+      await refreshLifecycle(activeContract.id);
+    } finally {
+      setPacketUploading(false);
+    }
+  }
+
+  async function uploadSlot(slot) {
+    const file = files[slot.id];
+    if (!activeContract?.id || !file) return;
+    setUploading(prev => ({ ...prev, [slot.id]: true }));
+    setError('');
+    try {
+      const doc = await uploadDocument({
+        contractId: activeContract.id,
+        title: `${activeContract.number} - ${slot.title}`,
+        documentType: slot.documentType,
+        notes: slot.notes,
+        file,
+        processInline: true,
+      });
+      setUploaded(prev => ({ ...prev, [slot.id]: doc }));
+      await refreshLifecycle(activeContract.id);
+    } catch (err) {
+      setError(err?.message || `${slot.label} upload failed.`);
+    } finally {
+      setUploading(prev => ({ ...prev, [slot.id]: false }));
+    }
+  }
+
+  const readiness = lifecycleReadiness(lifecycle);
+  const recentContracts = (contracts || []).slice(0, 6);
+
+  return (
+    <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
+      <TopBar crumbs={['Admin', 'Contract Setup']} />
+      <div style={{ flex:1, overflowY:'auto', padding:'24px 24px 48px' }}>
+        <SectionHeader
+          title="Contract Setup"
+          subtitle="Create the contract record, attach baseline evidence, and verify lifecycle readiness."
+        />
+
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:12, marginBottom:20 }}>
+          <MetricCard label="Visible Contracts" value={contracts === null ? '—' : String(contracts.length)} sub="backend records" mono />
+          <MetricCard label="Active Setup" value={activeContract?.number || 'None'} sub={activeContract ? activeContract.title : 'Create or select'} mono />
+          <MetricCard label="Source Docs" value={String(readiness.sources)} sub={availabilityLabel(lifecycle?.availability || (activeContract ? 'loading' : 'source_absent'))} mono />
+          <MetricCard label="Evidence Gaps" value={String(readiness.gaps)} sub="limitations + not proven" mono />
+        </div>
+
+        {error && (
+          <div style={{ border:'1px solid var(--flag-mid)', background:'var(--flag-soft)', color:'var(--flag)', borderRadius:4, padding:'10px 12px', marginBottom:16, fontSize:12 }}>
+            {error}
+          </div>
+        )}
+
+        <div style={{ display:'grid', gridTemplateColumns:'420px 1fr', gap:20 }}>
+          <div style={{ display:'grid', gap:16 }}>
+            <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:4, padding:'18px 20px' }}>
+              <div style={{ fontSize:11, fontWeight:700, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-mute)', marginBottom:12, fontFamily:'var(--mono)' }}>1. Contract Record</div>
+              <form onSubmit={createRecord}>
+                <div style={{ display:'grid', gap:10 }}>
+                  <AdminField label="Contract Number *" mono value={fields.number} onChange={v => updateField('number', v)} placeholder="N00173-25-C-0001" />
+                  <AdminField label="Title *" value={fields.title} onChange={v => updateField('title', v)} placeholder="Program or contract title" />
+                  <AdminField label="Contractor" value={fields.contractor} onChange={v => updateField('contractor', v)} placeholder="Vendor / contractor" />
+                  <AdminField label="Contracting Officer" value={fields.co} onChange={v => updateField('co', v)} placeholder="CO name" />
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+                    <AdminField label="PSC" mono value={fields.psc} onChange={v => updateField('psc', v)} />
+                    <AdminField label="NAICS" mono value={fields.naics} onChange={v => updateField('naics', v)} />
+                  </div>
+                  <AdminField label="Office / Component" value={fields.component} onChange={v => updateField('component', v)} placeholder="PMS / Code / Office" />
+                  <AdminField label="Obligated Value" mono value={fields.value} onChange={v => updateField('value', v)} placeholder="$8,450,000" />
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+                    <AdminField label="Start" mono value={fields.start} onChange={v => updateField('start', v)} placeholder="YYYY-MM-DD" />
+                    <AdminField label="End" mono value={fields.end} onChange={v => updateField('end', v)} placeholder="YYYY-MM-DD" />
+                  </div>
+                </div>
+                <div style={{ display:'flex', justifyContent:'flex-end', marginTop:14 }}>
+                  <BtnPrimary type="submit" disabled={creating}>{creating ? 'Creating…' : 'Create Contract Record'}</BtnPrimary>
+                </div>
+              </form>
+            </div>
+
+            <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:4, padding:'18px 20px' }}>
+              <div style={{ fontSize:11, fontWeight:700, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-mute)', marginBottom:12, fontFamily:'var(--mono)' }}>Continue Existing Setup</div>
+              {contracts === null && <Spinner label="Loading contracts…" />}
+              {contracts !== null && recentContracts.length === 0 && <EmptyState title="No contracts visible" sub="Create a record above to begin setup." />}
+              {recentContracts.map((contract, i) => (
+                <button key={contract.id} type="button" onClick={() => setActiveContract(contract)} style={{
+                  width:'100%', display:'grid', gridTemplateColumns:'1fr auto', gap:12, textAlign:'left',
+                  padding:'9px 0', border:'none', borderBottom: i < recentContracts.length - 1 ? '1px solid var(--border)' : 'none',
+                  background:'transparent', cursor:'pointer',
+                }}>
+                  <span style={{ minWidth:0 }}>
+                    <span style={{ display:'block', fontSize:12, color:'var(--accent)', fontFamily:'var(--mono)', fontWeight:700 }}>{contract.number}</span>
+                    <span style={{ display:'block', fontSize:12, color:'var(--ink)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', marginTop:2 }}>{contract.title}</span>
+                  </span>
+                  <span style={{ alignSelf:'center', color:'var(--ink-faint)' }}><IcoChevron /></span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display:'grid', gap:16, alignContent:'start' }}>
+            <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:4, overflow:'hidden' }}>
+              <div style={{ padding:'16px 18px', borderBottom:'1px solid var(--border)', display:'flex', justifyContent:'space-between', gap:12, alignItems:'center' }}>
+                <div>
+                  <div style={{ fontSize:11, fontWeight:700, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)' }}>2. Baseline Evidence Packet</div>
+                  <div style={{ fontSize:11, color:'var(--ink-faint)', marginTop:4 }}>{activeContract ? `${activeContract.number} · drop a folder or use the manual slots below` : 'Create or select a contract before uploading evidence.'}</div>
+                </div>
+                {activeContract && <BtnSecondary onClick={() => onSelectContract(activeContract)}>Open Workspace</BtnSecondary>}
+              </div>
+              <div style={{ padding:'16px 18px', borderBottom:'1px solid var(--border)' }}>
+                <div
+                  onClick={() => activeContract && !packetUploading && packetInputRef.current?.click()}
+                  onDragOver={e => { e.preventDefault(); if (activeContract) setPacketDragging(true); }}
+                  onDragLeave={() => setPacketDragging(false)}
+                  onDrop={handlePacketDrop}
+                  style={{
+                    border:`1.5px dashed ${packetDragging ? 'var(--accent)' : 'var(--border-md)'}`,
+                    borderRadius:3,
+                    padding:'18px 16px',
+                    background: packetDragging ? 'var(--accent-soft)' : 'var(--surface-alt)',
+                    cursor: activeContract && !packetUploading ? 'pointer' : 'default',
+                    opacity: activeContract ? 1 : 0.55,
+                  }}
+                >
+                  <input
+                    ref={packetInputRef}
+                    type="file"
+                    multiple
+                    webkitdirectory=""
+                    directory=""
+                    style={{ display:'none' }}
+                    disabled={!activeContract || packetUploading}
+                    onChange={e => setPacketSelection(e.target.files)}
+                  />
+                  <div style={{ display:'grid', gridTemplateColumns:'auto 1fr auto', alignItems:'center', gap:14 }}>
+                    <div style={{ color:'var(--ink-faint)' }}><IcoUpload /></div>
+                    <div>
+                      <div style={{ fontSize:13, color:'var(--ink)', fontWeight:600 }}>Drop a contract packet folder</div>
+                      <div style={{ fontSize:11, color:'var(--ink-mute)', marginTop:3 }}>
+                        Uploads every file to the selected contract; AI intake and processing classify/link source contracts, CDRLs, mods, reports, CPARS, and IPMDAR artifacts.
+                      </div>
+                      {packetFiles.length > 0 && (
+                        <div style={{ fontSize:10.5, color:'var(--accent)', marginTop:6, fontFamily:'var(--mono)' }}>
+                          {packetFiles.length} selected · {packetFiles.slice(0, 3).map(packetFilePath).join(', ')}{packetFiles.length > 3 ? '…' : ''}
+                        </div>
+                      )}
+                      {packetUploaded.length > 0 && (
+                        <div style={{ fontSize:10.5, color:'var(--good)', marginTop:4, fontFamily:'var(--mono)' }}>
+                          {packetUploaded.length} packet files uploaded in this setup session.
+                        </div>
+                      )}
+                    </div>
+                    <BtnSecondary disabled={!activeContract || packetFiles.length === 0 || packetUploading} onClick={(e) => { e.stopPropagation(); uploadPacket(); }}>
+                      {packetUploading ? 'Uploading…' : 'Upload Packet'}
+                    </BtnSecondary>
+                  </div>
+                </div>
+              </div>
+              <table style={{ width:'100%', borderCollapse:'collapse' }}>
+                <thead>
+                  <tr style={{ background:'var(--surface-alt)' }}>
+                    {['Evidence', 'File', 'Status', ''].map((h, i) => (
+                      <th key={h} style={{ padding:'9px 14px', textAlign:i === 3 ? 'right' : 'left', fontSize:10, fontWeight:700, letterSpacing:'0.12em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)', borderBottom:'1px solid var(--border-md)' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {SETUP_EVIDENCE_SLOTS.map(slot => {
+                    const file = files[slot.id];
+                    const done = uploaded[slot.id];
+                    const busy = uploading[slot.id];
+                    return (
+                      <tr key={slot.id} style={{ borderBottom:'1px solid var(--border)' }}>
+                        <td style={{ padding:'12px 14px' }}>
+                          <div style={{ fontSize:12.5, color:'var(--ink)', fontWeight:600 }}>{slot.label}</div>
+                          <div style={{ fontSize:10.5, color:'var(--ink-faint)', marginTop:2 }}>{slot.required ? 'Required' : 'Optional'} · {slot.documentType}</div>
+                        </td>
+                        <td style={{ padding:'12px 14px' }}>
+                          <input
+                            type="file"
+                            disabled={!activeContract || busy}
+                            onChange={e => setFiles(prev => ({ ...prev, [slot.id]: e.target.files?.[0] || null }))}
+                            style={{ fontSize:11, color:'var(--ink-mute)', maxWidth:260 }}
+                          />
+                          {file && <div style={{ fontSize:10, color:'var(--ink-faint)', marginTop:4, fontFamily:'var(--mono)' }}>{file.name}</div>}
+                        </td>
+                        <td style={{ padding:'12px 14px', fontSize:11, color: done ? 'var(--good)' : file ? 'var(--warn)' : 'var(--ink-mute)', fontFamily:'var(--mono)', textTransform:'uppercase', whiteSpace:'nowrap' }}>
+                          {done ? 'uploaded' : busy ? 'uploading' : file ? 'ready' : 'waiting'}
+                        </td>
+                        <td style={{ padding:'12px 14px', textAlign:'right', whiteSpace:'nowrap' }}>
+                          <BtnSecondary disabled={!activeContract || !file || busy} onClick={() => uploadSlot(slot)}>{busy ? 'Uploading…' : 'Upload'}</BtnSecondary>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:4, padding:'18px 20px' }}>
+              <div style={{ fontSize:11, fontWeight:700, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-mute)', marginBottom:12, fontFamily:'var(--mono)' }}>3. Lifecycle Readiness</div>
+              {!activeContract && <EmptyState title="No active setup" sub="Create or select a contract record to view lifecycle readiness." />}
+              {activeContract && !lifecycle && !lifecycleError && <Spinner label="Loading lifecycle packet…" />}
+              {activeContract && lifecycleError && <EmptyState title="Lifecycle unavailable" sub="The backend lifecycle endpoint could not be loaded." />}
+              {activeContract && lifecycle && (
+                <>
+                  <div style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:0, border:'1px solid var(--border)', borderRadius:3, overflow:'hidden', marginBottom:14 }}>
+                    <SetupReadinessCell label="Sources" value={readiness.sources} />
+                    <SetupReadinessCell label="CDRLs" value={readiness.deliverables} border />
+                    <SetupReadinessCell label="Monthly" value={readiness.monthly} border />
+                    <SetupReadinessCell label="IPMDAR" value={readiness.ipmdar} border />
+                  </div>
+                  <div style={{ display:'grid', gap:7 }}>
+                    {[
+                      ['Contract record created', Boolean(activeContract)],
+                      ['Source packet has extracted text', readiness.sources > 0],
+                      ['CDRL / deliverable rows available', readiness.deliverables > 0],
+                      ['Recurring report row available', readiness.monthly > 0],
+                      ['Lifecycle gaps are visible', readiness.gaps >= 0],
+                    ].map(([label, ok]) => (
+                      <div key={label} style={{ display:'flex', justifyContent:'space-between', gap:12, padding:'7px 0', borderBottom:'1px solid var(--border)' }}>
+                        <span style={{ fontSize:12, color:'var(--ink-soft)' }}>{label}</span>
+                        <span style={{ fontSize:10, fontWeight:700, fontFamily:'var(--mono)', color: ok ? 'var(--good)' : 'var(--warn)', textTransform:'uppercase' }}>{ok ? 'ready' : 'missing'}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {(lifecycle.limitations || lifecycle.not_proven || []).length > 0 && (
+                    <div style={{ marginTop:12, padding:'10px 12px', background:'var(--surface-alt)', border:'1px solid var(--border)', borderRadius:3 }}>
+                      <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.12em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)', marginBottom:6 }}>Current Evidence Gaps</div>
+                      {[...(lifecycle.limitations || []), ...(lifecycle.not_proven || [])].slice(0, 5).map((item, i) => (
+                        <div key={i} style={{ fontSize:11.5, color:'var(--ink-mute)', lineHeight:1.5, padding:'2px 0' }}>{item}</div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AdminField({ label, value, onChange, placeholder, mono }) {
+  return (
+    <label style={{ display:'grid', gap:5 }}>
+      <span style={{ fontSize:9.5, fontWeight:700, color:'var(--ink-soft)', letterSpacing:'0.10em', textTransform:'uppercase', fontFamily:'var(--mono)' }}>{label}</span>
+      <input
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        style={{
+          width:'100%', border:'1px solid var(--border-md)', borderRadius:3,
+          padding:'7px 10px', background:'var(--surface)', color:'var(--ink)',
+          fontSize:12.5, outline:'none', fontFamily: mono ? 'var(--mono)' : 'inherit',
+        }}
+      />
+    </label>
+  );
+}
+
+function SetupReadinessCell({ label, value, border }) {
+  return (
+    <div style={{ padding:'12px 14px', borderLeft: border ? '1px solid var(--border)' : 'none' }}>
+      <div style={{ fontSize:9.5, fontWeight:700, letterSpacing:'0.12em', textTransform:'uppercase', color:'var(--ink-faint)', fontFamily:'var(--mono)', marginBottom:5 }}>{label}</div>
+      <div style={{ fontSize:22, fontWeight:700, color:'var(--ink)', fontFamily:'var(--mono)', lineHeight:1 }}>{value}</div>
+    </div>
+  );
+}
+
+function lifecycleReadiness(lifecycle) {
+  if (!lifecycle) {
+    return { sources:0, deliverables:0, monthly:0, ipmdar:0, cpars:0, issues:0, gaps:0 };
+  }
+  return {
+    sources: (lifecycle.source_packet || []).filter(item => item.has_extracted_text).length,
+    deliverables: (lifecycle.deliverables || []).length,
+    monthly: (lifecycle.monthly_reports || []).length,
+    ipmdar: (lifecycle.ipmdar_metrics || []).length,
+    cpars: (lifecycle.cpars_ratings || []).length,
+    issues: (lifecycle.issue_register || []).length,
+    gaps: (lifecycle.limitations || []).length + (lifecycle.not_proven || []).length,
+  };
+}
+
+async function filesFromDataTransfer(dataTransfer) {
+  const items = Array.from(dataTransfer?.items || []);
+  const entries = items
+    .map(item => (item.webkitGetAsEntry ? item.webkitGetAsEntry() : null))
+    .filter(Boolean);
+  if (entries.length === 0) return Array.from(dataTransfer?.files || []);
+  const nested = await Promise.all(entries.map(entry => readDroppedEntry(entry, '')));
+  return nested.flat();
+}
+
+function readDroppedEntry(entry, path) {
+  if (entry.isFile) {
+    return new Promise(resolve => {
+      entry.file(file => {
+        try {
+          Object.defineProperty(file, 'relativePath', { value: `${path}${file.name}` });
+        } catch {}
+        resolve([file]);
+      });
+    });
+  }
+  if (!entry.isDirectory) return Promise.resolve([]);
+  const reader = entry.createReader();
+  return new Promise(resolve => {
+    const entries = [];
+    function readBatch() {
+      reader.readEntries(async batch => {
+        if (!batch.length) {
+          const nested = await Promise.all(entries.map(child => readDroppedEntry(child, `${path}${entry.name}/`)));
+          resolve(nested.flat());
+          return;
+        }
+        entries.push(...batch);
+        readBatch();
+      });
+    }
+    readBatch();
+  });
+}
+
+function packetFilePath(file) {
+  return file.relativePath || file.webkitRelativePath || file.name;
+}
+
+function stripExtension(name) {
+  return String(name || '').replace(/\.[^/.]+$/, '');
+}
+
+function inferSetupDocumentType(path) {
+  const value = String(path || '').toLowerCase();
+  if (value.includes('cdrl') || value.includes('dd1423') || value.includes('exhibit')) {
+    return { documentType:'CDRL', label:'CDRL' };
+  }
+  if (value.includes('solicitation') || value.includes('source') || value.includes('award') || value.includes('contract')) {
+    return { documentType:'Source Contract', label:'source contract' };
+  }
+  if (value.includes('mod') || /\bp\d{4}\b/.test(value) || value.includes('option')) {
+    return { documentType:'Modification', label:'modification' };
+  }
+  if (value.includes('ipmdar') || value.includes('cpd') || value.includes('spd') || value.includes('pnr')) {
+    return { documentType:'IPMDAR', label:'IPMDAR' };
+  }
+  if (value.includes('cpar')) {
+    return { documentType:'CPARS', label:'CPARS' };
+  }
+  if (value.includes('monthly') || value.includes('status') || value.includes('report')) {
+    return { documentType:'Monthly Report', label:'status report' };
+  }
+  if (value.includes('cwbs') || value.includes('ims') || value.includes('baseline') || value.includes('schedule')) {
+    return { documentType:'Program Baseline', label:'baseline evidence' };
+  }
+  if (value.includes('invoice')) {
+    return { documentType:'Invoice', label:'invoice' };
+  }
+  return { documentType:'Supporting Evidence', label:'supporting evidence' };
+}
+
 // ─── CONTRACT DETAIL PAGE ───────────────────────────────────────────────────
-const DETAIL_TABS = ['Overview', 'Insights', 'Benchmarks', 'Documents'];
+const DETAIL_TABS = ['Overview', 'Lifecycle', 'Insights', 'Benchmarks', 'Documents'];
 
 function ContractDetailPage({ contract, onBack, onSelectContract }) {
   const [tab, setTab] = useState('Overview');
@@ -981,9 +1519,24 @@ function ContractDetailPage({ contract, onBack, onSelectContract }) {
   const [analysis, setAnalysis] = useState(null);
   const [deliverables, setDeliverables] = useState(null);
   const [analysisLog, setAnalysisLog] = useState([]);
+  const [lifecycle, setLifecycle] = useState(null);
+  const [lifecycleError, setLifecycleError] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
 
   const c = contract;
+
+  function refreshLifecycle() {
+    setLifecycle(null);
+    setLifecycleError(false);
+    return getContractLifecycle(c.id)
+      .then(row => {
+        setLifecycle(row);
+        setLifecycleError(false);
+      })
+      .catch(() => {
+        setLifecycleError(true);
+      });
+  }
 
   useEffect(() => {
     setDocs([]);
@@ -991,6 +1544,8 @@ function ContractDetailPage({ contract, onBack, onSelectContract }) {
     setAnalysis(null);
     setDeliverables(null);
     setAnalysisLog([]);
+    setLifecycle(null);
+    setLifecycleError(false);
     let cancelled = false;
     listContractDocuments(c.id)
       .then(rows => {
@@ -1017,6 +1572,13 @@ function ContractDetailPage({ contract, onBack, onSelectContract }) {
     getContractAnalysisLog(c.id)
       .then(rows => { if (!cancelled) setAnalysisLog(rows); })
       .catch(() => {});
+    getContractLifecycle(c.id)
+      .then(row => {
+        if (!cancelled) setLifecycle(row);
+      })
+      .catch(() => {
+        if (!cancelled) setLifecycleError(true);
+      });
     return () => { cancelled = true; };
   }, [c.id]);
 
@@ -1063,54 +1625,66 @@ function ContractDetailPage({ contract, onBack, onSelectContract }) {
 
       {/* Body */}
       <div style={{ flex:1, overflowY:'auto' }}>
-        {tab === 'Overview'   && <OverviewTab contract={c} docs={docs} deliverables={deliverables} />}
-        {tab === 'Insights'   && <ContractInsightsTab contract={c} findings={findings} analysisLog={analysisLog} onSelectContract={onSelectContract} />}
+        {tab === 'Overview'   && <OverviewTab contract={c} docs={docs} deliverables={deliverables} lifecycle={lifecycle} lifecycleError={lifecycleError} />}
+        {tab === 'Lifecycle'  && <LifecycleTab contract={c} lifecycle={lifecycle} error={lifecycleError} />}
+        {tab === 'Insights'   && <ContractInsightsTab contract={c} findings={findings} analysisLog={analysisLog} lifecycle={lifecycle} onSelectContract={onSelectContract} />}
         {tab === 'Benchmarks' && <BenchmarksTab contract={c} analysis={analysis} />}
         {tab === 'Documents'  && <DocumentsTab docs={docs} contract={c} onUpload={() => setShowUpload(true)} />}
       </div>
 
-      {showUpload && <UploadModal contract={c} onClose={() => setShowUpload(false)} onUploaded={(d) => { setDocs(prev => [d, ...prev]); setShowUpload(false); }}/>}
+      {showUpload && <UploadModal contract={c} onClose={() => setShowUpload(false)} onUploaded={(d) => { setDocs(prev => [d, ...prev]); refreshLifecycle(); setShowUpload(false); }}/>}
     </div>
   );
 }
 
 // ─── OVERVIEW TAB ───────────────────────────────────────────────────────────
-function OverviewTab({ contract: c, docs, deliverables }) {
-  const authorized = c.authorized || DEFAULT_AUTHORIZED;
+function OverviewTab({ contract: c, docs, deliverables, lifecycle, lifecycleError }) {
   const classification = c.classification || 'CUI';
+  const header = lifecycle?.contract || {};
+  const sources = lifecycle?.source_packet || [];
+  const lifecycleDeliverables = lifecycle?.deliverables || [];
+  const monthly = lifecycle?.monthly_reports || [];
+  const issues = lifecycle?.issue_register || [];
+  const financial = lifecycle?.financial_summary || {};
   const deliverableGroups = normalizeBackendDeliverables(deliverables);
-  const deliverableAvailability = deliverables?.availability || 'loading';
-
-  // Counts of upcoming vs filed
-  const today = Date.now();
-  const allItems = deliverableGroups.flatMap(d => d.items);
-  const filedCount = allItems.filter(i => i.filed).length;
-  const upcomingCount = allItems.filter(i => !i.filed && new Date(i.due).getTime() > today).length;
+  const deliverableAvailability = lifecycle
+    ? lifecycle.availability
+    : lifecycleError
+      ? 'error'
+      : (deliverables?.availability || 'loading');
+  const allItems = lifecycleDeliverables.length
+    ? lifecycleDeliverables
+    : deliverableGroups.flatMap(d => d.items);
+  const latestSource = docs[0] || null;
+  const latestPeriod = monthly.length ? (monthly[monthly.length - 1].period || `Month ${monthly[monthly.length - 1].month_number}`) : 'No monthly row';
+  const value = fmtLifecycleMoney(header.obligated_value || header.funded_amount || header.awarded_contract_value);
+  const period = header.current_period || header.base_period || c.period;
+  const contractRows = [
+    ['Contract Number', header.contract_number || c.number, true],
+    ['Contractor', header.contractor || c.contractor || 'Not extracted', false],
+    ['Contracting Officer', header.contracting_officer || c.co || 'Not extracted', false],
+    ['Agency / Office', [header.agency || c.component, header.office].filter(Boolean).join(' · ') || 'Not extracted', false],
+    ['PSC / NAICS', `${c.psc || 'Not extracted'} · ${c.naics || 'Not extracted'}`, true],
+    ['Period', period || 'Not extracted', true],
+    ['Total Value', value === '—' ? (c.value || 'Not extracted') : value, true],
+    ['Classification', classification, true],
+  ];
 
   return (
     <div style={{ padding:'24px 24px 48px' }}>
       {/* Top metrics */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:12, marginBottom:24 }}>
-        <MetricCard label="Contract Value" value={c.value}            sub="Total obligated"     mono />
-        <MetricCard label="Period Elapsed" value={`${c.elapsed}%`}    sub={c.period}            mono />
-        <MetricCard label="Deliverables Filed" value={deliverableAvailability === 'available' ? `${filedCount} / ${allItems.length}` : '—'} sub={deliverableAvailability === 'available' ? `${upcomingCount} upcoming` : availabilityLabel(deliverableAvailability)} mono />
-        <MetricCard label="Last Activity"  value={c.lastActivity}     sub="Most recent filing"  mono />
+        <MetricCard label="Contract Value" value={value === '—' ? c.value : value} sub="Lifecycle header" mono />
+        <MetricCard label="Latest CPI / SPI" value={`${fmtLifecycleNumber(financial.latest_cpi)} / ${fmtLifecycleNumber(financial.latest_spi)}`} sub="IPMDAR lifecycle" mono />
+        <MetricCard label="Deliverables" value={deliverableAvailability === 'available' ? String(allItems.length) : '—'} sub={availabilityLabel(deliverableAvailability)} mono />
+        <MetricCard label="Latest Report" value={latestPeriod} sub={latestSource ? fmtDateMil(latestSource.created_at) : 'No filing'} mono />
       </div>
 
       {/* Two-column: details + activity */}
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:20, marginBottom:20 }}>
         <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:4, padding:'18px 22px' }}>
           <div style={{ fontSize:11, fontWeight:700, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-mute)', marginBottom:14, fontFamily:'var(--mono)' }}>Contract Particulars</div>
-          {[
-            ['Contract Number',    c.number, true],
-            ['Contractor',         c.contractor, false],
-            ['Contracting Officer',c.co, false],
-            ['Component',          c.component, false],
-            ['PSC / NAICS',        `${c.psc} · ${c.naics}`, true],
-            ['Period',             c.period, true],
-            ['Total Obligated',    c.value, true],
-            ['Classification',     classification, true],
-          ].map(([k, v, mono]) => (
+          {contractRows.map(([k, v, mono]) => (
             <div key={k} style={{
               display:'flex', justifyContent:'space-between', gap:24,
               padding:'8px 0', borderBottom:'1px solid var(--border)',
@@ -1123,43 +1697,34 @@ function OverviewTab({ contract: c, docs, deliverables }) {
             </div>
           ))}
 
-          {/* Authorized access block */}
           <div style={{ marginTop:14, paddingTop:14, borderTop:'1px solid var(--border-md)' }}>
-            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
-              <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)' }}>Authorized Access</div>
-              <div style={{ display:'inline-flex', alignItems:'center', gap:6, fontSize:9.5, fontFamily:'var(--mono)', color:'var(--accent)', border:'1px solid var(--accent)', padding:'2px 7px', borderRadius:2, fontWeight:700, letterSpacing:'0.10em' }}>
-                <svg width="9" height="9" viewBox="0 0 12 12" fill="none"><path d="M3 5V4a3 3 0 016 0v1m-7 0h8v6H2V5z" stroke="currentColor" strokeWidth="1.5"/></svg>
-                {classification}
-              </div>
-            </div>
-            {authorized.map((p, i) => (
-              <div key={i} style={{
-                display:'grid', gridTemplateColumns:'1fr auto', gap:8,
-                padding:'7px 0', borderBottom: i < authorized.length-1 ? '1px solid var(--border)' : 'none',
-              }}>
-                <div style={{ minWidth:0 }}>
-                  <div style={{ fontSize:12.5, color:'var(--ink)', fontWeight:500 }}>{p.name}</div>
-                  <div style={{ fontSize:10.5, color:'var(--ink-faint)', fontFamily:'var(--mono)', marginTop:1 }}>{p.email}</div>
-                </div>
-                <div style={{ fontSize:10.5, color:'var(--ink-mute)', fontFamily:'var(--mono)', letterSpacing:'0.04em', textTransform:'uppercase', whiteSpace:'nowrap', alignSelf:'center' }}>{p.role}</div>
+            <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)', marginBottom:10 }}>Lifecycle Readiness</div>
+            {[
+              ['Source packet', sources.length],
+              ['Monthly rows', monthly.length],
+              ['Issue rows', issues.length],
+              ['Evidence gaps', (lifecycle?.limitations || []).length + (lifecycle?.not_proven || []).length],
+            ].map(([label, count]) => (
+              <div key={label} style={{ display:'flex', justifyContent:'space-between', gap:12, padding:'7px 0', borderBottom:'1px solid var(--border)' }}>
+                <span style={{ fontSize:11.5, color:'var(--ink-mute)', fontFamily:'var(--mono)', textTransform:'uppercase', letterSpacing:'0.04em' }}>{label}</span>
+                <span style={{ fontSize:12, color:'var(--ink)', fontWeight:700, fontFamily:'var(--mono)' }}>{count}</span>
               </div>
             ))}
-            <button style={{
-              marginTop:10, padding:'5px 10px', fontSize:11, fontFamily:'var(--mono)',
-              background:'transparent', border:'1px dashed var(--border-str)', borderRadius:2,
-              color:'var(--ink-mute)', letterSpacing:'0.04em', cursor:'pointer',
-            }}>+ Manage access</button>
           </div>
         </div>
 
         <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:4, padding:'18px 22px' }}>
-          <div style={{ fontSize:11, fontWeight:700, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-mute)', marginBottom:14, fontFamily:'var(--mono)' }}>Recent Filings</div>
-          {docs.slice(0, 8).map((d, i) => {
+          <div style={{ fontSize:11, fontWeight:700, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-mute)', marginBottom:14, fontFamily:'var(--mono)' }}>Source Packet</div>
+          {!lifecycle && !lifecycleError && <Spinner label="Loading lifecycle evidence…" />}
+          {lifecycleError && <EmptyState title="Lifecycle unavailable" sub="Backend lifecycle evidence could not be loaded." />}
+          {lifecycle && sources.length === 0 && <EmptyState title="No linked source packet" sub="Upload and process contract artifacts to populate the lifecycle packet." />}
+          {sources.slice(0, 8).map((source, i) => {
+            const d = docs.find(item => item.id === source.document_id) || source;
             const meta = DOC_TYPE_META[d.doc_type] || { abbr:'DOC', tone:'default' };
             return (
-              <div key={d.id} style={{
+              <div key={source.document_id || d.id} style={{
                 display:'flex', gap:12, padding:'8px 0',
-                borderBottom: i < 7 ? '1px solid var(--border)' : 'none',
+                borderBottom: i < Math.min(sources.length, 8) - 1 ? '1px solid var(--border)' : 'none',
                 alignItems:'center',
               }}>
                 <div style={{
@@ -1170,35 +1735,49 @@ function OverviewTab({ contract: c, docs, deliverables }) {
                   padding:'3px 6px', borderRadius:2, letterSpacing:'0.06em', minWidth:42, textAlign:'center',
                 }}>{meta.abbr}</div>
                 <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontSize:12.5, color:'var(--ink)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{d.title}</div>
-                  <div style={{ fontSize:10, color:'var(--ink-faint)', marginTop:2, fontFamily:'var(--mono)', letterSpacing:'0.04em', textTransform:'uppercase' }}>{d.source}</div>
+                  <div style={{ fontSize:12.5, color:'var(--ink)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{source.title || d.title || source.filename}</div>
+                  <div style={{ fontSize:10, color:'var(--ink-faint)', marginTop:2, fontFamily:'var(--mono)', letterSpacing:'0.04em', textTransform:'uppercase' }}>{source.lifecycle_role || source.document_kind || d.source}</div>
                 </div>
-                <div style={{ fontSize:10, color:'var(--ink-faint)', fontFamily:'var(--mono)', whiteSpace:'nowrap' }}>{fmtDateMil(d.created_at)}</div>
+                <div style={{ fontSize:10, color:source.has_extracted_text ? 'var(--good)' : 'var(--warn)', fontFamily:'var(--mono)', whiteSpace:'nowrap' }}>{source.has_extracted_text ? 'TEXT' : 'NO TEXT'}</div>
               </div>
             );
           })}
         </div>
       </div>
 
-      {/* Gantt — at the bottom */}
       <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:4, padding:'18px 22px 22px' }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:18 }}>
           <div>
-            <div style={{ fontSize:11, fontWeight:700, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)' }}>Deliverables Schedule</div>
-            <div style={{ fontSize:11, color:'var(--ink-faint)', fontFamily:'var(--mono)', marginTop:4 }}>{c.period} · extracted from CDRL</div>
-          </div>
-          <div style={{ display:'flex', gap:14, fontSize:10, color:'var(--ink-mute)', fontFamily:'var(--mono)', letterSpacing:'0.04em' }}>
-            <LegendDot color="var(--ink)"       label="Filed"/>
-            <LegendDot color="var(--surface-alt)" border="var(--border-str)" label="Upcoming"/>
-            <LegendDot color="var(--warn)"      label="Late"/>
-            <LegendDot color="var(--accent)"    label="Imported"/>
+            <div style={{ fontSize:11, fontWeight:700, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)' }}>Deliverables Evidence</div>
+            <div style={{ fontSize:11, color:'var(--ink-faint)', fontFamily:'var(--mono)', marginTop:4 }}>{period} · lifecycle CDRL/deliverable extraction</div>
           </div>
         </div>
-        {deliverableAvailability === 'loading' && <Spinner label="Loading deliverable evidence…" />}
-        {deliverableAvailability === 'available' && <ContractGantt contract={c} deliverables={deliverableGroups} />}
-        {deliverableAvailability !== 'loading' && deliverableAvailability !== 'available' && (
-          <EmptyState title="No deliverable schedule available" sub={(deliverables?.limitations || [])[0] || availabilityLabel(deliverableAvailability)} />
+        {!lifecycle && !lifecycleError && <Spinner label="Loading lifecycle deliverables…" />}
+        {lifecycle && lifecycleDeliverables.length > 0 && (
+          <table style={{ width:'100%', borderCollapse:'collapse' }}>
+            <thead>
+              <tr style={{ background:'var(--surface-alt)' }}>
+                {['CDRL', 'Deliverable', 'Status', 'Evidence'].map(h => (
+                  <th key={h} style={{ padding:'9px 12px', textAlign:'left', fontSize:10, fontWeight:700, letterSpacing:'0.12em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)', borderBottom:'1px solid var(--border-md)' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {lifecycleDeliverables.map((item, i) => (
+                <tr key={`${item.cdrl_item || 'cdrl'}-${item.title}-${i}`} style={{ borderBottom:'1px solid var(--border)' }}>
+                  <td style={{ padding:'10px 12px', fontSize:12, fontFamily:'var(--mono)', color:'var(--accent)', fontWeight:700 }}>{item.cdrl_item || '—'}</td>
+                  <td style={{ padding:'10px 12px', fontSize:12.5, color:'var(--ink)' }}>{item.title || item.description || 'Deliverable'}</td>
+                  <td style={{ padding:'10px 12px', fontSize:11, fontFamily:'var(--mono)', color:'var(--ink-soft)' }}>{item.status || item.acceptance_status || 'requirement'}</td>
+                  <td style={{ padding:'10px 12px', fontSize:11, fontFamily:'var(--mono)', color:'var(--ink-mute)' }}>{(item.document_ids || []).join(', ') || item.source || 'lifecycle'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
+        {lifecycle && lifecycleDeliverables.length === 0 && (
+          <EmptyState title="No lifecycle deliverables available" sub={(lifecycle.limitations || deliverables?.limitations || [])[0] || availabilityLabel(deliverableAvailability)} />
+        )}
+        {lifecycleError && <EmptyState title="Deliverable evidence unavailable" sub="Backend lifecycle evidence could not be loaded." />}
       </div>
     </div>
   );
@@ -1369,6 +1948,236 @@ function normalizeBackendDeliverables(payload) {
   })).filter(group => group.items.length > 0);
 }
 
+function LifecycleTab({ contract: c, lifecycle, error }) {
+  if (error) {
+    return (
+      <div style={{ padding:'24px' }}>
+        <EmptyState title="Lifecycle packet unavailable" sub="The backend lifecycle endpoint could not be loaded for this contract." />
+      </div>
+    );
+  }
+  if (!lifecycle) {
+    return (
+      <div style={{ padding:'24px' }}>
+        <Spinner label="Loading lifecycle evidence…" />
+      </div>
+    );
+  }
+
+  const monthly = lifecycle.monthly_reports || [];
+  const ipmdar = lifecycle.ipmdar_metrics || [];
+  const issues = lifecycle.issue_register || [];
+  const ratings = lifecycle.cpars_ratings || [];
+  const events = lifecycle.lifecycle_events || [];
+  const sources = lifecycle.source_packet || [];
+  const limitations = lifecycle.limitations || [];
+  const notProven = lifecycle.not_proven || [];
+  const financial = lifecycle.financial_summary || {};
+
+  return (
+    <div style={{ padding:'24px 24px 48px' }}>
+      <SectionHeader
+        title={`Lifecycle evidence for ${c.number}`}
+        subtitle="Backend extracted packet from linked contract documents, reports, IPMDAR, CPARS, and CDRLs"
+      />
+
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:12, marginBottom:20 }}>
+        <MetricCard label="Sources" value={String(sources.length)} sub={availabilityLabel(lifecycle.availability)} mono />
+        <MetricCard label="Monthly Reports" value={String(monthly.length)} sub="status rows" mono />
+        <MetricCard label="Latest CPI / SPI" value={`${fmtLifecycleNumber(financial.latest_cpi)} / ${fmtLifecycleNumber(financial.latest_spi)}`} sub="IPMDAR" mono />
+        <MetricCard label="Latest Invoiced" value={fmtLifecycleMoney(financial.latest_invoiced_to_date)} sub="monthly report" mono />
+      </div>
+
+      {(limitations.length > 0 || notProven.length > 0) && (
+        <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderLeft:'3px solid var(--warn)', borderRadius:4, padding:'14px 18px', marginBottom:20 }}>
+          <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)', marginBottom:8 }}>Evidence Limits</div>
+          {[...limitations, ...notProven].slice(0, 8).map((item, i) => (
+            <div key={`${item}-${i}`} style={{ fontSize:12, color:'var(--ink-mute)', lineHeight:1.55, padding:'3px 0' }}>{item}</div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display:'grid', gridTemplateColumns:'1.15fr 0.85fr', gap:18, marginBottom:18 }}>
+        <LifecyclePanel title="Lifecycle Events" emptyTitle="No lifecycle events extracted" emptySub="Upload and process baseline reports, mods, and IPMDAR/CPARS evidence.">
+          {events.map((event, i) => (
+            <div key={`${event.date || 'event'}-${i}`} style={{ display:'grid', gridTemplateColumns:'112px 150px 1fr', gap:12, padding:'8px 0', borderBottom: i < events.length - 1 ? '1px solid var(--border)' : 'none' }}>
+              <div style={{ fontSize:11, color:'var(--ink-soft)', fontFamily:'var(--mono)' }}>{fmtLifecycleDate(event.date)}</div>
+              <div style={{ fontSize:10, color:'var(--accent)', fontFamily:'var(--mono)', textTransform:'uppercase', letterSpacing:'0.08em' }}>{event.type || 'event'}</div>
+              <div style={{ fontSize:12.5, color:'var(--ink)', lineHeight:1.45 }}>{event.summary || 'Lifecycle event'}</div>
+            </div>
+          ))}
+        </LifecyclePanel>
+
+        <LifecyclePanel title="CPARS Ratings" emptyTitle="No CPARS ratings extracted" emptySub="Import an authorized CPARS export or process a CPARS narrative.">
+          {ratings.map((rating, i) => (
+            <div key={`${rating.label}-${i}`} style={{ display:'grid', gridTemplateColumns:'1fr auto', gap:12, padding:'8px 0', borderBottom: i < ratings.length - 1 ? '1px solid var(--border)' : 'none' }}>
+              <div>
+                <div style={{ fontSize:12.5, color:'var(--ink)', fontWeight:600 }}>{rating.label}</div>
+                <div style={{ fontSize:10.5, color:'var(--ink-faint)', marginTop:2, fontFamily:'var(--mono)' }}>{rating.period_label || rating.source_document_id || 'CPARS evidence'}</div>
+              </div>
+              <div style={{ alignSelf:'center', fontSize:11, color:'var(--ink)', fontWeight:700, fontFamily:'var(--mono)', whiteSpace:'nowrap' }}>{rating.rating}</div>
+            </div>
+          ))}
+        </LifecyclePanel>
+      </div>
+
+      <LifecycleTable
+        title="Monthly Status Reports"
+        emptyTitle="No monthly status rows extracted"
+        emptySub="Upload processed monthly reports linked to this contract."
+        columns={['Month', 'Period', 'Invoiced To Date', 'This Period', 'ETC', 'Schedule']}
+        rows={monthly}
+        renderRow={(row, i) => (
+          <tr key={`${row.document_id}-${i}`} style={{ borderBottom:'1px solid var(--border)' }}>
+            <LifecycleCell mono>{row.month_number || '—'}</LifecycleCell>
+            <LifecycleCell>{row.period || row.source || '—'}</LifecycleCell>
+            <LifecycleCell mono align="right">{fmtLifecycleMoney(row.invoiced_to_date)}</LifecycleCell>
+            <LifecycleCell mono align="right">{fmtLifecycleMoney(row.invoiced_this_period)}</LifecycleCell>
+            <LifecycleCell mono align="right">{fmtLifecycleMoney(row.estimated_cost_to_complete)}</LifecycleCell>
+            <LifecycleCell>{row.schedule_status || row.problem_signal || '—'}</LifecycleCell>
+          </tr>
+        )}
+      />
+
+      <LifecycleTable
+        title="IPMDAR Metrics"
+        emptyTitle="No IPMDAR metrics extracted"
+        emptySub="Process IPMDAR PNR/CPD/SPD evidence linked to this contract."
+        columns={['Date', 'BCWS', 'BCWP', 'ACWP', 'CV', 'SV', 'CPI', 'SPI', 'Driver']}
+        rows={ipmdar}
+        renderRow={(row, i) => (
+          <tr key={`${row.document_id}-${i}`} style={{ borderBottom:'1px solid var(--border)' }}>
+            <LifecycleCell mono>{fmtLifecycleDate(row.data_date) || row.reporting_period || '—'}</LifecycleCell>
+            <LifecycleCell mono align="right">{fmtLifecycleMoney(row.bcws)}</LifecycleCell>
+            <LifecycleCell mono align="right">{fmtLifecycleMoney(row.bcwp)}</LifecycleCell>
+            <LifecycleCell mono align="right">{fmtLifecycleMoney(row.acwp)}</LifecycleCell>
+            <LifecycleCell mono align="right">{fmtLifecycleMoney(row.cost_variance)}</LifecycleCell>
+            <LifecycleCell mono align="right">{fmtLifecycleMoney(row.schedule_variance)}</LifecycleCell>
+            <LifecycleCell mono align="right">{fmtLifecycleNumber(row.cpi)}</LifecycleCell>
+            <LifecycleCell mono align="right">{fmtLifecycleNumber(row.spi)}</LifecycleCell>
+            <LifecycleCell>{row.primary_driver || '—'}</LifecycleCell>
+          </tr>
+        )}
+      />
+
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:18 }}>
+        <LifecycleTable
+          title="Issue Register"
+          emptyTitle="No lifecycle issues extracted"
+          emptySub="Process reports with issue, variance, staffing, or delay evidence."
+          columns={['Issue', 'Owner', 'Severity', 'Status']}
+          rows={issues}
+          compact
+          renderRow={(row, i) => (
+            <tr key={`${row.issue_id}-${i}`} style={{ borderBottom:'1px solid var(--border)' }}>
+              <LifecycleCell>
+                <div style={{ fontWeight:600, color:'var(--ink)' }}>{row.title || row.category || row.issue_id}</div>
+                <div style={{ fontSize:11, color:'var(--ink-mute)', marginTop:3, lineHeight:1.45 }}>{row.summary || '—'}</div>
+              </LifecycleCell>
+              <LifecycleCell mono>{row.responsible_party || '—'}</LifecycleCell>
+              <LifecycleCell mono>{row.severity || '—'}</LifecycleCell>
+              <LifecycleCell mono>{row.status || '—'}</LifecycleCell>
+            </tr>
+          )}
+        />
+
+        <LifecycleTable
+          title="Source Packet"
+          emptyTitle="No source packet"
+          emptySub="No linked contract documents are visible yet."
+          columns={['Document', 'Kind', 'Status', 'Text']}
+          rows={sources}
+          compact
+          renderRow={(row, i) => (
+            <tr key={`${row.document_id}-${i}`} style={{ borderBottom:'1px solid var(--border)' }}>
+              <LifecycleCell>{row.title || row.filename || row.document_id}</LifecycleCell>
+              <LifecycleCell mono>{row.document_kind || row.lifecycle_role || '—'}</LifecycleCell>
+              <LifecycleCell mono>{row.processing_status || '—'}</LifecycleCell>
+              <LifecycleCell mono>{row.has_extracted_text ? 'yes' : 'no'}</LifecycleCell>
+            </tr>
+          )}
+        />
+      </div>
+    </div>
+  );
+}
+
+function LifecyclePanel({ title, emptyTitle, emptySub, children }) {
+  const hasChildren = React.Children.count(children) > 0;
+  return (
+    <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:4, padding:'16px 18px' }}>
+      <div style={{ fontSize:11, fontWeight:700, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)', marginBottom:12 }}>{title}</div>
+      {hasChildren ? children : <EmptyState title={emptyTitle} sub={emptySub} />}
+    </div>
+  );
+}
+
+function LifecycleTable({ title, emptyTitle, emptySub, columns, rows, renderRow, compact }) {
+  return (
+    <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:4, overflow:'hidden', marginBottom:18 }}>
+      <div style={{ padding:'13px 16px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 }}>
+        <div style={{ fontSize:11, fontWeight:700, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)' }}>{title}</div>
+        <div style={{ fontSize:10, color:'var(--ink-faint)', fontFamily:'var(--mono)' }}>{rows.length} rows</div>
+      </div>
+      {rows.length === 0 ? (
+        <EmptyState title={emptyTitle} sub={emptySub} />
+      ) : (
+        <div style={{ overflowX:'auto' }}>
+          <table style={{ width:'100%', borderCollapse:'collapse', minWidth: compact ? 520 : 900 }}>
+            <thead>
+              <tr style={{ background:'var(--surface-alt)' }}>
+                {columns.map((h, i) => (
+                  <th key={i} style={{
+                    padding:'9px 12px', textAlign:i > 1 && !compact ? 'right' : 'left',
+                    fontSize:10, fontWeight:700, letterSpacing:'0.12em', textTransform:'uppercase',
+                    color:'var(--ink-mute)', whiteSpace:'nowrap', fontFamily:'var(--mono)',
+                    borderBottom:'1px solid var(--border-md)',
+                  }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>{rows.map(renderRow)}</tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LifecycleCell({ children, mono, align }) {
+  return (
+    <td style={{
+      padding:'10px 12px',
+      fontSize:12,
+      color:'var(--ink-soft)',
+      lineHeight:1.45,
+      verticalAlign:'top',
+      textAlign: align || 'left',
+      fontFamily: mono ? 'var(--mono)' : 'inherit',
+      whiteSpace: align === 'right' ? 'nowrap' : 'normal',
+    }}>{children}</td>
+  );
+}
+
+function fmtLifecycleMoney(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '—';
+  return new Intl.NumberFormat('en-US', { style:'currency', currency:'USD', maximumFractionDigits:0 }).format(num);
+}
+
+function fmtLifecycleNumber(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '—';
+  return String(Math.round(num * 1000) / 1000);
+}
+
+function fmtLifecycleDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return fmtDateMil(value);
+}
+
 // ─── DOCUMENTS TAB ──────────────────────────────────────────────────────────
 function DocumentsTab({ docs, contract, onUpload }) {
   const [typeFilter, setTypeFilter] = useState('all');
@@ -1442,8 +2251,6 @@ function DocumentsTab({ docs, contract, onUpload }) {
           <FilterPills options={[{id:'all', label:'All'}, ...sources.map(s=>({id:s, label:s}))]} value={sourceFilter} onChange={setSourceFilter}/>
         </div>
         <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
-          <BtnSecondary>Import from CPARS</BtnSecondary>
-          <BtnSecondary>Import from IPMDAR</BtnSecondary>
           <BtnPrimary onClick={onUpload}>+ Upload</BtnPrimary>
         </div>
       </div>
@@ -1507,18 +2314,31 @@ function DocumentsTab({ docs, contract, onUpload }) {
 }
 
 // ─── CONTRACT INSIGHTS TAB — findings → patterns → similar contracts ────────
-function ContractInsightsTab({ contract: c, findings, analysisLog = [], onSelectContract }) {
+function ContractInsightsTab({ contract: c, findings, analysisLog = [], lifecycle, onSelectContract }) {
+  const lifecycleIssues = (lifecycle?.issue_register || []).map(issue => ({
+    id: `lifecycle-${issue.issue_id || issue.title}`,
+    severity: issue.severity === 'high' ? 'critical' : issue.severity === 'low' ? 'healthy' : 'watch',
+    claim: issue.title || issue.category || 'Lifecycle issue',
+    observed: issue.summary || issue.description || 'No lifecycle summary is available.',
+    sourceDoc: issue.source_document_id || issue.source || 'Lifecycle packet',
+    similar: [],
+  }));
+  const rowsById = new Map();
+  for (const row of [...findings, ...lifecycleIssues]) {
+    rowsById.set(row.id, row);
+  }
+  const rows = [...rowsById.values()];
   return (
     <div style={{ padding:'24px 24px 48px' }}>
       <SectionHeader
         title="Findings on this contract"
-        subtitle={`${findings.length} specific issues flagged from filed documents`}
+        subtitle={`${rows.length} backend issue rows from regressions and lifecycle extraction`}
       />
       <div style={{ display:'grid', gap:14, marginBottom:36 }}>
-        {findings.length === 0 && (
-          <EmptyState title="No extracted findings" sub="Run document processing or upload reports with extractable performance issues." />
+        {rows.length === 0 && (
+          <EmptyState title="No extracted findings" sub="Run document processing or upload reports with extractable performance issues; no demo findings are shown here." />
         )}
-        {findings.map(f => {
+        {rows.map(f => {
           const sev = SEVERITY_META[f.severity];
           return (
             <div key={f.id} style={{
@@ -2201,138 +3021,6 @@ function DocumentsPage({ onSelectContract }) {
 }
 
 // ─── DOCUMENT VIEWER ────────────────────────────────────────────────────────
-// Builds plausible preview content per doc_type so the mock viewer feels real.
-function buildDocPreview(doc) {
-  const period = doc.period || '—';
-  const t = doc.doc_type;
-  if (t === 'Weekly Status') {
-    return [
-      `WEEKLY STATUS REPORT — ${period}`,
-      `Filed: ${new Date(doc.created_at).toLocaleString('en-US')}`,
-      ``,
-      `1. ACCOMPLISHMENTS`,
-      `   • Completed integration testing for Module B (8 of 10 cases passing).`,
-      `   • Closed 3 open CDRL items from prior period; submitted A001-23.`,
-      `   • Onboarded 1 cleared FTE to subcontract task L-04.`,
-      ``,
-      `2. PLANNED — NEXT 7 DAYS`,
-      `   • Resolve remaining failing test cases for Module B.`,
-      `   • Submit draft Performance Narrative inputs to PMO.`,
-      `   • COR site visit scheduled; agenda forthcoming.`,
-      ``,
-      `3. ISSUES / RISKS`,
-      `   • Government-furnished test data delayed 4 days; mitigated via synthetic data.`,
-      `   • Subcontractor staffing on L-04 below plan by 0.5 FTE.`,
-      ``,
-      `4. KEY METRICS`,
-      `   CPI: 0.96   SPI: 0.93   BCWP: $384k   ACWP: $401k`,
-    ].join('\n');
-  }
-  if (t === 'Modification') {
-    return [
-      `CONTRACT MODIFICATION — ${period}`,
-      `Effective: ${new Date(doc.created_at).toLocaleDateString('en-US')}`,
-      ``,
-      `PURPOSE`,
-      `This bilateral modification is issued to incorporate updated clause language and`,
-      `to obligate additional funding for continued performance.`,
-      ``,
-      `CHANGES`,
-      `   1. Period of performance extended through end of next option year.`,
-      `   2. Funding ceiling increased; total obligated value adjusted accordingly.`,
-      `   3. Clause 252.204-7012 (Safeguarding Covered Defense Information)`,
-      `      replaced with current revision.`,
-      ``,
-      `ALL OTHER TERMS AND CONDITIONS REMAIN UNCHANGED.`,
-    ].join('\n');
-  }
-  if (t === 'CPARS Report') {
-    return [
-      `CONTRACTOR PERFORMANCE ASSESSMENT REPORT — ${period}`,
-      ``,
-      `EVALUATION TYPE: ${period.includes('Annual') ? 'Annual' : 'Interim'}`,
-      ``,
-      `RATINGS`,
-      `   Quality . . . . . . . . . . . . . . . . . . Satisfactory`,
-      `   Schedule  . . . . . . . . . . . . . . . . . Satisfactory`,
-      `   Cost Control  . . . . . . . . . . . . . . . Very Good`,
-      `   Management  . . . . . . . . . . . . . . . . Satisfactory`,
-      `   Regulatory Compliance . . . . . . . . . . . Very Good`,
-      ``,
-      `CO/COR NARRATIVE`,
-      `Contractor delivered against the negotiated baseline with minor schedule slips`,
-      `attributable to government-furnished data delays. Cost variance was contained`,
-      `within tolerance. Recommend continued performance under current arrangement.`,
-      ``,
-      `CONTRACTOR RESPONSE`,
-      `Contractor concurs with the assessment and notes that mitigations identified`,
-      `for the schedule slips have been implemented.`,
-    ].join('\n');
-  }
-  if (t === 'IPMDAR Narrative') {
-    return [
-      `PERFORMANCE NARRATIVE REPORT — ${period}`,
-      ``,
-      `EXECUTIVE SUMMARY`,
-      `Performance during the reporting period was steady. CPI improved from 0.94 to`,
-      `0.96 and SPI held at 0.93. Variance drivers are identified below with corrective`,
-      `actions.`,
-      ``,
-      `COST VARIANCE DRIVERS`,
-      `   • Subcontractor labor escalation on T-3 ($28k unfavorable).`,
-      `   • Travel under-run on T-1 ($11k favorable).`,
-      ``,
-      `SCHEDULE VARIANCE DRIVERS`,
-      `   • Late receipt of GFI on Module B pushed milestone M-04 by 5 days.`,
-      ``,
-      `CORRECTIVE ACTIONS`,
-      `   1. Re-baselined Module B internal milestones; downstream impact contained.`,
-      `   2. Negotiating subcontractor rate true-up for next option period.`,
-    ].join('\n');
-  }
-  if (t === 'IPMDAR Format-5' || t === 'IPMDAR Format-6') {
-    const isF6 = t === 'IPMDAR Format-6';
-    return [
-      `${isF6 ? 'FORMAT 6 — TIME-PHASED FORECAST' : 'FORMAT 5 — VARIANCE ANALYSIS'} — ${period}`,
-      ``,
-      `WBS         BCWS      BCWP      ACWP      CV         SV       CPI    SPI`,
-      `1.0       412,000   401,800   418,200    -16,400    -10,200  0.96   0.98`,
-      `1.1       180,000   172,500   178,400    -5,900     -7,500   0.97   0.96`,
-      `1.2       142,000   139,300   147,100    -7,800     -2,700   0.95   0.98`,
-      `1.3        90,000    90,000    92,700    -2,700      0       0.97   1.00`,
-      ``,
-      isF6
-        ? `FORECAST (NEXT 6 PERIODS): EAC trending to $4.61M against BAC $4.50M.`
-        : `NARRATIVE: Cost variance driven by subcontractor labor; see narrative report.`,
-    ].join('\n');
-  }
-  if (t === 'Invoice') {
-    return [
-      `INVOICE — ${doc.title}`,
-      `Period: ${period}`,
-      `Invoice date: ${new Date(doc.created_at).toLocaleDateString('en-US')}`,
-      ``,
-      `LINE ITEMS`,
-      `   Direct Labor . . . . . . . . . . . . . . . . . $182,400.00`,
-      `   Fringe (28.4%) . . . . . . . . . . . . . . . .  $51,801.60`,
-      `   Overhead (61.0%) . . . . . . . . . . . . . . . $111,264.00`,
-      `   G&A (8.5%)   . . . . . . . . . . . . . . . . .  $29,617.34`,
-      `   Travel & ODC . . . . . . . . . . . . . . . . .   $4,830.00`,
-      `   Fee  . . . . . . . . . . . . . . . . . . . . .  $19,072.04`,
-      `                                                  ────────────`,
-      `   TOTAL DUE  . . . . . . . . . . . . . . . . . . $398,984.98`,
-    ].join('\n');
-  }
-  return [
-    `${doc.title}`,
-    `Type: ${doc.doc_type}`,
-    `Period: ${period}`,
-    `Source: ${doc.source}`,
-    ``,
-    `(This is a mock preview. The actual file would render here in production.)`,
-  ].join('\n');
-}
-
 async function downloadDocAsText(doc) {
   let blob;
   let filename = doc.filename || `${doc.id}.txt`;
@@ -3982,6 +4670,6 @@ function PlaceholderPage({ title, crumbs }) {
 
 export {
   LoginPage, HomePage, ContractsPage, ContractDetailPage,
-  InsightsPage, DocumentsPage, PlaceholderPage,
+  InsightsPage, DocumentsPage, AdminPage, PlaceholderPage,
   ContractorHome, ContractorContractPage,
 };

@@ -35,6 +35,7 @@ from app.models import (
     ContractHypothesis,
     ContractSimilarityLink,
     ChunkEmbedding,
+    CparsRating,
     DocumentChunk,
     DocumentProcessingJob,
     DocumentReportFact,
@@ -1987,6 +1988,27 @@ def _early_warning_signals(
 
 def _cpars_ratings(db: Session, contract_id: str) -> List[CparsRatingResponse]:
     ratings: List[CparsRatingResponse] = []
+    typed_rows = list(db.scalars(select(CparsRating).where(CparsRating.contract_id == contract_id)).all())
+    for row in typed_rows:
+        for label, rating in (
+            ("Quality", row.quality_rating),
+            ("Schedule", row.schedule_rating),
+            ("Cost Control", row.cost_control_rating),
+            ("Management", row.management_rating),
+            ("Small Business", row.small_business_rating),
+            ("Regulatory Compliance", row.regulatory_compliance_rating),
+            ("Overall", row.overall_rating),
+        ):
+            if rating:
+                ratings.append(
+                    CparsRatingResponse(
+                        label=label,
+                        rating=rating,
+                        period_label=row.evaluation_period or "",
+                        summary=row.narrative,
+                        source="cpars_ratings",
+                    )
+                )
     records = list(
         db.scalars(
             select(KnowledgeSourceRecord).where(
