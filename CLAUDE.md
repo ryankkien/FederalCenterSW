@@ -71,16 +71,7 @@ contract. The SQL mirror is maintained for review and local psql reference.
 - `topic_links`: topic-to-topic semantic links.
 - `contract_topic_revisions`: append-only topic revision history.
 
-### Knowledge Wiki Tables
-
-- `knowledge_ingestion_runs`: official-source and fixture-index build runs.
-- `knowledge_source_records`: normalized source records from uploaded evidence,
-  fixtures, and official bulk imports.
-- `knowledge_nodes`: contract, contractor, topic, and source wiki articles.
-- `knowledge_edges`: typed links between wiki nodes.
-- `knowledge_citations`: article citations to uploaded documents, official-source
-  records, or external-source references.
-- `contractor_profiles`: contractor evidence summaries and counts.
+- `contractor_profiles`: contractor evidence summaries, award counts, and issue/contradiction counts.
 
 ### Summarizer Service (`summarizer/`)
 
@@ -141,6 +132,5 @@ contracts
   ├─< contract_hypotheses ──< hypothesis_evidence
   ├─< investigation_runs ──< external_source_refs
   ├─< contract_similarity_links
-  ├─< contract_topics ──< topic_evidence/topic_links/contract_topic_revisions
-  └─< knowledge_nodes ──< knowledge_citations/knowledge_edges
+  └─< contract_topics ──< topic_evidence/topic_links/contract_topic_revisions
 ```
