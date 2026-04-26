@@ -255,6 +255,12 @@ as `document_uploads.contract_id`, so new reports immediately become child docum
 the contract while semantic cross-document and cross-contract relationships remain
 separate.
 
+Portal uploads run cheap deterministic intake decisions before the async processor:
+filename, title, notes, and type cues update `document_kind`, `match_status`, and
+`contract_id` when a known contract number is found. The upload response includes
+`detected_kind` and `matched_contract_id`; full text classification and AI-assisted
+matching still run later through processing jobs.
+
 Government officials see a contract-first analysis workspace. The current v1 view uses
 existing extracted primitives and wiki records to show a cited contract brief,
 chronological report signals, recurring versus one-off issues, early warnings before
@@ -267,7 +273,7 @@ local storage under `backend/data/`. For Azure-backed runs, fill in `DATABASE_UR
 
 ## Email Intake
 
-The backend includes an IMAP intake worker that parses unread mailbox messages into JSONL audit records. In commit mode, supported attachments are uploaded to the same contract-folder storage used by the portal and become visible to the mock contractor portal and official analyst workspace. It can also send an optional receipt auto-reply. Configure it with `EMAIL_INTAKE_*` environment variables, then run:
+The backend includes an IMAP intake worker that parses unread mailbox messages into JSONL audit records. In commit mode, supported attachments are uploaded to the same contract-folder storage used by the portal, run the same deterministic intake decisions, and become visible to the mock contractor portal and official analyst workspace. It can also send an optional receipt auto-reply. Configure it with `EMAIL_INTAKE_*` environment variables, then run:
 
 ```sh
 bun run email:intake -- --limit 5

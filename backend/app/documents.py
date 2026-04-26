@@ -15,6 +15,7 @@ from app.blob_storage import BlobStorage, get_blob_storage
 from app.database import get_db
 from app.document_assets import store_contract_document
 from app.document_files import ALLOWED_CONTENT_TYPES, ALLOWED_EXTENSIONS, clean_filename, file_extension
+from app.document_intake_decisions import apply_inline_intake_decisions
 from app.models import (
     Contract,
     DocumentChunk,
@@ -49,6 +50,8 @@ class DocumentResponse(BaseModel):
     uploader_id: str
     uploader_role: str
     contract_id: Optional[str] = None
+    detected_kind: str = "report"
+    matched_contract_id: Optional[str] = None
     document_kind: str = "report"
     match_status: str = "pending"
     processing_status: str = "pending"
@@ -118,7 +121,7 @@ async def upload_document(
         contract_id=linked_contract_id,
         title=title.strip(),
         document_type=document_type.strip(),
-        document_kind="status_report",
+        document_kind="other",
         intake_source="portal",
         notes=notes.strip() if notes else None,
         original_filename=filename,
@@ -134,6 +137,7 @@ async def upload_document(
         created_at=datetime.now(timezone.utc),
     )
     db.add(document)
+    apply_inline_intake_decisions(db, document)
     db.add(_processing_job(document_id))
     db.commit()
     db.refresh(document)
@@ -374,6 +378,8 @@ def _document_response(document: DocumentUpload) -> DocumentResponse:
         uploader_id=document.uploader_id,
         uploader_role=document.uploader_role,
         contract_id=document.contract_id,
+        detected_kind=document.document_kind,
+        matched_contract_id=document.contract_id,
         document_kind=document.document_kind,
         match_status=document.match_status,
         processing_status=document.processing_status,

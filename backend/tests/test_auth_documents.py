@@ -13,7 +13,13 @@ from app import document_assets
 from app.blob_storage import get_blob_storage
 from app.database import Base, get_db
 from app.main import app
-from app.models import Contract, ContractAccessGrant, DocumentUpload
+from app.models import (
+    Contract,
+    ContractAccessGrant,
+    DocumentClassificationDecision,
+    DocumentMatchDecision,
+    DocumentUpload,
+)
 
 
 class FakeBlobStorage:
@@ -96,6 +102,55 @@ def test_contractor_uploads_document_and_official_can_review(tmp_path) -> None:
         "url": f"https://storage.example.test/app-assets/contracts/{body['id']}/main.pdf?sas=true&expires=15",
         "expires_in_minutes": 15,
     }
+
+
+def test_upload_runs_inline_deterministic_classification_and_matching(tmp_path) -> None:
+    fake_storage = FakeBlobStorage()
+    client = _client_with_test_dependencies(tmp_path, fake_storage)
+    contractor_token = _token(client, "contractor")
+    with next(_test_db_session(tmp_path)) as db:
+        db.add(
+            Contract(
+                id="atlantic",
+                contract_number="N40080-24-D-1042",
+                title="Atlantic Environmental Support",
+            )
+        )
+        db.commit()
+
+    upload = client.post(
+        "/api/documents/upload",
+        headers={"Authorization": f"Bearer {contractor_token}"},
+        data={
+            "title": "Weekly status report",
+            "document_type": "Progress Report",
+            "notes": "Submitted for the Atlantic contract.",
+        },
+        files={"file": ("N40080-24-D-1042_WSR-001.pdf", b"weekly report", "application/pdf")},
+    )
+
+    assert upload.status_code == 201
+    body = upload.json()
+    assert body["document_kind"] == "weekly_report"
+    assert body["detected_kind"] == "weekly_report"
+    assert body["contract_id"] == "atlantic"
+    assert body["matched_contract_id"] == "atlantic"
+    assert body["match_status"] == "matched"
+    with next(_test_db_session(tmp_path)) as db:
+        document = db.get(DocumentUpload, body["id"])
+        classification = db.query(DocumentClassificationDecision).filter_by(document_upload_id=body["id"]).one()
+        match = db.query(DocumentMatchDecision).filter_by(document_upload_id=body["id"]).one()
+
+    assert document is not None
+    assert document.document_kind == "weekly_report"
+    assert document.contract_id == "atlantic"
+    assert classification.document_kind == "weekly_report"
+    assert classification.classifier_name == "deterministic"
+    assert classification.metadata_json["source"] == "deterministic"
+    assert match.contract_id == "atlantic"
+    assert match.matched_contract_number == "N40080-24-D-1042"
+    assert match.decision_status == "matched"
+    assert match.decision_source == "deterministic"
 
 
 def test_scanned_pdf_upload_uses_ocr_when_embedded_text_is_missing(tmp_path, monkeypatch) -> None:

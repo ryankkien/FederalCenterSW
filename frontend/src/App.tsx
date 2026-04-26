@@ -60,6 +60,8 @@ type DocumentRecord = {
   uploader_id: string;
   uploader_role: string;
   contract_id: string | null;
+  detected_kind: string;
+  matched_contract_id: string | null;
   match_status: string;
   processing_status: string;
   created_at: string;
