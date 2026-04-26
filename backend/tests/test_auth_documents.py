@@ -1,9 +1,13 @@
+import json
+from io import BytesIO
 from typing import Dict, Generator
 
+import fitz
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from app import document_text
 from app.blob_storage import get_blob_storage
 from app.database import Base, get_db
 from app.main import app
@@ -57,7 +61,15 @@ def test_contractor_uploads_document_and_official_can_review(tmp_path) -> None:
     body = upload.json()
     assert body["title"] == "Monthly progress report"
     assert body["original_filename"] == "progress.pdf"
-    assert len(fake_storage.files) == 1
+    assert len(fake_storage.files) == 2
+    main_blob = f"documents/contractor-demo/{body['id']}/progress.pdf"
+    text_blob = f"documents/contractor-demo/{body['id']}/text.json"
+    assert fake_storage.files[main_blob] == b"contractor document"
+    text_json = json.loads(fake_storage.files[text_blob])
+    assert text_json["document_id"] == body["id"]
+    assert text_json["original_filename"] == "progress.pdf"
+    assert text_json["source"] == "portal"
+    assert text_json["status"] == "failed"
 
     contractor_list = client.get(
         "/api/documents",
@@ -89,6 +101,88 @@ def test_contractor_uploads_document_and_official_can_review(tmp_path) -> None:
         "url": f"https://storage.example.test/app-assets/documents/contractor-demo/{body['id']}/progress.pdf?sas=true&expires=15",
         "expires_in_minutes": 15,
     }
+
+
+def test_scanned_pdf_upload_uses_ocr_when_embedded_text_is_missing(tmp_path, monkeypatch) -> None:
+    fake_storage = FakeBlobStorage()
+    client = _client_with_test_dependencies(tmp_path, fake_storage)
+    contractor_token = _token(client, "contractor")
+    monkeypatch.setattr(
+        document_text,
+        "_ocr_pdf_text",
+        lambda _document: ("OCR recovered status report text", None),
+    )
+
+    upload = client.post(
+        "/api/documents/upload",
+        headers={"Authorization": f"Bearer {contractor_token}"},
+        data={"title": "Scanned report", "document_type": "Progress Report"},
+        files={"file": ("scanned.pdf", _blank_pdf_bytes(), "application/pdf")},
+    )
+
+    assert upload.status_code == 201
+    body = upload.json()
+    text_blob = f"documents/contractor-demo/{body['id']}/text.json"
+    text_json = json.loads(fake_storage.files[text_blob])
+    assert text_json["status"] == "ocr_extracted"
+    assert text_json["method"] == "ocr"
+    assert text_json["text"] == "OCR recovered status report text"
+
+
+def test_scanned_pdf_upload_uses_ocr_when_embedded_text_is_low_quality(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    fake_storage = FakeBlobStorage()
+    client = _client_with_test_dependencies(tmp_path, fake_storage)
+    contractor_token = _token(client, "contractor")
+    monkeypatch.setattr(document_text, "_is_image_heavy_pdf", lambda _document: True)
+    monkeypatch.setattr(
+        document_text,
+        "_ocr_pdf_text",
+        lambda _document: ("clear monthly progress report text with normal words", None),
+    )
+
+    upload = client.post(
+        "/api/documents/upload",
+        headers={"Authorization": f"Bearer {contractor_token}"},
+        data={"title": "Noisy report", "document_type": "Progress Report"},
+        files={"file": ("noisy.pdf", _low_quality_text_pdf_bytes(), "application/pdf")},
+    )
+
+    assert upload.status_code == 201
+    body = upload.json()
+    text_blob = f"documents/contractor-demo/{body['id']}/text.json"
+    text_json = json.loads(fake_storage.files[text_blob])
+    assert text_json["status"] == "ocr_extracted"
+    assert text_json["method"] == "ocr"
+    assert "clear monthly progress" in text_json["text"]
+    assert text_json["ocr_quality"] > text_json["embedded_quality"]
+
+
+def test_scanned_pdf_upload_records_ocr_failure(tmp_path, monkeypatch) -> None:
+    fake_storage = FakeBlobStorage()
+    client = _client_with_test_dependencies(tmp_path, fake_storage)
+    contractor_token = _token(client, "contractor")
+
+    def fail_ocr(_document):
+        raise RuntimeError("Tesseract command 'tesseract' is not installed or not on PATH")
+
+    monkeypatch.setattr(document_text, "_ocr_pdf_text", fail_ocr)
+
+    upload = client.post(
+        "/api/documents/upload",
+        headers={"Authorization": f"Bearer {contractor_token}"},
+        data={"title": "Scanned report", "document_type": "Progress Report"},
+        files={"file": ("scanned.pdf", _blank_pdf_bytes(), "application/pdf")},
+    )
+
+    assert upload.status_code == 201
+    body = upload.json()
+    text_blob = f"documents/contractor-demo/{body['id']}/text.json"
+    text_json = json.loads(fake_storage.files[text_blob])
+    assert text_json["status"] == "failed"
+    assert "PDF text extraction produced no usable text and OCR failed" in text_json["error"]
 
 
 def test_official_cannot_upload_documents(tmp_path) -> None:
@@ -205,3 +299,20 @@ def _token(client: TestClient, role: str) -> str:
     response = client.post("/api/auth/mock-login", json={"role": role})
     assert response.status_code == 200
     return response.json()["access_token"]
+
+
+def _blank_pdf_bytes() -> bytes:
+    output = BytesIO()
+    document = fitz.open()
+    document.new_page(width=72, height=72)
+    document.save(output)
+    return output.getvalue()
+
+
+def _low_quality_text_pdf_bytes() -> bytes:
+    output = BytesIO()
+    document = fitz.open()
+    page = document.new_page(width=612, height=792)
+    page.insert_text((72, 72), " ".join(["xqz", "brr", "nth", "cwm", "pfft"] * 80))
+    document.save(output)
+    return output.getvalue()

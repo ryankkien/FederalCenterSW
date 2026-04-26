@@ -182,6 +182,13 @@ def test_save_email_documents_uploads_supported_attachments_to_portal_storage(tm
     assert document.uploader_id == "contractor-demo"
     assert document.blob_path in fake_storage.files
     assert fake_storage.files[document.blob_path] == b"pdf bytes"
+    text_blob = document.blob_path.rsplit("/", 1)[0] + "/text.json"
+    assert text_blob in fake_storage.files
+    text_json = json.loads(fake_storage.files[text_blob])
+    assert text_json["document_id"] == document.id
+    assert text_json["original_filename"] == "permit.pdf"
+    assert text_json["source"] == "email"
+    assert text_json["status"] == "failed"
     assert "Source UID: 77." in document.notes
 
 

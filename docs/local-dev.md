@@ -70,6 +70,40 @@ EMAIL_INTAKE_STUB_BLOB_CONTAINER=app-assets
 AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;...
 ```
 
+Portal uploads and committed email attachments store the source file plus extracted text
+metadata in Blob Storage:
+
+```text
+documents/{uploader_id}/{document_id}/{original_filename}
+documents/{uploader_id}/{document_id}/text.json
+```
+
+## OCR Notes
+
+PDF text extraction uses embedded PDF text when the text layer is usable. Scanned PDFs,
+PDFs with low-quality embedded OCR, and uploaded images need OCR. The backend renders
+PDF pages with PyMuPDF and calls the local Tesseract binary.
+
+Install Tesseract locally before testing scanned documents:
+
+```sh
+brew install tesseract
+```
+
+Optional OCR environment variables:
+
+```env
+DOCUMENT_OCR_TESSERACT_CMD=tesseract
+DOCUMENT_OCR_LANGUAGE=eng
+DOCUMENT_OCR_MAX_PAGES=25
+DOCUMENT_OCR_DPI_SCALE=2.0
+```
+
+When Tesseract is missing, uploads still succeed. `text.json` records the extraction
+failure, or falls back to embedded PDF text with a warning when usable embedded text is
+available. Long PDFs are limited by `DOCUMENT_OCR_MAX_PAGES` so synchronous uploads do
+not spend unbounded time in OCR.
+
 ## Boundaries
 
 The local mirror does not emulate:
