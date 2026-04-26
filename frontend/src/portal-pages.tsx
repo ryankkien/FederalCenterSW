@@ -11,15 +11,15 @@ import {
 
 // ─── MOCK DATA ────────────────────────────────────────────────────────────────
 const MOCK_CONTRACTS = [
-  { id:'c1', number:'N00024-23-C-4187', title:'Atlantic Logistics & Sustainment Services', psc:'R706', naics:'541614', component:'PMS 325', value:'$4,210,440', period:'15 MAR 2023 — 14 FEB 2027', start:'2023-03-15', end:'2027-02-14', elapsed:78, lastActivity:'24 APR 2026', docsCount:14, contractor:'Atlantic Logistics LLC', co:'LCDR J. Vance', classification:'CUI', authorized:[
-    { name:'LCDR J. Vance',  role:'Contracting Officer',           email:'j.vance@navy.mil' },
+  { id:'c1', number:'N00024-23-C-4187', title:'Atlantic Logistics & Sustainment Services', psc:'R706', naics:'541614', component:'PMS 325', value:'$4,210,440', period:'15 MAR 2023 — 14 FEB 2027', start:'2023-03-15', end:'2027-02-14', elapsed:78, lastActivity:'24 APR 2026', docsCount:14, contractor:'Atlantic Logistics LLC', co:'LCDR Nicole Jacobs', classification:'CUI', authorized:[
+    { name:'LCDR Nicole Jacobs',  role:'Contracting Officer',           email:'n.jacobs@navy.mil' },
     { name:'LT M. Reyes',    role:'Contracting Officer Rep (COR)', email:'m.reyes@navy.mil' },
     { name:'CDR A. Singh',   role:'Program Manager',               email:'a.singh@navy.mil' },
-    { name:'Sarah Kim',      role:'Contractor PM (Atlantic)',      email:'sarah.kim@atlanticlogistics.com' },
+    { name:'Daniel Kim',      role:'Contractor PM (Atlantic)',      email:'daniel.kim@atlanticlogistics.com' },
   ]},
   { id:'c2', number:'N00024-22-C-3091', title:'Pacific Fleet Maintenance Support',         psc:'J998', naics:'336611', component:'PMS 408', value:'$7,820,100', period:'10 JAN 2022 — 09 DEC 2026', start:'2022-01-10', end:'2026-12-09', elapsed:91, lastActivity:'22 APR 2026', docsCount:22, contractor:'Pacific Marine Industries', co:'CDR R. Patel' },
   { id:'c3', number:'N00178-22-D-7741', title:'NAVWAR IT Infrastructure Services',         psc:'D316', naics:'541512', component:'NAVWAR', value:'$12,140,000',period:'01 JUL 2022 — 30 JUN 2027', start:'2022-07-01', end:'2027-06-30', elapsed:64, lastActivity:'20 APR 2026', docsCount:9,  contractor:'Coastal Cyber Group', co:'CIV K. Brown' },
-  { id:'c4', number:'N00024-21-C-2204', title:'Ship Maintenance & Rebuilding',             psc:'J999', naics:'336611', component:'PMS 312', value:'$9,500,300', period:'01 OCT 2021 — 30 SEP 2026', start:'2021-10-01', end:'2026-09-30', elapsed:88, lastActivity:'18 APR 2026', docsCount:31, contractor:'Eastern Shipworks', co:'LCDR J. Vance' },
+  { id:'c4', number:'N00024-21-C-2204', title:'Ship Maintenance & Rebuilding',             psc:'J999', naics:'336611', component:'PMS 312', value:'$9,500,300', period:'01 OCT 2021 — 30 SEP 2026', start:'2021-10-01', end:'2026-09-30', elapsed:88, lastActivity:'18 APR 2026', docsCount:31, contractor:'Eastern Shipworks', co:'LCDR Nicole Jacobs' },
   { id:'c5', number:'N00024-23-C-4501', title:'Administrative & Management Support',       psc:'R408', naics:'561110', component:'PMS 325', value:'$2,340,000', period:'01 APR 2023 — 31 MAR 2027', start:'2023-04-01', end:'2027-03-31', elapsed:62, lastActivity:'17 APR 2026', docsCount:7,  contractor:'Cardinal Admin Svcs.', co:'CIV M. Diaz' },
   { id:'c6', number:'N00178-23-D-8812', title:'Cybersecurity Assessment & Testing',        psc:'D310', naics:'541512', component:'NAVWAR', value:'$3,110,000', period:'15 JUN 2023 — 14 MAY 2027', start:'2023-06-15', end:'2027-05-14', elapsed:58, lastActivity:'15 APR 2026', docsCount:11, contractor:'Coastal Cyber Group', co:'CIV K. Brown' },
   { id:'c7', number:'N00025-22-C-0041', title:'NAVFAC Facilities Sustainment',             psc:'Z2AA', naics:'238910', component:'NAVFAC', value:'$5,640,200', period:'15 MAR 2022 — 14 FEB 2026', start:'2022-03-15', end:'2026-02-14', elapsed:100,lastActivity:'01 MAR 2026', docsCount:44, contractor:'Tidewater Construction', co:'CDR R. Patel' },
@@ -28,7 +28,7 @@ const MOCK_CONTRACTS = [
 
 // Default access roster used when a contract record doesn't carry one explicitly.
 const DEFAULT_AUTHORIZED = [
-  { name:'LCDR J. Vance',  role:'Contracting Officer',           email:'j.vance@navy.mil' },
+  { name:'LCDR Nicole Jacobs',  role:'Contracting Officer',           email:'n.jacobs@navy.mil' },
   { name:'LT M. Reyes',    role:'Contracting Officer Rep (COR)', email:'m.reyes@navy.mil' },
   { name:'CDR A. Singh',   role:'Program Manager',               email:'a.singh@navy.mil' },
 ];
@@ -123,8 +123,31 @@ function buildDeliverables(c) {
 
 // ─── DOCUMENT CORPUS ────────────────────────────────────────────────────────
 // Generated weekly status reports + modifications + imported reports (CPARS, IPMDAR)
-function buildDocs(contractId) {
+function buildDocs(contractOrId) {
+  // Accept either a full contract record or just an id (back-compat).
+  const contract = typeof contractOrId === 'string' ? null : contractOrId;
+  const contractId = contract?.id || contractOrId;
+
   const docs = [];
+
+  // ── Contract itself — pinned at the top of every Documents view ──
+  // This is what program officers reach for first when reviewing a contract.
+  docs.push({
+    id: `${contractId}-contract`,
+    title: contract
+      ? `${contract.number} — Base Award (${contract.title})`
+      : 'Contract — Base Award',
+    doc_type: 'Contract',
+    source: 'Contracting Office',
+    filename: `${contract?.number || contractId}-base-award.pdf`,
+    content_type: 'application/pdf',
+    size_bytes: 1_842_500,
+    uploader: 'Contracting Office',
+    created_at: contract?.start ? `${contract.start}T08:00:00Z` : '2024-01-01T08:00:00Z',
+    period: 'Award',
+    pinned: true,
+  });
+
   // 14 weekly status reports
   for (let wk = 14; wk >= 1; wk--) {
     const wkStr = String(wk).padStart(2,'0');
@@ -162,11 +185,16 @@ function buildDocs(contractId) {
   docs.push({ id:`${contractId}-l1`,  title:'Labor Hours Summary — March 2026', doc_type:'Deliverable', source:'Contractor', filename:'labor-mar-2026.xlsx', content_type:'application/vnd.ms-excel', size_bytes:91340, uploader:'Contractor', created_at:'2026-04-01T14:05:00Z', period:'MAR 2026' });
   docs.push({ id:`${contractId}-s1`,  title:'Subcontractor Performance Report — Q1 FY26', doc_type:'Tech Report', source:'Contractor', filename:'sub-perf-q1.pdf', content_type:'application/pdf', size_bytes:341200, uploader:'Contractor', created_at:'2026-03-20T13:30:00Z', period:'Q1 FY26' });
 
-  return docs.sort((a,b)=> new Date(b.created_at) - new Date(a.created_at));
+  return docs.sort((a, b) => {
+    if (a.pinned && !b.pinned) return -1;
+    if (b.pinned && !a.pinned) return 1;
+    return new Date(b.created_at) - new Date(a.created_at);
+  });
 }
 
 // Map doc_type → tone/abbrev/source
 const DOC_TYPE_META = {
+  'Contract':          { abbr:'CTR',  tone:'ink',     },
   'Weekly Status':     { abbr:'WSR',  tone:'default', },
   'Modification':      { abbr:'MOD',  tone:'accent',  },
   'CPARS Report':      { abbr:'CPRS', tone:'ink',     },
@@ -260,36 +288,145 @@ const SEVERITY_META = {
   healthy:  { label:'Healthy',  clr:'var(--good)',  bg:'var(--good-soft)',  border:'var(--good-mid)' },
 };
 
+// ─── PSC SERVICE-CONTRACT CATEGORIES ───────────────────────────────────────
+// Federal PSC service-contract category letters. Lets analysts filter by an
+// entire category (e.g. "all R-coded") instead of picking individual codes.
+const PSC_CATEGORIES = [
+  { letter:'B', label:'Special Studies & Analyses' },
+  { letter:'C', label:'Architect & Engineering Services' },
+  { letter:'D', label:'Information Technology / Telecom' },
+  { letter:'F', label:'Natural Resources / Conservation' },
+  { letter:'H', label:'Quality Control / Testing' },
+  { letter:'J', label:'Maintenance / Repair of Equipment' },
+  { letter:'K', label:'Modification of Equipment' },
+  { letter:'L', label:'Technical Representative Services' },
+  { letter:'M', label:'Operation of Government Facilities' },
+  { letter:'N', label:'Installation of Equipment' },
+  { letter:'P', label:'Salvage Services' },
+  { letter:'Q', label:'Medical Services' },
+  { letter:'R', label:'Professional / Administrative / Management' },
+  { letter:'S', label:'Utilities & Housekeeping' },
+  { letter:'T', label:'Photographic, Mapping, Printing' },
+  { letter:'U', label:'Education & Training' },
+  { letter:'V', label:'Transportation, Travel, Relocation' },
+  { letter:'W', label:'Lease / Rental of Equipment' },
+  { letter:'X', label:'Lease / Rental of Facilities' },
+  { letter:'Y', label:'Construction of Structures' },
+  { letter:'Z', label:'Maint/Repair/Alteration of Real Property' },
+];
+
+// ─── PSC CODE CATALOG ───────────────────────────────────────────────────────
+// Representative set of Product/Service Codes used in DoD/Navy procurement.
+// Not exhaustive (the real list has 4 figures of codes), but covers the
+// categories an analyst typically filters on. UI greys-out codes with no
+// contracts in the current portfolio.
+const PSC_CODES = [
+  // R — Professional / Administrative / Management Support Services
+  { code:'R408', desc:'Program Management / Support Services' },
+  { code:'R425', desc:'Engineering & Technical Services' },
+  { code:'R499', desc:'Other Professional Services' },
+  { code:'R701', desc:'Advertising Services' },
+  { code:'R706', desc:'Logistics Support Services' },
+  { code:'R707', desc:'Management Services / Contract & Procurement Support' },
+  { code:'R713', desc:'Acquisition Support Services' },
+  // D — Information Technology / Telecommunications
+  { code:'D302', desc:'IT & Telecom — Systems Development' },
+  { code:'D306', desc:'IT & Telecom — Systems Analysis' },
+  { code:'D307', desc:'IT & Telecom — IT Strategy & Architecture' },
+  { code:'D310', desc:'IT & Telecom — Cyber Security & Information Assurance' },
+  { code:'D316', desc:'IT & Telecom — Telecommunications Network Management' },
+  { code:'D399', desc:'IT & Telecom — Other IT and Telecom Services' },
+  // J — Maintenance, Repair, and Rebuilding of Equipment
+  { code:'J019', desc:'Maint/Repair — Ships, Small Craft & Pontoons' },
+  { code:'J998', desc:'Maint/Repair — Non-Nuclear Ships' },
+  { code:'J999', desc:'Maint/Repair — Other Equipment' },
+  // C — Architect & Engineering Services
+  { code:'C211', desc:'Architect & Engineering — Naval Construction' },
+  { code:'C212', desc:'Architect & Engineering — Construction (Other)' },
+  // Z — Maintenance, Repair & Alteration of Real Property
+  { code:'Z1AA', desc:'Maint/Repair — Office Buildings' },
+  { code:'Z2AA', desc:'Construction of Office Buildings' },
+  { code:'Z2BB', desc:'Construction of Industrial Facilities' },
+  // Y — Construction of Structures and Facilities
+  { code:'Y1AA', desc:'Construction — Office Buildings' },
+  { code:'Y1BZ', desc:'Construction — Other Administrative Facilities' },
+  // S — Utilities and Housekeeping Services
+  { code:'S206', desc:'Guard Services' },
+  { code:'S214', desc:'Lawn & Landscaping Services' },
+  // M — Operation of Government-Owned Facilities
+  { code:'M1JB', desc:'Operation of Naval Facilities' },
+  // F — Natural Resources and Conservation
+  { code:'F108', desc:'Environmental Studies & Assessments' },
+  // Q — Medical Services
+  { code:'Q509', desc:'Medical — Other' },
+  // U — Education and Training Services
+  { code:'U009', desc:'Training/Curriculum Development' },
+  // 70 — General-Purpose Information Technology Equipment
+  { code:'7030', desc:'ADP Software' },
+  { code:'7035', desc:'ADP Support Equipment' },
+];
+
 // ─── INSIGHTS LIBRARY (filterable by PSC, etc.) ─────────────────────────────
 const INSIGHTS = [
   { id:'i1', psc:'R706', naics:'541614', tone:'flag', lens:'Pattern · Recurrence',     contracts:'12 of 47',
     claim:'In R-coded service contracts, weekly reports slip when key personnel rotate within 90 days of a deliverable.',
     why:'Across 47 contracts, 12 show this pattern. Mean slip 4.2 days following PM substitution, vs. 0.6 days otherwise.',
-    so:'Worth flagging when a key-personnel sub notice precedes a deliverable window. Predictive value ≈ 0.74.' },
+    so:'Worth flagging when a key-personnel sub notice precedes a deliverable window. Predictive value ≈ 0.74.',
+    historical: [
+      { source:'FPDS-NG · FY18–FY22 R-coded service awards', n:187, note:'Baseline schedule-slip rate post-PM-sub: 12.4%' },
+      { source:'NAVAIR portfolio · FY22–FY24 (cross-command)', n:34, note:'Same pattern observed in 9 of 34 contracts' },
+      { source:'CPARS historical · R-coded narratives FY15–FY24', n:1240, note:'Key-personnel sub flagged in 22% of "Marginal" Schedule ratings' },
+    ] },
   { id:'i2', psc:'D310', naics:'541512', tone:'flag', lens:'Anomaly · External Dependency', contracts:'3 of 8',
     claim:'D-310 cyber assessment contracts show recurring single-points-of-failure on vendor export licenses.',
     why:'License renewal packages submitted within 30 days of expiry in 3 of 8 cases. Mitigations rarely captured in IMS.',
-    so:'Suggests a contract-clause template change — pre-renewal milestone with a 60-day buffer.' },
+    so:'Suggests a contract-clause template change — pre-renewal milestone with a 60-day buffer.',
+    historical: [
+      { source:'NAVWAR portfolio · FY20–FY24 cyber awards', n:42, note:'Late-renewal pattern in 11 of 42 (26%)' },
+      { source:'GAO report GAO-23-105 — DoD export licensing', n:null, note:'Cited 30-day buffer as systemic risk' },
+      { source:'FPDS-NG · D-310 awards FY15–FY24', n:312, note:'Median renewal lead time 22 days; recommended ≥60' },
+    ] },
   { id:'i3', psc:'R408', naics:'561110', tone:'warn', lens:'Drift · Cost Composition', contracts:'9 of 22',
     claim:'In R-408 admin support, travel ODCs are growing faster than labor — and faster than peer median.',
     why:'ODCs +18% over baseline vs. +3% labor. Peer median ODC growth +6%.',
-    so:'Not yet an overrun. Worth understanding before EAC re-projection.' },
+    so:'Not yet an overrun. Worth understanding before EAC re-projection.',
+    historical: [
+      { source:'OSD CAPE peer cohort · R-408 FY21–FY24', n:64, note:'Median ODC growth +6%; this portfolio +18% (sig.)' },
+      { source:'IPMDAR Format-5 archive · FY22–FY24', n:902, note:'ODC drift precedes EAC re-baseline by 2.7 quarters on avg' },
+    ] },
   { id:'i4', psc:'D310', naics:'541512', tone:'good', lens:'Win · Replicable Practice', contracts:'2 of 8',
     claim:'Two NAVWAR cyber contracts closed POA&M items 11 days ahead of plan — same mechanism in both.',
     why:'Mechanism: SOC-2-tied clause language adopted in mod P00007. Same pattern present in 11 peer contracts.',
-    so:'Transferable to D, J, R-code SOW templates.' },
+    so:'Transferable to D, J, R-code SOW templates.',
+    historical: [
+      { source:'NAVWAR FY23 lessons-learned register', n:11, note:'Same clause language used in 11 peer awards' },
+      { source:'CPARS · D-310 narratives FY22–FY24', n:184, note:'POA&M closure ahead-of-plan in 14% of awards using this clause vs. 4% baseline' },
+    ] },
   { id:'i5', psc:'J998', naics:'336611', tone:'warn', lens:'Drift · Schedule Health', contracts:'5 of 11',
     claim:'J-998 fleet-maintenance contracts trend toward late delivery in months 22–24 of 36-month base periods.',
     why:'Mean SPI declines from 0.97 to 0.89 in this band. Correlates with sub-tier supplier lead-time growth.',
-    so:'Prompt for a mid-period IMS health check would have caught 4 of 5 prior cases.' },
+    so:'Prompt for a mid-period IMS health check would have caught 4 of 5 prior cases.',
+    historical: [
+      { source:'NAVSEA portfolio · J-998 FY18–FY23', n:38, note:'M22–M24 SPI dip in 21 of 38 (55%)' },
+      { source:'DLA sub-tier lead-time reports FY22–FY24', n:null, note:'Average lead-time +14 days vs. baseline' },
+      { source:'FPDS-NG · J-998 awards FY10–FY24', n:541, note:'Closeouts >30 days late more likely with M-22 SPI < 0.92' },
+    ] },
   { id:'i6', psc:'C211', naics:'541330', tone:'good', lens:'Benchmark · Outperform', contracts:'1 of 3',
     claim:'A&E dry-dock work has come in 6.2% under EAC across recent NAVFAC contracts.',
     why:'Driver: BIM-coordinated design reviews introduced FY24. Reduced rework hours ~12%.',
-    so:'Strong case for adopting the same review cadence in upcoming PMS 312 mods.' },
+    so:'Strong case for adopting the same review cadence in upcoming PMS 312 mods.',
+    historical: [
+      { source:'NAVFAC FY23–FY24 BIM pilot retrospective', n:8, note:'Mean cost variance −5.4% vs. −0.1% pre-pilot' },
+      { source:'FPDS-NG · C-211 NAVFAC awards FY18–FY22', n:74, note:'Pre-BIM baseline: median rework 8.3% of labor hours' },
+    ] },
   { id:'i7', psc:'Z2AA', naics:'238910', tone:'flag', lens:'Pattern · Recurrence', contracts:'4 of 6',
     claim:'Facilities sustainment contracts under-report sub-tier safety incidents in the first 6 months.',
     why:'Cross-checking with NAVFAC injury logs shows a 0.31 correlation; first-6-month reporting gap closes after H-19 reminders.',
-    so:'Worth requiring sub-tier reporting from Day 1 in next-cycle solicitations.' },
+    so:'Worth requiring sub-tier reporting from Day 1 in next-cycle solicitations.',
+    historical: [
+      { source:'NAVFAC injury log archive · FY20–FY24', n:1820, note:'Sub-tier under-report rate 41% in first 6 months' },
+      { source:'OSHA Form 300A · DoD-installation contractors', n:null, note:'Aggregate gap of 28% vs. self-reported figures' },
+    ] },
 ];
 
 // ─── LOGIN PAGE ─────────────────────────────────────────────────────────────
@@ -302,8 +439,8 @@ function LoginPage({ onLogin }) {
     setLoading(true);
     await new Promise(r => setTimeout(r, 400));
     const mockUser = role === 'contractor'
-      ? { id:'u1', email:'sarah.kim@atlanticlogistics.com', name:'Sarah Kim',     role:'contractor' }
-      : { id:'u2', email:'j.vance@navy.mil',                name:'LCDR J. Vance', role:'official'   };
+      ? { id:'u1', email:'daniel.kim@atlanticlogistics.com', name:'Daniel Kim',     role:'contractor' }
+      : { id:'u2', email:'n.jacobs@navy.mil',                name:'LCDR Nicole Jacobs', role:'official'   };
     onLogin('mock-token-' + role, mockUser);
     setLoading(false);
   }
@@ -368,7 +505,9 @@ function LoginPage({ onLogin }) {
 // ─── HOME PAGE — themes-driven overview ─────────────────────────────────────
 function HomePage({ user, onNav, onSelectContract }) {
   const today = new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' });
-  const firstName = (user?.name || 'User').split(' ').slice(-1)[0];
+  const nameParts = (user?.name || 'User').split(' ');
+  const RANKS = new Set(['LCDR','LT','CDR','CAPT','CIV','ENS','ADM','RDML','VADM','LTJG']);
+  const firstName = RANKS.has(nameParts[0]) ? (nameParts[1] || nameParts[0]) : nameParts[0];
 
   const [serviceCode, setServiceCode] = useState('All codes');
   const [component, setComponent] = useState('All');
@@ -598,12 +737,28 @@ function ContractsPage({ onSelectContract }) {
   const [search, setSearch] = useState('');
   const [pscFilter, setPscFilter] = useState('all');
   const [componentFilter, setComponentFilter] = useState('all');
+  const [userContracts, setUserContracts] = useState([]);
+  const [showLog, setShowLog] = useState(false);
 
-  const pscBuckets = [...new Set(MOCK_CONTRACTS.map(c => c.psc[0]))].sort();
-  const components = [...new Set(MOCK_CONTRACTS.map(c => c.component))];
+  const allContracts = [...userContracts, ...MOCK_CONTRACTS];
+  const presentPscs = new Set(allContracts.map(c => c.psc));
+  const pscOptions = PSC_CODES.map(p => ({
+    id: p.code, label: p.code, desc: p.desc,
+    disabled: !presentPscs.has(p.code),
+  }));
+  // Make sure any PSC actually used by a contract appears in the dropdown,
+  // even if it isn't in PSC_CODES.
+  for (const c of allContracts) {
+    if (!pscOptions.some(o => o.id === c.psc)) {
+      pscOptions.push({ id:c.psc, label:c.psc, desc:'(from contract record)', disabled:false });
+    }
+  }
+  pscOptions.sort((a, b) => a.id.localeCompare(b.id));
 
-  const filtered = MOCK_CONTRACTS.filter(c => {
-    if (pscFilter !== 'all' && c.psc[0] !== pscFilter) return false;
+  const components = [...new Set(allContracts.map(c => c.component))];
+
+  const filtered = allContracts.filter(c => {
+    if (pscFilter !== 'all' && c.psc !== pscFilter) return false;
     if (componentFilter !== 'all' && c.component !== componentFilter) return false;
     if (search && !`${c.number} ${c.title} ${c.contractor}`.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
@@ -621,10 +776,11 @@ function ContractsPage({ onSelectContract }) {
         <div>
           <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.18em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)', marginBottom:6 }}>Workspace</div>
           <h1 style={{ fontSize:22, fontWeight:700, letterSpacing:'-0.02em', color:'var(--ink)' }}>Contracts</h1>
-          <p style={{ fontSize:12, color:'var(--ink-mute)', marginTop:4 }}>{MOCK_CONTRACTS.length} contracts indexed · FY22 — FY27 spans</p>
+          <p style={{ fontSize:12, color:'var(--ink-mute)', marginTop:4 }}>{allContracts.length} contracts indexed · FY22 — FY27 spans</p>
         </div>
         <div style={{ display:'flex', gap:8 }}>
           <BtnSecondary>Export CSV</BtnSecondary>
+          <BtnPrimary onClick={() => setShowLog(true)}>+ Log Contract</BtnPrimary>
         </div>
       </div>
 
@@ -636,7 +792,7 @@ function ContractsPage({ onSelectContract }) {
       }}>
         <div style={{ display:'flex', alignItems:'center', gap:8 }}>
           <span style={{ fontSize:10, fontWeight:700, color:'var(--ink-mute)', letterSpacing:'0.12em', textTransform:'uppercase', fontFamily:'var(--mono)' }}>PSC</span>
-          <FilterPills options={[{id:'all', label:'All'}, ...pscBuckets.map(p=>({id:p, label:p+'-codes'}))]} value={pscFilter} onChange={setPscFilter} />
+          <SearchableSelect value={pscFilter} onChange={setPscFilter} options={pscOptions} placeholder="Search PSC code or description…" />
         </div>
         <div style={{ height:18, width:1, background:'var(--border)' }}/>
         <div style={{ display:'flex', alignItems:'center', gap:8 }}>
@@ -703,6 +859,13 @@ function ContractsPage({ onSelectContract }) {
         </table>
         {filtered.length === 0 && <EmptyState title="No contracts match" sub="Try adjusting your filters or search term." />}
       </div>
+
+      {showLog && (
+        <NewContractModal
+          onClose={() => setShowLog(false)}
+          onCreated={(c) => { setUserContracts(prev => [c, ...prev]); setShowLog(false); }}
+        />
+      )}
     </div>
   );
 }
@@ -732,7 +895,7 @@ const DETAIL_TABS = ['Overview', 'Insights', 'Benchmarks', 'Documents'];
 
 function ContractDetailPage({ contract, onBack, onSelectContract }) {
   const [tab, setTab] = useState('Overview');
-  const [docs, setDocs] = useState(() => buildDocs(contract.id));
+  const [docs, setDocs] = useState(() => buildDocs(contract));
   const [showUpload, setShowUpload] = useState(false);
 
   const c = contract;
@@ -1048,11 +1211,15 @@ function LegendDot({ color, border, label }) {
 function DocumentsTab({ docs, contract, onUpload }) {
   const [typeFilter, setTypeFilter] = useState('all');
   const [sourceFilter, setSourceFilter] = useState('all');
+  const [viewing, setViewing] = useState(null);
 
-  const types = [...new Set(docs.map(d => d.doc_type))];
-  const sources = [...new Set(docs.map(d => d.source))];
+  const pinnedDocs = docs.filter(d => d.pinned);
+  const otherDocs = docs.filter(d => !d.pinned);
 
-  const filtered = docs.filter(d => {
+  const types = [...new Set(otherDocs.map(d => d.doc_type))];
+  const sources = [...new Set(otherDocs.map(d => d.source))];
+
+  const filtered = otherDocs.filter(d => {
     if (typeFilter !== 'all' && d.doc_type !== typeFilter) return false;
     if (sourceFilter !== 'all' && d.source !== sourceFilter) return false;
     return true;
@@ -1060,12 +1227,48 @@ function DocumentsTab({ docs, contract, onUpload }) {
 
   return (
     <div>
+      {pinnedDocs.length > 0 && (
+        <div style={{ padding:'18px 24px 6px', background:'var(--surface)' }}>
+          <div style={{ fontSize:10, fontWeight:700, color:'var(--ink-mute)', letterSpacing:'0.14em', textTransform:'uppercase', fontFamily:'var(--mono)', marginBottom:10, display:'flex', alignItems:'center', gap:8 }}>
+            <span style={{ fontSize:11 }}>📌</span> Pinned · contract document
+          </div>
+          {pinnedDocs.map(doc => {
+            const meta = DOC_TYPE_META[doc.doc_type] || { abbr:'DOC', tone:'default' };
+            return (
+              <div key={doc.id} style={{
+                background:'var(--surface)',
+                border:'1px solid var(--ink)',
+                borderLeft:'3px solid var(--ink)',
+                borderRadius:3,
+                padding:'14px 18px',
+                display:'flex', alignItems:'center', gap:16,
+                boxShadow:'var(--shadow-sm)',
+              }}>
+                <span style={{
+                  fontSize:10, fontWeight:700, fontFamily:'var(--mono)',
+                  color:'#fff', background:'var(--ink)', border:'1px solid var(--ink)',
+                  padding:'4px 9px', borderRadius:2, letterSpacing:'0.10em', flexShrink:0,
+                }}>{meta.abbr}</span>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:14, fontWeight:600, color:'var(--ink)', lineHeight:1.3, marginBottom:3 }}>{doc.title}</div>
+                  <div style={{ fontSize:11, color:'var(--ink-mute)', fontFamily:'var(--mono)', letterSpacing:'0.04em' }}>
+                    {doc.filename} · {fmtBytes(doc.size_bytes)} · Awarded {fmtDateMil(doc.created_at)}
+                  </div>
+                </div>
+                <BtnSecondary style={{ padding:'5px 12px', fontSize:12, marginRight:6 }} onClick={() => setViewing(doc)}>View</BtnSecondary>
+                <BtnSecondary style={{ padding:'5px 12px', fontSize:12 }} onClick={() => downloadDocAsText(doc)}>Download</BtnSecondary>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       <div style={{
         padding:'14px 24px', display:'flex', alignItems:'center', gap:14,
         borderBottom:'1px solid var(--border)', background:'var(--surface)',
         flexWrap:'wrap',
       }}>
-        <div style={{ fontSize:13, fontWeight:600, color:'var(--ink)' }}>{filtered.length} of {docs.length} documents</div>
+        <div style={{ fontSize:13, fontWeight:600, color:'var(--ink)' }}>{filtered.length} of {otherDocs.length} documents</div>
         <div style={{ height:18, width:1, background:'var(--border)' }}/>
         <div style={{ display:'flex', alignItems:'center', gap:8 }}>
           <span style={{ fontSize:10, fontWeight:700, color:'var(--ink-mute)', letterSpacing:'0.12em', textTransform:'uppercase', fontFamily:'var(--mono)' }}>Type</span>
@@ -1126,8 +1329,9 @@ function DocumentsTab({ docs, contract, onUpload }) {
                   <div style={{ fontSize:10, color:'var(--ink-faint)', marginTop:2, fontFamily:'var(--mono)' }}>{fmtBytes(doc.size_bytes)}</div>
                 </td>
                 <td style={{ padding:'12px 16px', fontSize:11, color:'var(--ink-mute)', whiteSpace:'nowrap', fontFamily:'var(--mono)' }}>{fmtDateMil(doc.created_at)}</td>
-                <td style={{ padding:'12px 16px' }}>
-                  <BtnSecondary style={{ padding:'4px 10px', fontSize:11 }}>Download</BtnSecondary>
+                <td style={{ padding:'12px 16px', whiteSpace:'nowrap' }}>
+                  <BtnSecondary style={{ padding:'4px 10px', fontSize:11, marginRight:6 }} onClick={() => setViewing(doc)}>View</BtnSecondary>
+                  <BtnSecondary style={{ padding:'4px 10px', fontSize:11 }} onClick={() => downloadDocAsText(doc)}>Download</BtnSecondary>
                 </td>
               </tr>
             );
@@ -1135,6 +1339,7 @@ function DocumentsTab({ docs, contract, onUpload }) {
         </tbody>
       </table>
       {filtered.length === 0 && <EmptyState title="No documents match" sub="Try a different filter combination."/>}
+      {viewing && <DocumentViewerModal doc={viewing} onClose={() => setViewing(null)} />}
     </div>
   );
 }
@@ -1142,17 +1347,31 @@ function DocumentsTab({ docs, contract, onUpload }) {
 // ─── CONTRACT INSIGHTS TAB — findings → patterns → similar contracts ────────
 function ContractInsightsTab({ contract: c, onSelectContract }) {
   const findings = FINDINGS[c.id] || FINDINGS.c1; // fall back to demo set
+  const [pinnedSet, setPinnedSet] = useState(() => new Set(loadCustomInsights().map(i => i.id)));
+
+  function togglePin(finding) {
+    const key = `pinned-${c.id}-${finding.id}`;
+    if (pinnedSet.has(key)) {
+      unpinFindingFromLibrary(c, finding);
+      setPinnedSet(prev => { const n = new Set(prev); n.delete(key); return n; });
+    } else {
+      pinFindingToLibrary(c, finding);
+      setPinnedSet(prev => { const n = new Set(prev); n.add(key); return n; });
+    }
+  }
 
   return (
     <div style={{ padding:'24px 24px 48px' }}>
       <SectionHeader
         title="Findings on this contract"
-        subtitle={`${findings.length} specific issues flagged from filed documents — each linked to a portfolio-wide pattern`}
+        subtitle={`${findings.length} specific issues flagged from filed documents — pin any to your Insights Library to track across the portfolio`}
       />
       <div style={{ display:'grid', gap:14 }}>
         {findings.map(f => {
           const sev = SEVERITY_META[f.severity];
           const theme = THEMES.find(t => t.id === f.themeId);
+          const pinKey = `pinned-${c.id}-${f.id}`;
+          const isPinned = pinnedSet.has(pinKey);
           return (
             <div key={f.id} style={{
               background:'var(--surface)', border:'1px solid var(--border)',
@@ -1169,6 +1388,11 @@ function ContractInsightsTab({ contract: c, onSelectContract }) {
                   <span style={{ fontSize:10, color:'var(--ink-faint)', fontFamily:'var(--mono)', letterSpacing:'0.06em' }}>
                     SOURCE → {f.sourceDoc}
                   </span>
+                  {isPinned && <Tag tone="accent">⚑ Pinned to library</Tag>}
+                  <BtnSecondary
+                    style={{ padding:'4px 10px', fontSize:11, marginLeft:'auto' }}
+                    onClick={() => togglePin(f)}
+                  >{isPinned ? '⚑ Unpin' : '⚑ Pin to library'}</BtnSecondary>
                 </div>
                 <div style={{ fontSize:15, fontWeight:600, color:'var(--ink)', lineHeight:1.4, marginBottom:8 }}>{f.claim}</div>
                 <div style={{ fontSize:12, color:'var(--ink-mute)', lineHeight:1.6 }}>
@@ -1224,14 +1448,46 @@ function ContractInsightsTab({ contract: c, onSelectContract }) {
 }
 
 // ─── INSIGHTS LIBRARY (cross-portfolio) ─────────────────────────────────────
-function InsightsTab({ psc, naics, embedded }) {
-  const [pscFilter, setPscFilter] = useState(embedded ? psc : 'all');
+function InsightsTab({ psc, naics, embedded, onSelectContract, customInsights = [], onUnpin }) {
+  // Embedded mode (inside a contract page) seeds with that contract's specific code.
+  const [pscSelection, setPscSelection] = useState(() => ({
+    categories: new Set(),
+    codes: embedded && psc ? new Set([psc]) : new Set(),
+  }));
   const [toneFilter, setToneFilter] = useState('all');
+  const [openInsight, setOpenInsight] = useState(null);
+  const [flagged, setFlagged] = useState(() => loadFlaggedInsights());
 
-  const pscBuckets = [...new Set(INSIGHTS.map(i => i.psc))].sort();
+  // Custom insights from the user are shown ahead of built-ins.
+  const ALL_INSIGHTS = [...customInsights, ...INSIGHTS];
+  const presentInsightPscs = new Set(ALL_INSIGHTS.map(i => i.psc));
+  const pscOptions = PSC_CODES.map(p => ({
+    id: p.code, label: p.code, desc: p.desc,
+    disabled: !presentInsightPscs.has(p.code),
+  }));
+  for (const ins of ALL_INSIGHTS) {
+    if (!pscOptions.some(o => o.id === ins.psc)) {
+      pscOptions.push({ id:ins.psc, label:ins.psc, desc:'(insight code)', disabled:false });
+    }
+  }
+  pscOptions.sort((a, b) => a.id.localeCompare(b.id));
 
-  const filtered = INSIGHTS.filter(i => {
-    if (pscFilter !== 'all' && i.psc !== pscFilter) return false;
+  function toggleFlag(id) {
+    setFlagged(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      saveFlaggedInsights(next);
+      return next;
+    });
+  }
+
+  const noPscFilter = pscSelection.categories.size === 0 && pscSelection.codes.size === 0;
+  const filtered = ALL_INSIGHTS.filter(i => {
+    if (!noPscFilter) {
+      const matchesCategory = pscSelection.categories.has(i.psc[0]);
+      const matchesCode = pscSelection.codes.has(i.psc);
+      if (!matchesCategory && !matchesCode) return false;
+    }
     if (toneFilter !== 'all' && i.tone !== toneFilter) return false;
     return true;
   });
@@ -1252,7 +1508,12 @@ function InsightsTab({ psc, naics, embedded }) {
         }}>
           <div style={{ display:'flex', alignItems:'center', gap:8 }}>
             <span style={{ fontSize:10, fontWeight:700, color:'var(--ink-mute)', letterSpacing:'0.12em', textTransform:'uppercase', fontFamily:'var(--mono)' }}>PSC</span>
-            <FilterPills options={[{id:'all', label:'All'}, ...pscBuckets.map(p=>({id:p, label:p}))]} value={pscFilter} onChange={setPscFilter}/>
+            <PSCMultiSelect
+              categories={pscSelection.categories}
+              codes={pscSelection.codes}
+              codeOptions={pscOptions}
+              onChange={setPscSelection}
+            />
           </div>
           <div style={{ height:18, width:1, background:'var(--border)' }}/>
           <div style={{ display:'flex', alignItems:'center', gap:8 }}>
@@ -1277,12 +1538,19 @@ function InsightsTab({ psc, naics, embedded }) {
         <div style={{ display:'grid', gap:10 }}>
           {filtered.map((ins) => {
             const t = toneMap[ins.tone];
+            const isFlagged = flagged.has(ins.id);
             return (
-              <div key={ins.id} style={{
-                background:'var(--surface)', border:'1px solid var(--border)',
-                borderLeft:`3px solid ${t.border}`,
-                borderRadius:3, padding:'18px 20px',
-              }}>
+              <div key={ins.id}
+                onClick={() => setOpenInsight(ins)}
+                style={{
+                  background:'var(--surface)', border:'1px solid var(--border)',
+                  borderLeft:`3px solid ${t.border}`,
+                  borderRadius:3, padding:'18px 20px',
+                  cursor:'pointer', transition:'background 0.1s, border-color 0.1s',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background='var(--surface-alt)'}
+                onMouseLeave={e => e.currentTarget.style.background='var(--surface)'}
+              >
                 <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10, flexWrap:'wrap' }}>
                   <span style={{
                     fontSize:9.5, fontWeight:700, letterSpacing:'0.10em', textTransform:'uppercase',
@@ -1291,6 +1559,8 @@ function InsightsTab({ psc, naics, embedded }) {
                   }}>{ins.lens}</span>
                   <Tag>{ins.psc}</Tag>
                   <Tag>NAICS {ins.naics}</Tag>
+                  {ins.custom && <Tag tone="accent">⚑ Pinned by you</Tag>}
+                  {isFlagged && <Tag tone="flag">⚑ Flagged</Tag>}
                   <span style={{ marginLeft:'auto', fontSize:10, color:'var(--ink-faint)', fontFamily:'var(--mono)', letterSpacing:'0.06em' }}>Observed in {ins.contracts} contracts</span>
                 </div>
                 <div style={{ fontSize:14.5, fontWeight:600, color:'var(--ink)', lineHeight:1.45, marginBottom:10 }}>{ins.claim}</div>
@@ -1310,24 +1580,70 @@ function InsightsTab({ psc, naics, embedded }) {
         </div>
         {filtered.length === 0 && <EmptyState title="No insights match" sub="Adjust your filters to see related findings."/>}
       </div>
+      {openInsight && (
+        <InsightDetailModal
+          insight={openInsight}
+          onClose={() => setOpenInsight(null)}
+          onSelectContract={onSelectContract}
+          isFlagged={flagged.has(openInsight.id)}
+          onToggleFlag={toggleFlag}
+          onUnpin={onUnpin}
+        />
+      )}
     </div>
   );
 }
 
-function InsightsPage() {
+function InsightsPage({ onSelectContract }) {
+  const [customInsights, setCustomInsights] = useState(() => loadCustomInsights());
+
+  // Re-read pinned insights on focus / visibility change so the library stays
+  // in sync after the user pins something from a contract page in another tab
+  // or simply navigates back here.
+  useEffect(() => {
+    function refresh() { setCustomInsights(loadCustomInsights()); }
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, []);
+
+  function unpinInsight(id) {
+    setCustomInsights(prev => {
+      const next = prev.filter(i => i.id !== id);
+      saveCustomInsights(next);
+      return next;
+    });
+  }
+
+  const totalCount = INSIGHTS.length + customInsights.length;
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
       <TopBar crumbs={['Insights']} />
       <div style={{
         background:'var(--surface)', borderBottom:'1px solid var(--border)',
         padding:'18px 24px',
+        display:'flex', alignItems:'flex-end', justifyContent:'space-between', gap:16,
       }}>
-        <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.18em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)', marginBottom:6 }}>Cross-portfolio</div>
-        <h1 style={{ fontSize:22, fontWeight:700, letterSpacing:'-0.02em', color:'var(--ink)' }}>Insights Library</h1>
-        <p style={{ fontSize:12, color:'var(--ink-mute)', marginTop:4 }}>{INSIGHTS.length} findings across the portfolio · filter by PSC, NAICS, or lens</p>
+        <div>
+          <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.18em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)', marginBottom:6 }}>Cross-portfolio</div>
+          <h1 style={{ fontSize:22, fontWeight:700, letterSpacing:'-0.02em', color:'var(--ink)' }}>Insights Library</h1>
+          <p style={{ fontSize:12, color:'var(--ink-mute)', marginTop:4 }}>
+            {totalCount} findings{customInsights.length > 0 ? ` · ${customInsights.length} pinned from contracts` : ''} · pin findings from a contract's Insights tab to track them here
+          </p>
+        </div>
+        <div style={{ display:'flex', gap:8 }}>
+          <BtnSecondary onClick={() => downloadInsightLibrary([...customInsights, ...INSIGHTS], loadFlaggedInsights())}>Export library (PDF)</BtnSecondary>
+        </div>
       </div>
       <div style={{ flex:1, overflowY:'auto', background:'var(--bg)' }}>
-        <InsightsTab />
+        <InsightsTab
+          onSelectContract={onSelectContract}
+          customInsights={customInsights}
+          onUnpin={unpinInsight}
+        />
       </div>
     </div>
   );
@@ -1401,20 +1717,39 @@ function BenchmarksTab({ contract: c }) {
 
 // ─── DOCUMENTS PAGE (cross-contract) ────────────────────────────────────────
 function DocumentsPage({ onSelectContract }) {
-  const allDocs = MOCK_CONTRACTS.flatMap(c =>
-    buildDocs(c.id).slice(0, 4).map(d => ({ ...d, contractNumber:c.number, contractId:c.id, contract:c }))
-  ).sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
+  const docsByContract = MOCK_CONTRACTS.map(c => ({
+    contract: c,
+    docs: buildDocs(c).slice(0, 5),
+  }));
+  const totalDocs = docsByContract.reduce((n, g) => n + g.docs.length, 0);
 
   const [typeFilter, setTypeFilter] = useState('all');
   const [sourceFilter, setSourceFilter] = useState('all');
+  const [viewing, setViewing] = useState(null);
+  const [collapsed, setCollapsed] = useState(() => new Set());
+
+  const allDocs = docsByContract.flatMap(g => g.docs);
   const types = [...new Set(allDocs.map(d => d.doc_type))];
   const sources = [...new Set(allDocs.map(d => d.source))];
 
-  const filtered = allDocs.filter(d => {
+  function passesFilter(d) {
     if (typeFilter !== 'all' && d.doc_type !== typeFilter) return false;
     if (sourceFilter !== 'all' && d.source !== sourceFilter) return false;
     return true;
-  });
+  }
+
+  function toggle(id) {
+    setCollapsed(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  const visibleGroups = docsByContract
+    .map(g => ({ ...g, filteredDocs: g.docs.filter(passesFilter) }))
+    .filter(g => g.filteredDocs.length > 0);
+  const visibleDocsTotal = visibleGroups.reduce((n, g) => n + g.filteredDocs.length, 0);
 
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
@@ -1422,7 +1757,7 @@ function DocumentsPage({ onSelectContract }) {
       <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', padding:'18px 24px' }}>
         <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.18em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)', marginBottom:6 }}>Portfolio</div>
         <h1 style={{ fontSize:22, fontWeight:700, letterSpacing:'-0.02em', color:'var(--ink)' }}>All Documents</h1>
-        <p style={{ fontSize:12, color:'var(--ink-mute)', marginTop:4 }}>{allDocs.length} documents across {MOCK_CONTRACTS.length} contracts</p>
+        <p style={{ fontSize:12, color:'var(--ink-mute)', marginTop:4 }}>{totalDocs} documents across {MOCK_CONTRACTS.length} contracts · grouped by contract</p>
       </div>
 
       <div style={{ padding:'12px 24px', display:'flex', alignItems:'center', gap:14, borderBottom:'1px solid var(--border)', background:'var(--surface)', flexWrap:'wrap' }}>
@@ -1435,56 +1770,318 @@ function DocumentsPage({ onSelectContract }) {
           <span style={{ fontSize:10, fontWeight:700, color:'var(--ink-mute)', letterSpacing:'0.12em', textTransform:'uppercase', fontFamily:'var(--mono)' }}>Source</span>
           <FilterPills options={[{id:'all', label:'All'}, ...sources.map(s=>({id:s, label:s}))]} value={sourceFilter} onChange={setSourceFilter}/>
         </div>
+        <div style={{ marginLeft:'auto', fontSize:11, color:'var(--ink-faint)', fontFamily:'var(--mono)', letterSpacing:'0.04em' }}>
+          {visibleDocsTotal} of {totalDocs} matching
+        </div>
       </div>
 
-      <div style={{ flex:1, overflowY:'auto', background:'var(--bg)' }}>
-        <table style={{ width:'100%', borderCollapse:'collapse' }}>
-          <thead>
-            <tr style={{ background:'var(--surface-alt)' }}>
-              {['Type', 'Title', 'Contract', 'Source', 'Filed', ''].map((h,i) => (
-                <th key={i} style={{
-                  padding:'9px 16px', textAlign:'left',
-                  fontSize:10, fontWeight:700, letterSpacing:'0.12em', textTransform:'uppercase',
-                  color:'var(--ink-mute)', whiteSpace:'nowrap', fontFamily:'var(--mono)',
-                  position:'sticky', top:0, background:'var(--surface-alt)',
-                  borderBottom:'1px solid var(--border-md)',
-                }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map(doc => {
-              const meta = DOC_TYPE_META[doc.doc_type] || { abbr:'DOC', tone:'default' };
-              return (
-                <tr key={doc.id} onClick={() => onSelectContract(doc.contract)} style={{
-                  borderBottom:'1px solid var(--border)', cursor:'pointer',
-                  background:'var(--surface)', transition:'background 0.1s',
-                }}
-                  onMouseEnter={e => e.currentTarget.style.background='var(--surface-alt)'}
-                  onMouseLeave={e => e.currentTarget.style.background='var(--surface)'}
-                >
-                  <td style={{ padding:'12px 16px', whiteSpace:'nowrap' }}>
-                    <span style={{
-                      fontSize:9.5, fontWeight:700, fontFamily:'var(--mono)',
-                      color: meta.tone === 'ink' ? '#fff' : meta.tone === 'accent' ? '#fff' : 'var(--ink-mute)',
-                      background: meta.tone === 'ink' ? 'var(--ink)' : meta.tone === 'accent' ? 'var(--accent)' : 'var(--surface-alt)',
-                      border: '1px solid ' + (meta.tone === 'ink' ? 'var(--ink)' : meta.tone === 'accent' ? 'var(--accent)' : 'var(--border-md)'),
-                      padding:'3px 7px', borderRadius:2, letterSpacing:'0.08em',
-                    }}>{meta.abbr}</span>
-                  </td>
-                  <td style={{ padding:'12px 16px' }}>
-                    <div style={{ fontSize:13, color:'var(--ink)' }}>{doc.title}</div>
-                    <div style={{ fontSize:10, color:'var(--ink-faint)', marginTop:2, fontFamily:'var(--mono)' }}>{doc.doc_type}</div>
-                  </td>
-                  <td style={{ padding:'12px 16px', fontFamily:'var(--mono)', fontSize:11.5, color:'var(--accent)', whiteSpace:'nowrap' }}>{doc.contractNumber}</td>
-                  <td style={{ padding:'12px 16px', fontSize:11, color:doc.source.startsWith('Imported')?'var(--accent)':'var(--ink-mute)', fontFamily:'var(--mono)', whiteSpace:'nowrap', letterSpacing:'0.04em' }}>{doc.source}</td>
-                  <td style={{ padding:'12px 16px', fontSize:11, color:'var(--ink-mute)', fontFamily:'var(--mono)', whiteSpace:'nowrap' }}>{fmtDateMil(doc.created_at)}</td>
-                  <td style={{ padding:'12px 16px', color:'var(--ink-faint)' }}><IcoChevron/></td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      <div style={{ flex:1, overflowY:'auto', background:'var(--bg)', padding:'18px 24px 32px' }}>
+        {visibleGroups.length === 0 && (
+          <EmptyState title="No documents match" sub="Try a different filter combination."/>
+        )}
+        <div style={{ display:'grid', gap:14 }}>
+          {visibleGroups.map(({ contract: c, filteredDocs }) => {
+            const isCollapsed = collapsed.has(c.id);
+            return (
+              <div key={c.id} style={{
+                background:'var(--surface)', border:'1px solid var(--border)', borderRadius:4, overflow:'hidden',
+              }}>
+                <div style={{
+                  padding:'14px 18px', display:'flex', alignItems:'center', gap:14,
+                  borderBottom: isCollapsed ? 'none' : '1px solid var(--border)',
+                  background:'var(--surface-alt)',
+                }}>
+                  <button
+                    type="button"
+                    onClick={() => toggle(c.id)}
+                    style={{
+                      background:'none', border:'none', cursor:'pointer', color:'var(--ink-mute)',
+                      transform: isCollapsed ? 'rotate(0)' : 'rotate(90deg)',
+                      transition:'transform 0.12s', display:'flex', alignItems:'center',
+                    }}
+                  ><IcoChevron dir="right" /></button>
+                  <div style={{ flex:1, minWidth:0, cursor:'pointer' }} onClick={() => onSelectContract(c)}>
+                    <div style={{ display:'flex', alignItems:'baseline', gap:10, flexWrap:'wrap' }}>
+                      <span style={{ fontFamily:'var(--mono)', fontSize:13, fontWeight:700, color:'var(--accent)' }}>{c.number}</span>
+                      <span style={{ fontSize:13, fontWeight:600, color:'var(--ink)' }}>{c.title}</span>
+                    </div>
+                    <div style={{ fontSize:11, color:'var(--ink-mute)', marginTop:3, fontFamily:'var(--mono)', letterSpacing:'0.04em' }}>
+                      {c.psc} · {c.component} · CO {c.co}
+                    </div>
+                  </div>
+                  <div style={{ fontSize:10, fontWeight:700, color:'var(--ink-mute)', fontFamily:'var(--mono)', letterSpacing:'0.10em', textTransform:'uppercase', whiteSpace:'nowrap' }}>
+                    {filteredDocs.length} {filteredDocs.length === 1 ? 'doc' : 'docs'}
+                  </div>
+                </div>
+
+                {!isCollapsed && (
+                  <table style={{ width:'100%', borderCollapse:'collapse' }}>
+                    <thead>
+                      <tr style={{ background:'var(--surface)' }}>
+                        {['Type', 'Title', 'Source', 'Filed', ''].map((h, i) => (
+                          <th key={i} style={{
+                            padding:'8px 16px', textAlign:'left',
+                            fontSize:9.5, fontWeight:700, letterSpacing:'0.12em', textTransform:'uppercase',
+                            color:'var(--ink-faint)', whiteSpace:'nowrap', fontFamily:'var(--mono)',
+                            borderBottom:'1px solid var(--border)',
+                          }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredDocs.map((doc, i) => {
+                        const meta = DOC_TYPE_META[doc.doc_type] || { abbr:'DOC', tone:'default' };
+                        return (
+                          <tr key={doc.id} style={{
+                            borderBottom: i < filteredDocs.length - 1 ? '1px solid var(--border)' : 'none',
+                            background:'var(--surface)',
+                          }}>
+                            <td style={{ padding:'11px 16px', whiteSpace:'nowrap' }}>
+                              <span style={{
+                                fontSize:9.5, fontWeight:700, fontFamily:'var(--mono)',
+                                color: meta.tone === 'ink' ? '#fff' : meta.tone === 'accent' ? '#fff' : 'var(--ink-mute)',
+                                background: meta.tone === 'ink' ? 'var(--ink)' : meta.tone === 'accent' ? 'var(--accent)' : 'var(--surface-alt)',
+                                border: '1px solid ' + (meta.tone === 'ink' ? 'var(--ink)' : meta.tone === 'accent' ? 'var(--accent)' : 'var(--border-md)'),
+                                padding:'3px 7px', borderRadius:2, letterSpacing:'0.08em',
+                              }}>{meta.abbr}</span>
+                            </td>
+                            <td style={{ padding:'11px 16px' }}>
+                              <div style={{ fontSize:13, color:'var(--ink)' }}>{doc.title}</div>
+                              <div style={{ fontSize:10, color:'var(--ink-faint)', marginTop:2, fontFamily:'var(--mono)' }}>{doc.doc_type}</div>
+                            </td>
+                            <td style={{ padding:'11px 16px', fontSize:11, color:doc.source.startsWith('Imported')?'var(--accent)':'var(--ink-mute)', fontFamily:'var(--mono)', whiteSpace:'nowrap', letterSpacing:'0.04em' }}>{doc.source}</td>
+                            <td style={{ padding:'11px 16px', fontSize:11, color:'var(--ink-mute)', fontFamily:'var(--mono)', whiteSpace:'nowrap' }}>{fmtDateMil(doc.created_at)}</td>
+                            <td style={{ padding:'11px 16px', whiteSpace:'nowrap', textAlign:'right' }}>
+                              <BtnSecondary style={{ padding:'4px 10px', fontSize:11, marginRight:6 }} onClick={() => setViewing(doc)}>View</BtnSecondary>
+                              <BtnSecondary style={{ padding:'4px 10px', fontSize:11 }} onClick={() => downloadDocAsText(doc)}>Download</BtnSecondary>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      {viewing && <DocumentViewerModal doc={viewing} onClose={() => setViewing(null)} />}
+    </div>
+  );
+}
+
+// ─── DOCUMENT VIEWER ────────────────────────────────────────────────────────
+// Builds plausible preview content per doc_type so the mock viewer feels real.
+function buildDocPreview(doc) {
+  const period = doc.period || '—';
+  const t = doc.doc_type;
+  if (t === 'Weekly Status') {
+    return [
+      `WEEKLY STATUS REPORT — ${period}`,
+      `Filed: ${new Date(doc.created_at).toLocaleString('en-US')}`,
+      ``,
+      `1. ACCOMPLISHMENTS`,
+      `   • Completed integration testing for Module B (8 of 10 cases passing).`,
+      `   • Closed 3 open CDRL items from prior period; submitted A001-23.`,
+      `   • Onboarded 1 cleared FTE to subcontract task L-04.`,
+      ``,
+      `2. PLANNED — NEXT 7 DAYS`,
+      `   • Resolve remaining failing test cases for Module B.`,
+      `   • Submit draft Performance Narrative inputs to PMO.`,
+      `   • COR site visit scheduled; agenda forthcoming.`,
+      ``,
+      `3. ISSUES / RISKS`,
+      `   • Government-furnished test data delayed 4 days; mitigated via synthetic data.`,
+      `   • Subcontractor staffing on L-04 below plan by 0.5 FTE.`,
+      ``,
+      `4. KEY METRICS`,
+      `   CPI: 0.96   SPI: 0.93   BCWP: $384k   ACWP: $401k`,
+    ].join('\n');
+  }
+  if (t === 'Modification') {
+    return [
+      `CONTRACT MODIFICATION — ${period}`,
+      `Effective: ${new Date(doc.created_at).toLocaleDateString('en-US')}`,
+      ``,
+      `PURPOSE`,
+      `This bilateral modification is issued to incorporate updated clause language and`,
+      `to obligate additional funding for continued performance.`,
+      ``,
+      `CHANGES`,
+      `   1. Period of performance extended through end of next option year.`,
+      `   2. Funding ceiling increased; total obligated value adjusted accordingly.`,
+      `   3. Clause 252.204-7012 (Safeguarding Covered Defense Information)`,
+      `      replaced with current revision.`,
+      ``,
+      `ALL OTHER TERMS AND CONDITIONS REMAIN UNCHANGED.`,
+    ].join('\n');
+  }
+  if (t === 'CPARS Report') {
+    return [
+      `CONTRACTOR PERFORMANCE ASSESSMENT REPORT — ${period}`,
+      ``,
+      `EVALUATION TYPE: ${period.includes('Annual') ? 'Annual' : 'Interim'}`,
+      ``,
+      `RATINGS`,
+      `   Quality . . . . . . . . . . . . . . . . . . Satisfactory`,
+      `   Schedule  . . . . . . . . . . . . . . . . . Satisfactory`,
+      `   Cost Control  . . . . . . . . . . . . . . . Very Good`,
+      `   Management  . . . . . . . . . . . . . . . . Satisfactory`,
+      `   Regulatory Compliance . . . . . . . . . . . Very Good`,
+      ``,
+      `CO/COR NARRATIVE`,
+      `Contractor delivered against the negotiated baseline with minor schedule slips`,
+      `attributable to government-furnished data delays. Cost variance was contained`,
+      `within tolerance. Recommend continued performance under current arrangement.`,
+      ``,
+      `CONTRACTOR RESPONSE`,
+      `Contractor concurs with the assessment and notes that mitigations identified`,
+      `for the schedule slips have been implemented.`,
+    ].join('\n');
+  }
+  if (t === 'IPMDAR Narrative') {
+    return [
+      `PERFORMANCE NARRATIVE REPORT — ${period}`,
+      ``,
+      `EXECUTIVE SUMMARY`,
+      `Performance during the reporting period was steady. CPI improved from 0.94 to`,
+      `0.96 and SPI held at 0.93. Variance drivers are identified below with corrective`,
+      `actions.`,
+      ``,
+      `COST VARIANCE DRIVERS`,
+      `   • Subcontractor labor escalation on T-3 ($28k unfavorable).`,
+      `   • Travel under-run on T-1 ($11k favorable).`,
+      ``,
+      `SCHEDULE VARIANCE DRIVERS`,
+      `   • Late receipt of GFI on Module B pushed milestone M-04 by 5 days.`,
+      ``,
+      `CORRECTIVE ACTIONS`,
+      `   1. Re-baselined Module B internal milestones; downstream impact contained.`,
+      `   2. Negotiating subcontractor rate true-up for next option period.`,
+    ].join('\n');
+  }
+  if (t === 'IPMDAR Format-5' || t === 'IPMDAR Format-6') {
+    const isF6 = t === 'IPMDAR Format-6';
+    return [
+      `${isF6 ? 'FORMAT 6 — TIME-PHASED FORECAST' : 'FORMAT 5 — VARIANCE ANALYSIS'} — ${period}`,
+      ``,
+      `WBS         BCWS      BCWP      ACWP      CV         SV       CPI    SPI`,
+      `1.0       412,000   401,800   418,200    -16,400    -10,200  0.96   0.98`,
+      `1.1       180,000   172,500   178,400    -5,900     -7,500   0.97   0.96`,
+      `1.2       142,000   139,300   147,100    -7,800     -2,700   0.95   0.98`,
+      `1.3        90,000    90,000    92,700    -2,700      0       0.97   1.00`,
+      ``,
+      isF6
+        ? `FORECAST (NEXT 6 PERIODS): EAC trending to $4.61M against BAC $4.50M.`
+        : `NARRATIVE: Cost variance driven by subcontractor labor; see narrative report.`,
+    ].join('\n');
+  }
+  if (t === 'Invoice') {
+    return [
+      `INVOICE — ${doc.title}`,
+      `Period: ${period}`,
+      `Invoice date: ${new Date(doc.created_at).toLocaleDateString('en-US')}`,
+      ``,
+      `LINE ITEMS`,
+      `   Direct Labor . . . . . . . . . . . . . . . . . $182,400.00`,
+      `   Fringe (28.4%) . . . . . . . . . . . . . . . .  $51,801.60`,
+      `   Overhead (61.0%) . . . . . . . . . . . . . . . $111,264.00`,
+      `   G&A (8.5%)   . . . . . . . . . . . . . . . . .  $29,617.34`,
+      `   Travel & ODC . . . . . . . . . . . . . . . . .   $4,830.00`,
+      `   Fee  . . . . . . . . . . . . . . . . . . . . .  $19,072.04`,
+      `                                                  ────────────`,
+      `   TOTAL DUE  . . . . . . . . . . . . . . . . . . $398,984.98`,
+    ].join('\n');
+  }
+  return [
+    `${doc.title}`,
+    `Type: ${doc.doc_type}`,
+    `Period: ${period}`,
+    `Source: ${doc.source}`,
+    ``,
+    `(This is a mock preview. The actual file would render here in production.)`,
+  ].join('\n');
+}
+
+function downloadDocAsText(doc) {
+  const content = `${doc.title}\n${'─'.repeat(64)}\n\n${buildDocPreview(doc)}\n`;
+  const blob = new Blob([content], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = (doc.filename || `${doc.id}.txt`).replace(/\.(pdf|docx?|xlsx?|xml)$/i, '.txt');
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function DocumentViewerModal({ doc, onClose }) {
+  if (!doc) return null;
+  const meta = DOC_TYPE_META[doc.doc_type] || { abbr:'DOC', tone:'default' };
+  const preview = buildDocPreview(doc);
+  return (
+    <div onClick={onClose} style={{
+      position:'fixed', inset:0, background:'rgba(10,25,41,0.55)',
+      display:'flex', alignItems:'center', justifyContent:'center', zIndex:50,
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background:'var(--surface)', borderRadius:4, width:880, maxWidth:'94vw',
+        height:'82vh', display:'flex', flexDirection:'column',
+        boxShadow:'var(--shadow)', border:'1px solid var(--border-md)',
+      }}>
+        <div style={{ padding:'16px 22px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between', gap:14 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:12, minWidth:0 }}>
+            <span style={{
+              fontSize:10, fontWeight:700, fontFamily:'var(--mono)',
+              color: meta.tone === 'ink' ? '#fff' : meta.tone === 'accent' ? '#fff' : 'var(--ink-mute)',
+              background: meta.tone === 'ink' ? 'var(--ink)' : meta.tone === 'accent' ? 'var(--accent)' : 'var(--surface-alt)',
+              border: '1px solid ' + (meta.tone === 'ink' ? 'var(--ink)' : meta.tone === 'accent' ? 'var(--accent)' : 'var(--border-md)'),
+              padding:'3px 8px', borderRadius:2, letterSpacing:'0.08em', flexShrink:0,
+            }}>{meta.abbr}</span>
+            <div style={{ minWidth:0 }}>
+              <div style={{ fontSize:14, fontWeight:600, color:'var(--ink)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{doc.title}</div>
+              <div style={{ fontSize:11, color:'var(--ink-mute)', fontFamily:'var(--mono)', marginTop:2 }}>{doc.filename} · {fmtBytes(doc.size_bytes)} · {fmtDateMil(doc.created_at)}</div>
+            </div>
+          </div>
+          <button type="button" onClick={onClose} style={{ background:'none', border:'none', color:'var(--ink-mute)', cursor:'pointer' }}><IcoClose/></button>
+        </div>
+
+        <div style={{ flex:1, display:'grid', gridTemplateColumns:'1fr 220px', minHeight:0 }}>
+          <div style={{ overflowY:'auto', background:'#fafafa', padding:'24px 32px' }}>
+            <div style={{
+              background:'#fff', border:'1px solid var(--border-md)', borderRadius:3,
+              padding:'32px 36px', maxWidth:680, margin:'0 auto',
+              fontFamily:'var(--mono)', fontSize:12, lineHeight:1.65,
+              color:'var(--ink)', whiteSpace:'pre-wrap',
+              boxShadow:'var(--shadow-sm)', minHeight:'100%',
+            }}>{preview}</div>
+          </div>
+          <div style={{ borderLeft:'1px solid var(--border)', background:'var(--surface-alt)', padding:'18px 18px', overflowY:'auto' }}>
+            <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)', marginBottom:10 }}>Details</div>
+            {[
+              ['Type', doc.doc_type],
+              ['Period', doc.period || '—'],
+              ['Source', doc.source],
+              ['Uploader', doc.uploader],
+              ['Filed', fmtDateMil(doc.created_at)],
+              ['Size', fmtBytes(doc.size_bytes)],
+              ['File', doc.filename],
+              doc.importRef && ['Import ref', doc.importRef],
+            ].filter(Boolean).map(([k, v]) => (
+              <div key={k} style={{ marginBottom:10 }}>
+                <div style={{ fontSize:9, fontWeight:700, color:'var(--ink-faint)', letterSpacing:'0.10em', textTransform:'uppercase', fontFamily:'var(--mono)', marginBottom:3 }}>{k}</div>
+                <div style={{ fontSize:11.5, color:'var(--ink)', wordBreak:'break-word', fontFamily: k === 'File' || k === 'Filed' || k === 'Size' ? 'var(--mono)' : 'inherit' }}>{v}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ padding:'12px 22px', borderTop:'1px solid var(--border)', display:'flex', justifyContent:'flex-end', gap:10 }}>
+          <BtnSecondary onClick={onClose}>Close</BtnSecondary>
+          <BtnPrimary onClick={() => downloadDocAsText(doc)}>Download</BtnPrimary>
+        </div>
       </div>
     </div>
   );
@@ -1602,7 +2199,7 @@ function UploadModal({ contract, onClose, onUploaded }) {
 // Map a logged-in contractor's email to their contracts.
 function contractsForContractor(user) {
   const map = {
-    'sarah.kim@atlanticlogistics.com': ['c1'],
+    'daniel.kim@atlanticlogistics.com': ['c1'],
   };
   const ids = map[user?.email] || ['c1']; // demo fallback
   return MOCK_CONTRACTS.filter(c => ids.includes(c.id));
@@ -1629,17 +2226,30 @@ function ContractorHome({ user, onSelectContract }) {
   const myContracts = contractsForContractor(user);
   const today = new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' });
   const firstName = (user?.name || 'Contractor').split(' ')[0];
+  const [filedHere, setFiledHere] = useState(() => new Set());
+  const [uploadTarget, setUploadTarget] = useState(null);
 
-  // Aggregate next deliverables across all contracts
-  const upNext = myContracts.flatMap(c => {
+  function pickOverdueForContract(c) {
     const dels = buildDeliverables(c);
-    return dels.flatMap(group => group.items
-      .filter(i => !i.filed)
-      .slice(0, 4)
-      .map(i => ({ contract:c, group, item:i, status:deliverableStatus(i) })));
-  })
-  .sort((a,b) => new Date(a.item.due) - new Date(b.item.due))
-  .slice(0, 6);
+    const now = Date.now();
+    const open = dels.flatMap(group => group.items
+      .filter(i => !i.filed && !filedHere.has(`${c.id}|${i.id}`))
+      .map(i => ({ group, item:i, due: new Date(i.due).getTime() })));
+    const overdue = open.filter(r => r.due < now).sort((a,b) => a.due - b.due);
+    if (overdue.length >= 2) return overdue.slice(0, 2);
+    // Top up with the soonest upcoming items so each contract has 2 rows.
+    const upcoming = open.filter(r => r.due >= now).sort((a,b) => a.due - b.due);
+    return [...overdue, ...upcoming].slice(0, 2);
+  }
+
+  function handleFiled(c, item) {
+    setFiledHere(prev => {
+      const next = new Set(prev);
+      next.add(`${c.id}|${item.id}`);
+      return next;
+    });
+    setUploadTarget(null);
+  }
 
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
@@ -1662,83 +2272,94 @@ function ContractorHome({ user, onSelectContract }) {
           </div>
         </div>
 
-        {/* Up next */}
-        <div style={{ marginBottom:28 }}>
-          <div style={{ fontSize:11, fontWeight:700, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)', marginBottom:10 }}>
-            Up next — your deliverables
-          </div>
-          <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:4 }}>
-            {upNext.map((row, i) => {
-              const meta = STATUS_META[row.status];
-              return (
-                <div key={`${row.contract.id}-${row.item.id}`} onClick={() => onSelectContract(row.contract)} style={{
-                  display:'grid', gridTemplateColumns:'120px 1fr 220px 110px 110px 16px',
-                  gap:16, alignItems:'center',
-                  padding:'12px 18px', cursor:'pointer',
-                  borderBottom: i < upNext.length-1 ? '1px solid var(--border)' : 'none',
-                  transition:'background 0.1s',
-                }}
-                  onMouseEnter={e => e.currentTarget.style.background='var(--surface-alt)'}
-                  onMouseLeave={e => e.currentTarget.style.background='transparent'}
-                >
-                  <div style={{ fontFamily:'var(--mono)', fontSize:11.5, fontWeight:600, color:'var(--accent)' }}>
-                    {row.group.cdrl !== '—' ? `CDRL ${row.group.cdrl}` : row.group.title.split(' ')[0]}
-                  </div>
-                  <div>
-                    <div style={{ fontSize:13, fontWeight:600, color:'var(--ink)' }}>{row.group.title}</div>
-                    <div style={{ fontSize:11, color:'var(--ink-mute)', marginTop:2, fontFamily:'var(--mono)' }}>{row.item.title}</div>
-                  </div>
-                  <div style={{ fontSize:11, color:'var(--ink-mute)', fontFamily:'var(--mono)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{row.contract.number} · {row.contract.title}</div>
-                  <div style={{ fontSize:11, fontFamily:'var(--mono)', color:'var(--ink-soft)' }}>
-                    DUE {new Date(row.item.due).toLocaleDateString('en-US',{day:'2-digit', month:'short'}).toUpperCase()}
-                  </div>
-                  <div style={{ display:'flex', justifyContent:'flex-end' }}>
-                    <span style={{
-                      fontSize:9.5, fontWeight:700, letterSpacing:'0.10em', textTransform:'uppercase',
-                      color:meta.color, background:meta.bg, border:`1px solid ${meta.border}`,
-                      padding:'2px 7px', borderRadius:2, fontFamily:'var(--mono)',
-                    }}>{meta.label}</span>
-                  </div>
-                  <IcoChevron/>
-                </div>
-              );
-            })}
-            {upNext.length === 0 && <EmptyState title="All caught up" sub="No outstanding deliverables right now."/>}
-          </div>
-        </div>
-
         {/* My contracts */}
         <div style={{ fontSize:11, fontWeight:700, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)', marginBottom:10 }}>My contracts</div>
-        <div style={{ display:'grid', gap:10 }}>
+        <div style={{ display:'grid', gap:14 }}>
           {myContracts.map(c => {
             const dels = buildDeliverables(c);
             const all = dels.flatMap(d => d.items);
             const filed = all.filter(i => i.filed).length;
             const overdue = all.filter(i => !i.filed && new Date(i.due).getTime() < Date.now()).length;
+            const rows = pickOverdueForContract(c);
             return (
-              <div key={c.id} onClick={() => onSelectContract(c)} style={{
+              <div key={c.id} style={{
                 background:'var(--surface)', border:'1px solid var(--border)', borderRadius:4,
-                padding:'18px 22px', cursor:'pointer',
-                display:'grid', gridTemplateColumns:'1fr auto auto auto auto', gap:24, alignItems:'center',
-                transition:'border-color 0.12s',
-              }}
-                onMouseEnter={e => e.currentTarget.style.borderColor='var(--border-str)'}
-                onMouseLeave={e => e.currentTarget.style.borderColor='var(--border)'}
-              >
-                <div>
-                  <div style={{ fontFamily:'var(--mono)', fontSize:11.5, fontWeight:600, color:'var(--accent)', marginBottom:4 }}>{c.number}</div>
-                  <div style={{ fontSize:14, fontWeight:600, color:'var(--ink)' }}>{c.title}</div>
-                  <div style={{ fontSize:11, color:'var(--ink-mute)', marginTop:3, fontFamily:'var(--mono)' }}>{c.period} · CO {c.co}</div>
+              }}>
+                {/* Card header — clickable to drill in */}
+                <div onClick={() => onSelectContract(c)} style={{
+                  padding:'16px 22px', cursor:'pointer',
+                  display:'grid', gridTemplateColumns:'1fr auto auto auto auto', gap:24, alignItems:'center',
+                  borderBottom:'1px solid var(--border)',
+                }}
+                  onMouseEnter={e => e.currentTarget.style.background='var(--surface-alt)'}
+                  onMouseLeave={e => e.currentTarget.style.background='transparent'}
+                >
+                  <div>
+                    <div style={{ fontFamily:'var(--mono)', fontSize:11.5, fontWeight:600, color:'var(--accent)', marginBottom:4 }}>{c.number}</div>
+                    <div style={{ fontSize:14, fontWeight:600, color:'var(--ink)' }}>{c.title}</div>
+                    <div style={{ fontSize:11, color:'var(--ink-mute)', marginTop:3, fontFamily:'var(--mono)' }}>{c.period} · CO {c.co}</div>
+                  </div>
+                  <KpiMini label="Filed"   value={`${filed}/${all.length}`} />
+                  <KpiMini label="Overdue" value={overdue} flag={overdue > 0} />
+                  <KpiMini label="Elapsed" value={`${c.elapsed}%`} />
+                  <IcoChevron/>
                 </div>
-                <KpiMini label="Filed"    value={`${filed}/${all.length}`} />
-                <KpiMini label="Overdue"  value={overdue} flag={overdue > 0} />
-                <KpiMini label="Elapsed"  value={`${c.elapsed}%`} />
-                <IcoChevron/>
+
+                {/* Per-deliverable rows — upload only, no click-through */}
+                <div>
+                  {rows.length === 0 && (
+                    <div style={{ padding:'14px 22px', fontSize:11.5, color:'var(--ink-faint)', fontFamily:'var(--mono)', letterSpacing:'0.04em' }}>
+                      All deliverables filed.
+                    </div>
+                  )}
+                  {rows.map((row, i) => {
+                    const status = deliverableStatus(row.item);
+                    const meta = STATUS_META[status];
+                    return (
+                      <div key={row.item.id} style={{
+                        display:'grid', gridTemplateColumns:'130px 1fr 110px 110px 110px',
+                        gap:16, alignItems:'center',
+                        padding:'12px 22px',
+                        borderTop: i > 0 ? '1px solid var(--border)' : 'none',
+                        background:'var(--surface-alt)',
+                      }}>
+                        <div style={{ fontFamily:'var(--mono)', fontSize:11.5, fontWeight:600, color:'var(--accent)' }}>
+                          {row.group.cdrl !== '—' ? `CDRL ${row.group.cdrl}` : row.group.title.split(' ')[0]}
+                        </div>
+                        <div>
+                          <div style={{ fontSize:13, fontWeight:600, color:'var(--ink)' }}>{row.group.title}</div>
+                          <div style={{ fontSize:11, color:'var(--ink-mute)', marginTop:2, fontFamily:'var(--mono)' }}>{row.item.title}</div>
+                        </div>
+                        <div style={{ fontSize:11, fontFamily:'var(--mono)', color:'var(--ink-soft)' }}>
+                          DUE {new Date(row.item.due).toLocaleDateString('en-US',{day:'2-digit', month:'short'}).toUpperCase()}
+                        </div>
+                        <span style={{
+                          justifySelf:'start',
+                          fontSize:9.5, fontWeight:700, letterSpacing:'0.10em', textTransform:'uppercase',
+                          color:meta.color, background:meta.bg, border:`1px solid ${meta.border}`,
+                          padding:'2px 8px', borderRadius:2, fontFamily:'var(--mono)',
+                        }}>{meta.label}</span>
+                        <BtnPrimary
+                          style={{ padding:'5px 12px', fontSize:11.5, justifySelf:'end' }}
+                          onClick={() => setUploadTarget({ contract: c, group: row.group, item: row.item })}
+                        >Upload</BtnPrimary>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             );
           })}
         </div>
       </div>
+
+      {uploadTarget && (
+        <UploadModal
+          contract={uploadTarget.contract}
+          onClose={() => setUploadTarget(null)}
+          onUploaded={() => handleFiled(uploadTarget.contract, uploadTarget.item)}
+        />
+      )}
     </div>
   );
 }
@@ -1756,9 +2377,10 @@ function KpiMini({ label, value, flag }) {
 // Two columns: contract particulars (left) + deliverables-as-upload-targets (right)
 function ContractorContractPage({ contract, user, onBack }) {
   const c = contract;
-  const [docs, setDocs] = useState(() => buildDocs(c.id));
+  const [docs, setDocs] = useState(() => buildDocs(c));
   const [deliverables, setDeliverables] = useState(() => buildDeliverables(c));
   const [uploadTarget, setUploadTarget] = useState(null);
+  const [freeUpload, setFreeUpload] = useState(false);
 
   function handleFiled(groupId, itemId, doc) {
     setDeliverables(ds => ds.map(g => g.id === groupId
@@ -1767,6 +2389,11 @@ function ContractorContractPage({ contract, user, onBack }) {
     ));
     setDocs(prev => [doc, ...prev]);
     setUploadTarget(null);
+  }
+
+  function handleFreeUploaded(doc) {
+    setDocs(prev => [doc, ...prev]);
+    setFreeUpload(false);
   }
 
   return (
@@ -1784,6 +2411,9 @@ function ContractorContractPage({ contract, user, onBack }) {
             </div>
             <div style={{ fontSize:14, fontWeight:600, color:'var(--ink-soft)', marginBottom:4 }}>{c.title}</div>
             <div style={{ fontSize:11.5, color:'var(--ink-mute)', fontFamily:'var(--mono)' }}>{c.period} · {c.elapsed}% elapsed · CO {c.co}</div>
+          </div>
+          <div style={{ flexShrink:0 }}>
+            <BtnPrimary onClick={() => setFreeUpload(true)}>+ Upload Document</BtnPrimary>
           </div>
         </div>
       </div>
@@ -1855,6 +2485,13 @@ function ContractorContractPage({ contract, user, onBack }) {
           presetType={uploadTarget.group.title}
           onClose={() => setUploadTarget(null)}
           onUploaded={(d) => handleFiled(uploadTarget.group.id, uploadTarget.item.id, d)}
+        />
+      )}
+      {freeUpload && (
+        <UploadModal
+          contract={c}
+          onClose={() => setFreeUpload(false)}
+          onUploaded={handleFreeUploaded}
         />
       )}
     </div>
@@ -1947,6 +2584,946 @@ function DeliverableGroupCard({ group, onClickItem }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── SEARCHABLE SELECT ──────────────────────────────────────────────────────
+// A click-to-open dropdown with type-ahead search. Options can be flagged
+// disabled (rendered muted but still clickable) — used for PSC where many
+// codes exist but only some are present in the current portfolio.
+function SearchableSelect({ value, onChange, options, placeholder = 'Select…', allLabel = 'All', width = 220 }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const ref = useRef(null);
+
+  useEffect(() => {
+    function onDocClick(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    if (open) document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [open]);
+
+  const selected = value === 'all'
+    ? null
+    : options.find(o => o.id === value);
+
+  const norm = q.trim().toLowerCase();
+  const filtered = !norm
+    ? options
+    : options.filter(o => `${o.id} ${o.label} ${o.desc || ''}`.toLowerCase().includes(norm));
+
+  return (
+    <div ref={ref} style={{ position:'relative', display:'inline-block', width }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        style={{
+          width:'100%', display:'flex', alignItems:'center', justifyContent:'space-between',
+          padding:'5px 10px', background:'var(--surface)',
+          border:'1px solid var(--border-md)', borderRadius:3,
+          fontSize:12, color: selected ? 'var(--ink)' : 'var(--ink-mute)',
+          fontFamily:'inherit', cursor:'pointer', gap:8,
+        }}
+      >
+        <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', textAlign:'left' }}>
+          {selected ? (
+            <>
+              <span style={{ fontFamily:'var(--mono)', fontWeight:600 }}>{selected.id}</span>
+              {selected.desc && <span style={{ color:'var(--ink-mute)', marginLeft:8 }}>{selected.desc}</span>}
+            </>
+          ) : (
+            <span>{allLabel}</span>
+          )}
+        </span>
+        <span style={{ color:'var(--ink-faint)', flexShrink:0 }}><IcoChevron dir="down" size={10} /></span>
+      </button>
+      {open && (
+        <div style={{
+          position:'absolute', top:'calc(100% + 4px)', left:0, zIndex:30,
+          width:Math.max(width, 320), background:'var(--surface)',
+          border:'1px solid var(--border-md)', borderRadius:3,
+          boxShadow:'var(--shadow)',
+        }}>
+          <div style={{ padding:8, borderBottom:'1px solid var(--border)' }}>
+            <input
+              autoFocus
+              value={q}
+              onChange={e => setQ(e.target.value)}
+              placeholder={placeholder}
+              style={{
+                width:'100%', border:'1px solid var(--border-md)', borderRadius:3,
+                padding:'6px 9px', fontSize:12, outline:'none', background:'var(--surface-alt)',
+              }}
+            />
+          </div>
+          <div style={{ maxHeight:280, overflowY:'auto', padding:'4px 0' }}>
+            <div
+              onClick={() => { onChange('all'); setOpen(false); setQ(''); }}
+              style={{
+                padding:'7px 12px', fontSize:12, cursor:'pointer',
+                background: value === 'all' ? 'var(--accent-soft)' : 'transparent',
+                color: value === 'all' ? 'var(--accent)' : 'var(--ink)',
+                fontWeight: value === 'all' ? 600 : 400,
+              }}
+              onMouseEnter={e => value !== 'all' && (e.currentTarget.style.background='var(--surface-alt)')}
+              onMouseLeave={e => value !== 'all' && (e.currentTarget.style.background='transparent')}
+            >{allLabel}</div>
+            {filtered.length === 0 && (
+              <div style={{ padding:'10px 12px', fontSize:11.5, color:'var(--ink-faint)' }}>No matches.</div>
+            )}
+            {filtered.map(opt => {
+              const isActive = value === opt.id;
+              return (
+                <div key={opt.id}
+                  onClick={() => { onChange(opt.id); setOpen(false); setQ(''); }}
+                  style={{
+                    padding:'7px 12px', fontSize:12, cursor:'pointer',
+                    display:'flex', alignItems:'baseline', gap:10,
+                    background: isActive ? 'var(--accent-soft)' : 'transparent',
+                    opacity: opt.disabled ? 0.42 : 1,
+                  }}
+                  onMouseEnter={e => !isActive && (e.currentTarget.style.background='var(--surface-alt)')}
+                  onMouseLeave={e => !isActive && (e.currentTarget.style.background='transparent')}
+                >
+                  <span style={{
+                    fontFamily:'var(--mono)', fontWeight:600,
+                    color: isActive ? 'var(--accent)' : 'var(--ink)', minWidth:54,
+                  }}>{opt.id}</span>
+                  {opt.desc && <span style={{ color:'var(--ink-mute)', flex:1 }}>{opt.desc}</span>}
+                  {opt.disabled && <span style={{ fontSize:9.5, fontFamily:'var(--mono)', color:'var(--ink-faint)', letterSpacing:'0.08em', textTransform:'uppercase' }}>no examples</span>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── PSC MULTI-SELECT (categories + specific codes) ─────────────────────────
+// Lets the analyst pick whole letter-categories (e.g., "all R-codes") and/or
+// individual PSC codes. An empty selection means no filter.
+function PSCMultiSelect({ categories, codes, onChange, codeOptions, width = 260 }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const ref = useRef(null);
+
+  useEffect(() => {
+    function onDocClick(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    if (open) document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [open]);
+
+  const norm = q.trim().toLowerCase();
+  const filteredCats = !norm
+    ? PSC_CATEGORIES
+    : PSC_CATEGORIES.filter(c => `${c.letter} ${c.label}`.toLowerCase().includes(norm));
+  const filteredCodes = !norm
+    ? codeOptions
+    : codeOptions.filter(o => `${o.id} ${o.label} ${o.desc || ''}`.toLowerCase().includes(norm));
+
+  function toggleCategory(letter) {
+    const next = new Set(categories);
+    if (next.has(letter)) next.delete(letter); else next.add(letter);
+    onChange({ categories: next, codes });
+  }
+  function toggleCode(code) {
+    const next = new Set(codes);
+    if (next.has(code)) next.delete(code); else next.add(code);
+    onChange({ categories, codes: next });
+  }
+  function clearAll() {
+    onChange({ categories: new Set(), codes: new Set() });
+  }
+
+  const totalSelected = categories.size + codes.size;
+  const summary = totalSelected === 0
+    ? 'All PSCs'
+    : [
+        ...[...categories].map(l => `${l}-codes`),
+        ...[...codes],
+      ].join(', ');
+
+  return (
+    <div ref={ref} style={{ position:'relative', display:'inline-block', width }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        style={{
+          width:'100%', display:'flex', alignItems:'center', justifyContent:'space-between',
+          padding:'5px 10px', background:'var(--surface)',
+          border:'1px solid var(--border-md)', borderRadius:3,
+          fontSize:12, color: totalSelected > 0 ? 'var(--ink)' : 'var(--ink-mute)',
+          cursor:'pointer', gap:8, fontFamily:'inherit',
+        }}
+      >
+        <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', textAlign:'left' }}>
+          {summary}
+        </span>
+        <span style={{ color:'var(--ink-faint)', flexShrink:0, display:'flex', alignItems:'center', gap:6 }}>
+          {totalSelected > 0 && (
+            <span style={{
+              fontSize:10, fontFamily:'var(--mono)', fontWeight:700,
+              background:'var(--ink)', color:'#fff', borderRadius:2, padding:'1px 5px',
+            }}>{totalSelected}</span>
+          )}
+          <IcoChevron dir="down" size={10} />
+        </span>
+      </button>
+      {open && (
+        <div style={{
+          position:'absolute', top:'calc(100% + 4px)', left:0, zIndex:30,
+          width:Math.max(width, 360), background:'var(--surface)',
+          border:'1px solid var(--border-md)', borderRadius:3,
+          boxShadow:'var(--shadow)',
+        }}>
+          <div style={{ padding:8, borderBottom:'1px solid var(--border)', display:'flex', gap:6 }}>
+            <input
+              autoFocus
+              value={q}
+              onChange={e => setQ(e.target.value)}
+              placeholder="Search category or PSC code…"
+              style={{
+                flex:1, border:'1px solid var(--border-md)', borderRadius:3,
+                padding:'6px 9px', fontSize:12, outline:'none', background:'var(--surface-alt)',
+              }}
+            />
+            {totalSelected > 0 && (
+              <button
+                type="button"
+                onClick={clearAll}
+                style={{
+                  border:'1px solid var(--border-md)', borderRadius:3, padding:'0 10px',
+                  background:'var(--surface-alt)', fontSize:11, color:'var(--ink-mute)',
+                  cursor:'pointer', fontFamily:'var(--mono)', letterSpacing:'0.06em',
+                }}
+              >CLEAR</button>
+            )}
+          </div>
+          <div style={{ maxHeight:340, overflowY:'auto' }}>
+            {filteredCats.length > 0 && (
+              <>
+                <div style={{ padding:'8px 12px 4px', fontSize:9.5, fontWeight:700, color:'var(--ink-mute)', letterSpacing:'0.14em', textTransform:'uppercase', fontFamily:'var(--mono)' }}>
+                  Categories (broad)
+                </div>
+                {filteredCats.map(cat => {
+                  const checked = categories.has(cat.letter);
+                  return (
+                    <label key={cat.letter} style={{
+                      display:'flex', alignItems:'center', gap:10, padding:'6px 12px',
+                      cursor:'pointer', fontSize:12,
+                      background: checked ? 'var(--accent-soft)' : 'transparent',
+                    }}
+                      onMouseEnter={e => !checked && (e.currentTarget.style.background='var(--surface-alt)')}
+                      onMouseLeave={e => !checked && (e.currentTarget.style.background='transparent')}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleCategory(cat.letter)}
+                        style={{ accentColor:'var(--accent)' }}
+                      />
+                      <span style={{ fontFamily:'var(--mono)', fontWeight:700, color: checked ? 'var(--accent)' : 'var(--ink)', minWidth:38 }}>{cat.letter}-codes</span>
+                      <span style={{ color:'var(--ink-mute)', flex:1 }}>{cat.label}</span>
+                    </label>
+                  );
+                })}
+              </>
+            )}
+            {filteredCodes.length > 0 && (
+              <>
+                <div style={{ padding:'10px 12px 4px', fontSize:9.5, fontWeight:700, color:'var(--ink-mute)', letterSpacing:'0.14em', textTransform:'uppercase', fontFamily:'var(--mono)', borderTop: filteredCats.length > 0 ? '1px solid var(--border)' : 'none', marginTop: filteredCats.length > 0 ? 4 : 0 }}>
+                  Specific codes
+                </div>
+                {filteredCodes.map(opt => {
+                  const checked = codes.has(opt.id);
+                  return (
+                    <label key={opt.id} style={{
+                      display:'flex', alignItems:'center', gap:10, padding:'6px 12px',
+                      cursor:'pointer', fontSize:12,
+                      background: checked ? 'var(--accent-soft)' : 'transparent',
+                      opacity: opt.disabled ? 0.45 : 1,
+                    }}
+                      onMouseEnter={e => !checked && (e.currentTarget.style.background='var(--surface-alt)')}
+                      onMouseLeave={e => !checked && (e.currentTarget.style.background='transparent')}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleCode(opt.id)}
+                        style={{ accentColor:'var(--accent)' }}
+                      />
+                      <span style={{ fontFamily:'var(--mono)', fontWeight:600, color: checked ? 'var(--accent)' : 'var(--ink)', minWidth:54 }}>{opt.id}</span>
+                      {opt.desc && <span style={{ color:'var(--ink-mute)', flex:1 }}>{opt.desc}</span>}
+                      {opt.disabled && <span style={{ fontSize:9, fontFamily:'var(--mono)', color:'var(--ink-faint)', letterSpacing:'0.08em', textTransform:'uppercase' }}>no examples</span>}
+                    </label>
+                  );
+                })}
+              </>
+            )}
+            {filteredCats.length === 0 && filteredCodes.length === 0 && (
+              <div style={{ padding:'12px', fontSize:11.5, color:'var(--ink-faint)' }}>No matches.</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── NEW-CONTRACT (LOG) MODAL ───────────────────────────────────────────────
+// Mock "upload contract → extract fields" flow. Drops in a file, simulates
+// extraction with a brief spinner, then surfaces editable fields the user
+// can confirm before adding to the portfolio.
+function NewContractModal({ onClose, onCreated }) {
+  const [stage, setStage] = useState('drop'); // drop → extracting → review
+  const [file, setFile] = useState(null);
+  const [dragging, setDragging] = useState(false);
+  const fileRef = useRef(null);
+  const [fields, setFields] = useState({
+    number:'', title:'', psc:'', naics:'', component:'', value:'',
+    start:'', end:'', contractor:'', co:'',
+  });
+
+  function pickFile(f) {
+    if (!f) return;
+    setFile(f);
+    setStage('extracting');
+    setTimeout(() => {
+      setFields(extractFromFilename(f.name));
+      setStage('review');
+    }, 900);
+  }
+
+  function commit(e) {
+    e.preventDefault();
+    if (!fields.number || !fields.title) return;
+    const start = fields.start || '2026-01-01';
+    const end = fields.end || '2027-12-31';
+    const elapsed = Math.max(0, Math.min(100, Math.round(
+      ((Date.now() - new Date(start).getTime()) / (new Date(end).getTime() - new Date(start).getTime())) * 100
+    )));
+    onCreated({
+      id: 'usr-' + Date.now(),
+      number: fields.number,
+      title: fields.title,
+      psc: fields.psc || 'R499',
+      naics: fields.naics || '541611',
+      component: fields.component || 'PMS 325',
+      value: fields.value || '$0',
+      period: `${fmtDateMil(start)} — ${fmtDateMil(end)}`,
+      start, end, elapsed,
+      lastActivity: new Date().toISOString().slice(0,10),
+      docsCount: 0,
+      contractor: fields.contractor || 'TBD',
+      co: fields.co || 'TBD',
+    });
+  }
+
+  return (
+    <div onClick={onClose} style={{
+      position:'fixed', inset:0, background:'rgba(10,25,41,0.55)',
+      display:'flex', alignItems:'center', justifyContent:'center', zIndex:50,
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background:'var(--surface)', borderRadius:4, width:580, maxWidth:'94vw',
+        boxShadow:'var(--shadow)', border:'1px solid var(--border-md)',
+      }}>
+        <div style={{ padding:'16px 22px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+          <div>
+            <div style={{ fontSize:10, fontWeight:700, color:'var(--ink-mute)', letterSpacing:'0.14em', textTransform:'uppercase', fontFamily:'var(--mono)' }}>Log Contract</div>
+            <div style={{ fontSize:14, fontWeight:600, color:'var(--ink)', marginTop:2 }}>Upload contract document — fields will be extracted</div>
+          </div>
+          <button type="button" onClick={onClose} style={{ background:'none', border:'none', color:'var(--ink-mute)', cursor:'pointer' }}><IcoClose/></button>
+        </div>
+
+        {stage === 'drop' && (
+          <div style={{ padding:'22px' }}>
+            <div
+              onClick={() => fileRef.current?.click()}
+              onDragOver={e => { e.preventDefault(); setDragging(true); }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={e => { e.preventDefault(); setDragging(false); pickFile(e.dataTransfer.files[0]); }}
+              style={{
+                border:`1.5px dashed ${dragging ? 'var(--accent)' : 'var(--border-md)'}`,
+                borderRadius:3, padding:'34px 18px', textAlign:'center', cursor:'pointer',
+                background: dragging ? 'var(--accent-soft)' : 'var(--surface-alt)',
+              }}
+            >
+              <input ref={fileRef} type="file" style={{ display:'none' }} onChange={e => pickFile(e.target.files[0])}/>
+              <div style={{ marginBottom:10, color:'var(--ink-faint)' }}><IcoUpload/></div>
+              <div style={{ fontSize:13, fontWeight:600, color:'var(--ink)' }}>Drop the contract PDF or click to browse</div>
+              <div style={{ fontSize:11, color:'var(--ink-mute)', marginTop:4, fontFamily:'var(--mono)' }}>We'll extract the contract number, CO, PSC, NAICS, value, and period.</div>
+            </div>
+          </div>
+        )}
+
+        {stage === 'extracting' && (
+          <div style={{ padding:'40px 22px', textAlign:'center' }}>
+            <Spinner />
+            <div style={{ fontSize:13, fontWeight:600, color:'var(--ink)', marginTop:14 }}>Extracting contract metadata…</div>
+            <div style={{ fontSize:11, color:'var(--ink-mute)', marginTop:6, fontFamily:'var(--mono)' }}>{file?.name}</div>
+          </div>
+        )}
+
+        {stage === 'review' && (
+          <form onSubmit={commit}>
+            <div style={{ padding:'18px 22px' }}>
+              <div style={{ fontSize:10, fontWeight:700, color:'var(--ink-mute)', letterSpacing:'0.14em', textTransform:'uppercase', fontFamily:'var(--mono)', marginBottom:10 }}>Extracted from {file?.name}</div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+                {[
+                  ['number',     'Contract Number *', false],
+                  ['title',      'Title *',           true],
+                  ['contractor', 'Contractor',        true],
+                  ['co',         'Contracting Officer (CO)', true],
+                  ['psc',        'PSC',               false],
+                  ['naics',      'NAICS',             false],
+                  ['component',  'Component',         true],
+                  ['value',      'Obligated Value',   false],
+                  ['start',      'Start Date',        false],
+                  ['end',        'End Date',          false],
+                ].map(([k, label, span]) => (
+                  <label key={k} style={{ display:'grid', gap:5, gridColumn: span ? '1 / -1' : 'auto' }}>
+                    <span style={{ fontSize:9.5, fontWeight:700, color:'var(--ink-soft)', letterSpacing:'0.10em', textTransform:'uppercase', fontFamily:'var(--mono)' }}>{label}</span>
+                    <input
+                      value={fields[k]}
+                      onChange={e => setFields(f => ({ ...f, [k]: e.target.value }))}
+                      style={{
+                        width:'100%', border:'1px solid var(--border-md)', borderRadius:3,
+                        padding:'7px 10px', background:'var(--surface)', color:'var(--ink)',
+                        fontSize:12.5, outline:'none',
+                        fontFamily: ['number','psc','naics','value','start','end'].includes(k) ? 'var(--mono)' : 'inherit',
+                      }}
+                      placeholder={k === 'start' || k === 'end' ? 'YYYY-MM-DD' : ''}
+                      required={k === 'number' || k === 'title'}
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div style={{ padding:'12px 22px', borderTop:'1px solid var(--border)', display:'flex', justifyContent:'flex-end', gap:10 }}>
+              <BtnSecondary type="button" onClick={onClose}>Cancel</BtnSecondary>
+              <BtnPrimary type="submit">Add to portfolio</BtnPrimary>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function extractFromFilename(name) {
+  // Mock extraction. Try to pull a contract-number-shaped token from the name;
+  // otherwise return a plausible default set the user can edit.
+  const numMatch = name.match(/[Nn]\d{5}-\d{2}-[A-Z]-\d{4}/);
+  const number = numMatch ? numMatch[0].toUpperCase() : 'N00024-26-C-' + Math.floor(1000 + Math.random() * 9000);
+  return {
+    number,
+    title: 'Imported from ' + name.replace(/\.[^/.]+$/, ''),
+    psc: 'R706',
+    naics: '541614',
+    component: 'PMS 325',
+    value: '$0',
+    start: new Date().toISOString().slice(0,10),
+    end: new Date(Date.now() + 365 * 3 * 86400000).toISOString().slice(0,10),
+    contractor: 'TBD',
+    co: 'LCDR Nicole Jacobs',
+  };
+}
+
+// ─── INSIGHT DETAIL + REPORT ────────────────────────────────────────────────
+// Show contracts an insight is drawn from, allow flagging for follow-up,
+// and let the analyst download a shareable report (Markdown).
+function contractsForInsight(ins, contracts) {
+  // Custom (pinned) insights carry the user's explicit selection.
+  if (ins.pinnedContractIds && ins.pinnedContractIds.length > 0) {
+    const set = new Set(ins.pinnedContractIds);
+    return contracts.filter(c => set.has(c.id));
+  }
+  // Contracts whose PSC matches the insight's PSC. Falls back to a same-letter
+  // bucket so analysts always see at least a couple of examples.
+  const exact = contracts.filter(c => c.psc === ins.psc);
+  if (exact.length >= 2) return exact;
+  const bucket = contracts.filter(c => c.psc[0] === ins.psc[0]);
+  return Array.from(new Set([...exact, ...bucket]));
+}
+
+// HTML escape for any user-supplied or model-supplied strings rendered into
+// the report. Reports are loaded into an iframe and printed; we don't want
+// stray angle brackets or quotes breaking the markup.
+function esc(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+const PDF_STYLES = `
+  @page { size: Letter; margin: 0.75in; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: Georgia, 'Times New Roman', serif;
+    color: #0A1929;
+    font-size: 11pt;
+    line-height: 1.55;
+    margin: 0;
+  }
+  .doc-mast {
+    border-bottom: 2px solid #0A1929;
+    padding-bottom: 12px;
+    margin-bottom: 18px;
+  }
+  .doc-mast .label {
+    font-family: 'Courier New', monospace;
+    font-size: 8.5pt;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: #4D5A72;
+    margin-bottom: 6px;
+  }
+  .doc-mast h1 {
+    margin: 0 0 4px;
+    font-size: 18pt;
+    letter-spacing: -0.01em;
+  }
+  .doc-mast .meta {
+    font-family: 'Courier New', monospace;
+    font-size: 9pt;
+    color: #4D5A72;
+  }
+  .insight {
+    page-break-inside: avoid;
+    margin-bottom: 28px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid #ccd2dc;
+  }
+  .insight:last-child { border-bottom: none; }
+  .insight h2 {
+    font-size: 13pt;
+    margin: 0 0 8px;
+    color: #0A1929;
+  }
+  .pill {
+    display: inline-block;
+    font-family: 'Courier New', monospace;
+    font-size: 8pt;
+    font-weight: 700;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 2px;
+    border: 1px solid #4D5A72;
+    color: #4D5A72;
+    background: #F4F6F9;
+    margin-right: 6px;
+  }
+  .pill.flag { color: #9B3A1E; border-color: #9B3A1E; background: rgba(155,58,30,0.06); }
+  .pill.warn { color: #7A5310; border-color: #7A5310; background: rgba(122,83,16,0.06); }
+  .pill.good { color: #2F5D45; border-color: #2F5D45; background: rgba(47,93,69,0.06); }
+  .pill.flagged { color: #fff; background: #9B3A1E; border-color: #9B3A1E; }
+  .pill.pinned { color: #fff; background: #11447A; border-color: #11447A; }
+  .claim {
+    font-size: 12pt;
+    font-weight: 600;
+    margin: 6px 0 12px;
+  }
+  .section-label {
+    font-family: 'Courier New', monospace;
+    font-size: 8pt;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #4D5A72;
+    margin: 14px 0 6px;
+  }
+  .body-text { margin: 0 0 8px; }
+  .so-box {
+    border-left: 2px solid #11447A;
+    padding: 8px 12px;
+    background: #F4F6F9;
+    margin: 6px 0 14px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 4px;
+    font-size: 9.5pt;
+  }
+  th {
+    font-family: 'Courier New', monospace;
+    font-size: 8pt;
+    font-weight: 700;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    color: #4D5A72;
+    text-align: left;
+    padding: 6px 8px;
+    border-bottom: 1.5px solid #0A1929;
+  }
+  td {
+    padding: 5px 8px;
+    border-bottom: 0.5px solid #ccd2dc;
+    vertical-align: top;
+  }
+  td.mono, th.mono { font-family: 'Courier New', monospace; font-size: 9pt; }
+  .historical-row {
+    border-bottom: 0.5px solid #ccd2dc;
+    padding: 8px 0;
+  }
+  .historical-row:last-child { border-bottom: none; }
+  .historical-row .src { font-weight: 600; }
+  .historical-row .n {
+    font-family: 'Courier New', monospace;
+    font-size: 8.5pt;
+    color: #4D5A72;
+    margin-left: 8px;
+  }
+  .historical-row .note {
+    font-size: 10pt;
+    color: #4D5A72;
+    margin-top: 2px;
+  }
+  .footer {
+    margin-top: 24px;
+    padding-top: 10px;
+    border-top: 1px solid #ccd2dc;
+    font-family: 'Courier New', monospace;
+    font-size: 8.5pt;
+    color: #8492A6;
+    letter-spacing: 0.06em;
+  }
+`;
+
+function buildInsightReportHTML(ins, contracts, flagged) {
+  const isCustom = !!ins.custom;
+  const histRows = (ins.historical || []).map(h => `
+    <div class="historical-row">
+      <div><span class="src">${esc(h.source)}</span>${h.n != null ? `<span class="n">n = ${h.n.toLocaleString()}</span>` : ''}</div>
+      <div class="note">${esc(h.note)}</div>
+    </div>
+  `).join('');
+  const contractRows = contracts.length === 0
+    ? `<tr><td colspan="5" style="text-align:center; color:#8492A6;">No matching contracts in your portfolio.</td></tr>`
+    : contracts.map(c => `
+      <tr>
+        <td class="mono">${esc(c.number)}</td>
+        <td>${esc(c.title)}</td>
+        <td class="mono">${esc(c.psc)}</td>
+        <td>${esc(c.component)}</td>
+        <td class="mono" style="text-align:right;">${esc(c.value)}</td>
+      </tr>
+    `).join('');
+
+  return `
+    <div class="insight">
+      <div>
+        <span class="pill ${ins.tone}">${esc(ins.lens)}</span>
+        <span class="pill">${esc(ins.psc)}</span>
+        <span class="pill">NAICS ${esc(ins.naics)}</span>
+        ${isCustom ? '<span class="pill pinned">⚑ Pinned</span>' : ''}
+        ${flagged ? '<span class="pill flagged">⚑ Flagged</span>' : ''}
+      </div>
+      <h2 class="claim">${esc(ins.claim)}</h2>
+
+      <div class="section-label">Why</div>
+      <p class="body-text">${esc(ins.why || '—')}</p>
+
+      <div class="section-label">So what</div>
+      <div class="so-box">${esc(ins.so || '—')}</div>
+
+      <div class="section-label">Your portfolio — source contracts (${contracts.length})</div>
+      <table>
+        <thead><tr><th>Contract #</th><th>Title</th><th>PSC</th><th>Component</th><th style="text-align:right;">Value</th></tr></thead>
+        <tbody>${contractRows}</tbody>
+      </table>
+
+      ${histRows ? `
+        <div class="section-label">Historical / cross-portfolio sources (${ins.historical.length})</div>
+        ${histRows}
+      ` : ''}
+    </div>
+  `;
+}
+
+function buildLibraryReportHTML(insights, flaggedSet) {
+  const body = insights.map(ins => {
+    const linked = contractsForInsight(ins, MOCK_CONTRACTS);
+    return buildInsightReportHTML(ins, linked, flaggedSet?.has(ins.id));
+  }).join('');
+  return `
+    <div class="doc-mast">
+      <div class="label">FedCenter — Insights Library</div>
+      <h1>Insights Library Export</h1>
+      <div class="meta">
+        Generated ${new Date().toLocaleString('en-US')} ·
+        ${insights.length} insights${flaggedSet?.size ? ` · ${flaggedSet.size} flagged` : ''}
+      </div>
+    </div>
+    ${body}
+    <div class="footer">FedCenter Insights Library · ${new Date().toISOString().slice(0,10)}</div>
+  `;
+}
+
+// Renders HTML into an offscreen iframe and triggers the browser's print
+// dialog. Users get a real PDF via "Save as PDF" in the print destination.
+// No external PDF dependency required.
+function printHTMLAsPDF(html, title) {
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.right = '-9999px';
+  iframe.style.bottom = '-9999px';
+  iframe.style.width = '816px';
+  iframe.style.height = '1056px';
+  iframe.style.border = '0';
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentDocument || iframe.contentWindow.document;
+  doc.open();
+  doc.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>${PDF_STYLES}</style></head><body>${html}</body></html>`);
+  doc.close();
+
+  // Give the iframe a tick to lay out before triggering print.
+  setTimeout(() => {
+    try {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+    } catch (err) {
+      console.error('PDF print failed', err);
+    }
+    // Remove the iframe after the print dialog has had time to read it.
+    setTimeout(() => {
+      if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+    }, 1500);
+  }, 200);
+}
+
+function downloadInsightReport(ins, contracts, flagged) {
+  const html = `<div class="doc-mast">
+    <div class="label">FedCenter · Insight Report</div>
+    <h1>${esc(ins.lens)}</h1>
+    <div class="meta">Generated ${new Date().toLocaleString('en-US')}</div>
+  </div>
+  ${buildInsightReportHTML(ins, contracts, flagged)}
+  <div class="footer">FedCenter Insights Library</div>`;
+  printHTMLAsPDF(html, `Insight ${ins.id} — ${ins.psc}`);
+}
+
+function downloadInsightLibrary(insights, flaggedSet) {
+  printHTMLAsPDF(
+    buildLibraryReportHTML(insights, flaggedSet),
+    `FedCenter Insights Library — ${new Date().toISOString().slice(0,10)}`
+  );
+}
+
+const INSIGHT_FLAGS_KEY = 'fcsw-insight-flags';
+const CUSTOM_INSIGHTS_KEY = 'fcsw-custom-insights';
+
+function loadFlaggedInsights() {
+  try { return new Set(JSON.parse(localStorage.getItem(INSIGHT_FLAGS_KEY) || '[]')); }
+  catch { return new Set(); }
+}
+function saveFlaggedInsights(set) {
+  try { localStorage.setItem(INSIGHT_FLAGS_KEY, JSON.stringify([...set])); } catch {}
+}
+
+function loadCustomInsights() {
+  try { return JSON.parse(localStorage.getItem(CUSTOM_INSIGHTS_KEY) || '[]'); }
+  catch { return []; }
+}
+function saveCustomInsights(list) {
+  try { localStorage.setItem(CUSTOM_INSIGHTS_KEY, JSON.stringify(list)); } catch {}
+}
+
+// Promote a per-contract finding into a library insight. Used when the
+// analyst clicks "Pin to library" on a finding card.
+function buildPinnedInsightFromFinding(contract, finding) {
+  const toneFromSeverity = {
+    critical: 'flag',
+    watch:    'warn',
+    healthy:  'good',
+  };
+  const theme = THEMES.find(t => t.id === finding.themeId);
+  const similarIds = (finding.similar || []).map(s => s.id);
+  const pinnedContractIds = Array.from(new Set([contract.id, ...similarIds]));
+  return {
+    id: `pinned-${contract.id}-${finding.id}`,
+    custom: true,
+    pinnedAt: new Date().toISOString(),
+    sourceContractId: contract.id,
+    sourceFindingId: finding.id,
+    claim: finding.claim,
+    why: finding.observed,
+    so: theme
+      ? theme.insight
+      : 'Pinned from contract findings — track recurrence across the portfolio.',
+    psc: contract.psc,
+    naics: contract.naics,
+    tone: toneFromSeverity[finding.severity] || 'flag',
+    lens: theme
+      ? `Pinned · ${theme.title.split(/[—:]/)[0].trim()}`
+      : 'Pinned · From contract finding',
+    contracts: `${pinnedContractIds.length} of ${MOCK_CONTRACTS.length}`,
+    pinnedContractIds,
+    historical: [
+      { source: `Contract ${contract.number} · ${finding.sourceDoc}`, n: null, note: finding.observed },
+      ...(theme ? [{ source: `Portfolio theme · ${theme.title}`, n: theme.flagged, note: theme.insight }] : []),
+    ],
+  };
+}
+
+// Add or remove a finding's library pin. Used directly from finding cards
+// without an intermediate modal so analysts can pin in one click.
+function pinFindingToLibrary(contract, finding) {
+  const list = loadCustomInsights();
+  const ins = buildPinnedInsightFromFinding(contract, finding);
+  if (list.some(i => i.id === ins.id)) return list;
+  const next = [ins, ...list];
+  saveCustomInsights(next);
+  return next;
+}
+
+function unpinFindingFromLibrary(contract, finding) {
+  const id = `pinned-${contract.id}-${finding.id}`;
+  const next = loadCustomInsights().filter(i => i.id !== id);
+  saveCustomInsights(next);
+  return next;
+}
+
+function InsightDetailModal({ insight, onClose, onSelectContract, isFlagged, onToggleFlag, onUnpin }) {
+  if (!insight) return null;
+  const linked = contractsForInsight(insight, MOCK_CONTRACTS);
+  const toneMap = {
+    flag: { border:'var(--flag)', bg:'var(--flag-soft)', text:'var(--flag)' },
+    warn: { border:'var(--warn)', bg:'var(--warn-soft)', text:'var(--warn)' },
+    good: { border:'var(--good)', bg:'var(--good-soft)', text:'var(--good)' },
+  };
+  const t = toneMap[insight.tone];
+
+  return (
+    <div onClick={onClose} style={{
+      position:'fixed', inset:0, background:'rgba(10,25,41,0.55)',
+      display:'flex', alignItems:'center', justifyContent:'center', zIndex:50,
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background:'var(--surface)', borderRadius:4, width:780, maxWidth:'94vw',
+        maxHeight:'86vh', display:'flex', flexDirection:'column',
+        boxShadow:'var(--shadow)', border:'1px solid var(--border-md)',
+      }}>
+        <div style={{ padding:'16px 22px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between', gap:14 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+            <span style={{
+              fontSize:9.5, fontWeight:700, letterSpacing:'0.10em', textTransform:'uppercase',
+              color:t.text, background:t.bg, border:`1px solid ${t.border}`,
+              padding:'2px 8px', borderRadius:2, fontFamily:'var(--mono)',
+            }}>{insight.lens}</span>
+            <Tag>{insight.psc}</Tag>
+            <Tag>NAICS {insight.naics}</Tag>
+            {insight.custom && <Tag tone="accent">⚑ Pinned by you</Tag>}
+            {isFlagged && <Tag tone="flag">⚑ Flagged</Tag>}
+          </div>
+          <button type="button" onClick={onClose} style={{ background:'none', border:'none', color:'var(--ink-mute)', cursor:'pointer' }}><IcoClose/></button>
+        </div>
+
+        <div style={{ padding:'20px 22px', overflowY:'auto' }}>
+          <div style={{ fontSize:15, fontWeight:600, color:'var(--ink)', lineHeight:1.45, marginBottom:14 }}>{insight.claim}</div>
+          <div style={{ fontSize:12.5, color:'var(--ink-mute)', lineHeight:1.6, marginBottom:10 }}>
+            <strong style={{ color:'var(--ink-soft)', fontWeight:600 }}>Why: </strong>{insight.why}
+          </div>
+          <div style={{
+            fontSize:12.5, color:'var(--ink-soft)', lineHeight:1.6,
+            background:'var(--surface-alt)', borderLeft:`2px solid ${t.border}`,
+            padding:'10px 14px', marginBottom:18,
+          }}>
+            <strong style={{ fontWeight:600 }}>So what: </strong>{insight.so}
+          </div>
+
+          <div style={{ fontSize:10, fontWeight:700, color:'var(--ink-mute)', letterSpacing:'0.14em', textTransform:'uppercase', fontFamily:'var(--mono)', marginBottom:8 }}>
+            Your portfolio — source contracts ({linked.length})
+          </div>
+          <div style={{ border:'1px solid var(--border)', borderRadius:3, overflow:'hidden', marginBottom:18 }}>
+            <table style={{ width:'100%', borderCollapse:'collapse' }}>
+              <thead>
+                <tr style={{ background:'var(--surface-alt)' }}>
+                  {['Contract #','Title','PSC','Component','Value'].map((h,i) => (
+                    <th key={i} style={{
+                      padding:'8px 12px', textAlign:'left', fontSize:9.5, fontWeight:700,
+                      letterSpacing:'0.12em', textTransform:'uppercase', color:'var(--ink-mute)',
+                      fontFamily:'var(--mono)', borderBottom:'1px solid var(--border-md)',
+                    }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {linked.map(c => (
+                  <tr key={c.id}
+                    onClick={() => { onSelectContract && onSelectContract(c); onClose(); }}
+                    style={{ borderBottom:'1px solid var(--border)', cursor: onSelectContract ? 'pointer' : 'default', transition:'background 0.1s' }}
+                    onMouseEnter={e => e.currentTarget.style.background='var(--surface-alt)'}
+                    onMouseLeave={e => e.currentTarget.style.background='transparent'}
+                  >
+                    <td style={{ padding:'9px 12px', fontFamily:'var(--mono)', fontSize:11.5, color:'var(--accent)', fontWeight:600 }}>{c.number}</td>
+                    <td style={{ padding:'9px 12px', fontSize:12, color:'var(--ink)' }}>{c.title}</td>
+                    <td style={{ padding:'9px 12px', fontFamily:'var(--mono)', fontSize:11, color:'var(--ink-mute)' }}>{c.psc}</td>
+                    <td style={{ padding:'9px 12px', fontSize:11, color:'var(--ink-mute)' }}>{c.component}</td>
+                    <td style={{ padding:'9px 12px', fontFamily:'var(--mono)', fontSize:11.5, color:'var(--ink-soft)' }}>{c.value}</td>
+                  </tr>
+                ))}
+                {linked.length === 0 && (
+                  <tr><td colSpan={5} style={{ padding:'14px', textAlign:'center', fontSize:11.5, color:'var(--ink-faint)' }}>No matching contracts in your portfolio.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {insight.historical && insight.historical.length > 0 && (
+            <>
+              <div style={{ fontSize:10, fontWeight:700, color:'var(--ink-mute)', letterSpacing:'0.14em', textTransform:'uppercase', fontFamily:'var(--mono)', marginBottom:8 }}>
+                Historical / cross-portfolio sources ({insight.historical.length})
+              </div>
+              <div style={{ border:'1px solid var(--border)', borderRadius:3, overflow:'hidden' }}>
+                {insight.historical.map((h, i) => (
+                  <div key={i} style={{
+                    padding:'10px 14px',
+                    borderBottom: i < insight.historical.length - 1 ? '1px solid var(--border)' : 'none',
+                    background:'var(--surface)',
+                  }}>
+                    <div style={{ display:'flex', alignItems:'baseline', gap:10, flexWrap:'wrap', marginBottom:3 }}>
+                      <span style={{ fontSize:12.5, fontWeight:600, color:'var(--ink)' }}>{h.source}</span>
+                      {h.n != null && (
+                        <span style={{
+                          fontSize:9.5, fontWeight:700, fontFamily:'var(--mono)',
+                          letterSpacing:'0.10em', color:'var(--ink-mute)',
+                          background:'var(--surface-alt)', border:'1px solid var(--border-md)',
+                          padding:'1px 6px', borderRadius:2,
+                        }}>n = {h.n.toLocaleString()}</span>
+                      )}
+                    </div>
+                    <div style={{ fontSize:11.5, color:'var(--ink-mute)', lineHeight:1.5 }}>{h.note}</div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
+        <div style={{ padding:'12px 22px', borderTop:'1px solid var(--border)', display:'flex', justifyContent:'space-between', gap:10 }}>
+          <div style={{ display:'flex', gap:8 }}>
+            <BtnSecondary onClick={() => onToggleFlag(insight.id)}>{isFlagged ? '⚑ Unflag' : '⚑ Flag for follow-up'}</BtnSecondary>
+            {insight.custom && onUnpin && (
+              <BtnSecondary onClick={() => { onUnpin(insight.id); onClose(); }}>Unpin from library</BtnSecondary>
+            )}
+          </div>
+          <div style={{ display:'flex', gap:10 }}>
+            <BtnSecondary onClick={onClose}>Close</BtnSecondary>
+            <BtnPrimary onClick={() => downloadInsightReport(insight, linked, isFlagged)}>Download PDF</BtnPrimary>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

@@ -60,8 +60,12 @@ html, body {
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.5;
+}
+
+.app-main {
+  zoom: 1.18;
 }
 
 button, input, select, textarea { font: inherit; }

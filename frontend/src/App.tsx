@@ -44,12 +44,40 @@ export function App() {
       });
   }, []);
 
+  // Sync state ↔ browser history so the browser back/forward buttons
+  // navigate between pages within the app.
+  function pushHistory(nextPage, nextContract) {
+    const state = { page: nextPage, contract: nextContract || null };
+    window.history.pushState(state, '', '');
+  }
+
+  useEffect(() => {
+    // Seed history state on first load so popstate has something to restore to.
+    if (!window.history.state || !window.history.state.page) {
+      window.history.replaceState({ page, contract }, '', '');
+    }
+    function onPop(e) {
+      const s = e.state;
+      if (s && s.page) {
+        setPage(s.page);
+        setContract(s.contract || null);
+      } else {
+        setPage('home');
+        setContract(null);
+      }
+    }
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
   function handleLogin(tok, usr) {
     localStorage.setItem(TOKEN_KEY, tok);
     localStorage.setItem('fcsw-user', JSON.stringify(usr));
     setToken(tok);
     setUser(usr);
     setPage('home');
+    setContract(null);
+    pushHistory('home', null);
   }
 
   function handleLogout() {
@@ -58,6 +86,8 @@ export function App() {
     setToken('');
     setUser(null);
     setPage('home');
+    setContract(null);
+    pushHistory('home', null);
   }
 
   function handleNav(dest) {
@@ -65,13 +95,16 @@ export function App() {
       handleLogout();
       return;
     }
+    const nextContract = dest === 'contract-detail' ? contract : null;
     setPage(dest);
     if (dest !== 'contract-detail') setContract(null);
+    pushHistory(dest, nextContract);
   }
 
   function handleSelectContract(c) {
     setContract(c);
     setPage('contract-detail');
+    pushHistory('contract-detail', c);
   }
 
   if (!authChecked) return null;
@@ -85,14 +118,14 @@ export function App() {
     'contract-detail': contract ? (
       <ContractDetailPage
         contract={contract}
-        onBack={() => setPage('contracts')}
+        onBack={() => window.history.back()}
         onNav={handleNav}
         onSelectContract={handleSelectContract}
       />
     ) : (
       <ContractsPage onSelectContract={handleSelectContract} />
     ),
-    insights: <InsightsPage />,
+    insights: <InsightsPage onSelectContract={handleSelectContract} />,
     documents: <DocumentsPage onSelectContract={handleSelectContract} />,
     admin: <PlaceholderPage title="Admin" crumbs={['Admin']} />,
   };
@@ -100,7 +133,7 @@ export function App() {
   const contractorPages = {
     home: <ContractorHome user={user} onSelectContract={handleSelectContract} />,
     'contract-detail': contract ? (
-      <ContractorContractPage contract={contract} user={user} onBack={() => setPage('home')} />
+      <ContractorContractPage contract={contract} user={user} onBack={() => window.history.back()} />
     ) : (
       <ContractorHome user={user} onSelectContract={handleSelectContract} />
     ),
@@ -117,7 +150,7 @@ export function App() {
         user={user}
         onLogout={handleLogout}
       />
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
+      <div className="app-main" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
         {currentPage}
       </div>
     </div>
