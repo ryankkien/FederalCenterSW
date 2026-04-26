@@ -14,6 +14,7 @@ import {
   getContractAnalysis,
   getContractDeliverables,
   getContractLifecycle,
+  getContractSimilarityInsights,
   getDocument,
   getPortfolioThemes,
   listAllDocuments,
@@ -1576,6 +1577,8 @@ function ContractDetailPage({ contract, onBack, onSelectContract }) {
   const [deliverables, setDeliverables] = useState(null);
   const [lifecycle, setLifecycle] = useState(null);
   const [lifecycleError, setLifecycleError] = useState(false);
+  const [similarityInsights, setSimilarityInsights] = useState(null);
+  const [similarityError, setSimilarityError] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
 
   const c = contract;
@@ -1600,6 +1603,8 @@ function ContractDetailPage({ contract, onBack, onSelectContract }) {
     setDeliverables(null);
     setLifecycle(null);
     setLifecycleError(false);
+    setSimilarityInsights(null);
+    setSimilarityError(false);
     let cancelled = false;
     listContractDocuments(c.id)
       .then(rows => {
@@ -1629,6 +1634,16 @@ function ContractDetailPage({ contract, onBack, onSelectContract }) {
       })
       .catch(() => {
         if (!cancelled) setLifecycleError(true);
+      });
+    getContractSimilarityInsights(c.id)
+      .then(row => {
+        if (!cancelled) {
+          setSimilarityInsights(row);
+          setSimilarityError(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setSimilarityError(true);
       });
     return () => { cancelled = true; };
   }, [c.id]);
@@ -1678,7 +1693,7 @@ function ContractDetailPage({ contract, onBack, onSelectContract }) {
       <div style={{ flex:1, overflowY:'auto' }}>
         {tab === 'Overview'   && <OverviewTab contract={c} docs={docs} deliverables={deliverables} lifecycle={lifecycle} lifecycleError={lifecycleError} />}
         {tab === 'Lifecycle'  && <LifecycleTab contract={c} lifecycle={lifecycle} error={lifecycleError} />}
-        {tab === 'Insights'   && <ContractInsightsTab contract={c} findings={findings} lifecycle={lifecycle} onSelectContract={onSelectContract} />}
+        {tab === 'Insights'   && <ContractInsightsTab findings={findings} lifecycle={lifecycle} similarity={similarityInsights} similarityError={similarityError} />}
         {tab === 'Benchmarks' && <BenchmarksTab contract={c} analysis={analysis} />}
         {tab === 'Documents'  && <DocumentsTab docs={docs} contract={c} onUpload={() => setShowUpload(true)} />}
       </div>
@@ -2365,7 +2380,7 @@ function DocumentsTab({ docs, contract, onUpload }) {
 }
 
 // ─── CONTRACT INSIGHTS TAB — findings → patterns → similar contracts ────────
-function ContractInsightsTab({ contract: c, findings, lifecycle, onSelectContract }) {
+function ContractInsightsTab({ findings, lifecycle, similarity, similarityError }) {
   const lifecycleIssues = (lifecycle?.issue_register || []).map(issue => ({
     id: `lifecycle-${issue.issue_id || issue.title}`,
     severity: issue.severity === 'high' ? 'critical' : issue.severity === 'low' ? 'healthy' : 'watch',
@@ -2379,6 +2394,10 @@ function ContractInsightsTab({ contract: c, findings, lifecycle, onSelectContrac
     rowsById.set(row.id, row);
   }
   const rows = [...rowsById.values()];
+  const similarContracts = similarity?.similar_contracts || [];
+  const sharedFailurePoints = similarity?.shared_failure_points || [];
+  const recommendations = similarity?.recommendations || [];
+  const limitations = similarity?.limitations || [];
   return (
     <div style={{ padding:'24px 24px 48px' }}>
       <SectionHeader
@@ -2441,6 +2460,104 @@ function ContractInsightsTab({ contract: c, findings, lifecycle, onSelectContrac
           );
         })}
       </div>
+
+      <div style={{ height:28 }} />
+      <SectionHeader
+        title="Similar-contract guidance"
+        subtitle="Backend comparison of visible contracts, shared failure points, early warnings, and recommended controls"
+      />
+      {!similarity && !similarityError && <Spinner label="Loading similar-contract evidence…" />}
+      {similarityError && <EmptyState title="Similar-contract guidance unavailable" sub="The backend similarity-insights endpoint could not be loaded." />}
+      {similarity && similarContracts.length === 0 && sharedFailurePoints.length === 0 && recommendations.length === 0 && (
+        <EmptyState title="No comparable contract guidance yet" sub={(limitations || [])[0] || 'Process more visible contracts to build comparable failure points and drafting guidance.'} />
+      )}
+      {similarity && (similarContracts.length > 0 || sharedFailurePoints.length > 0 || recommendations.length > 0) && (
+        <div style={{ display:'grid', gridTemplateColumns:'1.1fr 0.9fr', gap:14, alignItems:'start' }}>
+          <div style={{ display:'grid', gap:14 }}>
+            <InsightPanel title="Similar Visible Contracts">
+              {similarContracts.map(item => (
+                <SimilarContractCard key={item.contract_id} item={item} />
+              ))}
+            </InsightPanel>
+            <InsightPanel title="Shared Failure Points">
+              {sharedFailurePoints.map(point => (
+                <PatternRow key={point.key || point.title} pattern={point} />
+              ))}
+            </InsightPanel>
+          </div>
+          <div style={{ display:'grid', gap:14 }}>
+            <InsightPanel title="Recommended Controls">
+              {recommendations.map((item, i) => (
+                <div key={`${item}-${i}`} style={{ display:'grid', gridTemplateColumns:'22px 1fr', gap:10, padding:'8px 0', borderBottom: i < recommendations.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                  <span style={{ fontSize:11, color:'var(--accent)', fontFamily:'var(--mono)', fontWeight:700 }}>{String(i + 1).padStart(2, '0')}</span>
+                  <span style={{ fontSize:12.5, color:'var(--ink)', lineHeight:1.5 }}>{item}</span>
+                </div>
+              ))}
+            </InsightPanel>
+            {(limitations.length > 0 || (similarity.methodology || []).length > 0) && (
+              <InsightPanel title="Methodology And Limits">
+                {[...(similarity.methodology || []), ...limitations].slice(0, 8).map((item, i) => (
+                  <div key={`${item}-${i}`} style={{ fontSize:11.5, color:'var(--ink-mute)', lineHeight:1.55, padding:'4px 0' }}>{item}</div>
+                ))}
+              </InsightPanel>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InsightPanel({ title, children }) {
+  const hasChildren = React.Children.count(children) > 0;
+  return (
+    <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:4, padding:'16px 18px' }}>
+      <div style={{ fontSize:10.5, fontWeight:700, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)', marginBottom:12 }}>{title}</div>
+      {hasChildren ? children : <EmptyState title="No evidence yet" sub="No backend rows are available for this section." />}
+    </div>
+  );
+}
+
+function SimilarContractCard({ item }) {
+  const score = item.similarity_score == null ? 'match' : `${Math.round(Number(item.similarity_score) * 100)}%`;
+  const failurePoints = item.failure_points || [];
+  const earlyWarnings = item.early_warnings || [];
+  return (
+    <div style={{ borderBottom:'1px solid var(--border)', padding:'10px 0 12px' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:6 }}>
+        <span style={{ fontFamily:'var(--mono)', fontSize:11.5, fontWeight:700, color:'var(--accent)' }}>{item.contract_id}</span>
+        <Tag>{score}</Tag>
+      </div>
+      <div style={{ fontSize:13, color:'var(--ink)', fontWeight:600, lineHeight:1.35 }}>{item.contract_title}</div>
+      {(item.match_basis || []).slice(0, 2).map((basis, i) => (
+        <div key={`${basis}-${i}`} style={{ fontSize:11.5, color:'var(--ink-mute)', lineHeight:1.45, marginTop:4 }}>{basis}</div>
+      ))}
+      {failurePoints.length > 0 && (
+        <div style={{ marginTop:8 }}>
+          <div style={{ fontSize:10, color:'var(--ink-faint)', fontFamily:'var(--mono)', letterSpacing:'0.08em', textTransform:'uppercase' }}>Failure points</div>
+          {failurePoints.slice(0, 3).map(point => <PatternRow key={point.key || point.title} pattern={point} compact />)}
+        </div>
+      )}
+      {earlyWarnings.length > 0 && (
+        <div style={{ marginTop:8 }}>
+          <div style={{ fontSize:10, color:'var(--ink-faint)', fontFamily:'var(--mono)', letterSpacing:'0.08em', textTransform:'uppercase' }}>Early warnings</div>
+          {earlyWarnings.slice(0, 2).map(signal => (
+            <div key={signal.id} style={{ fontSize:11.5, color:'var(--ink-mute)', lineHeight:1.45, padding:'3px 0' }}>{signal.label}: {signal.summary}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PatternRow({ pattern, compact = false }) {
+  return (
+    <div style={{ padding: compact ? '5px 0' : '8px 0', borderBottom: compact ? 'none' : '1px solid var(--border)' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:3 }}>
+        <span style={{ fontSize:12.5, color:'var(--ink)', fontWeight:600 }}>{pattern.title || pattern.key || 'Pattern'}</span>
+        {pattern.contract_count != null && <Tag>{pattern.contract_count} contracts</Tag>}
+      </div>
+      <div style={{ fontSize:11.5, color:'var(--ink-mute)', lineHeight:1.5 }}>{pattern.summary || pattern.description || 'No summary available.'}</div>
     </div>
   );
 }
@@ -2603,6 +2720,10 @@ function InsightsPage({ onSelectContract }) {
     return () => { cancelled = true; };
   }, []);
   const themes = portfolio?.themes || [];
+  const kpis = portfolio?.kpis || {};
+  const priorityThemes = themes.slice(0, 4);
+  const contractRows = portfolioContractRows(themes).slice(0, 8);
+  const controls = portfolioControlPrompts(themes).slice(0, 6);
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
       <TopBar crumbs={['Insights']} />
@@ -2613,15 +2734,65 @@ function InsightsPage({ onSelectContract }) {
       }}>
         <div>
           <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.18em', textTransform:'uppercase', color:'var(--ink-mute)', fontFamily:'var(--mono)', marginBottom:6 }}>Cross-portfolio</div>
-          <h1 style={{ fontSize:22, fontWeight:700, letterSpacing:'-0.02em', color:'var(--ink)' }}>Insights Library</h1>
+          <h1 style={{ fontSize:22, fontWeight:700, letterSpacing:'-0.02em', color:'var(--ink)' }}>Global Insights</h1>
           <p style={{ fontSize:12, color:'var(--ink-mute)', marginTop:4 }}>
-            {themes.length} backend evidence themes · generated from processed findings, facts, signals, and hypotheses
+            Main cross-contract view · {themes.length} backend evidence themes from processed findings, facts, signals, and hypotheses
           </p>
         </div>
       </div>
       <div style={{ flex:1, overflowY:'auto', background:'var(--bg)', padding:'20px 24px' }}>
         {!portfolio && !error && <Spinner label="Loading backend insights…" />}
-        {themes.map(theme => <ThemeCard key={theme.id} theme={theme} onSelectContract={onSelectContract} />)}
+        {portfolio && themes.length > 0 && (
+          <>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:12, marginBottom:20 }}>
+              <MetricCard label="Flagged Contracts" value={String(kpis.flagged ?? 0)} sub={`${kpis.total_contracts ?? 0} visible`} mono />
+              <MetricCard label="Evidence Themes" value={String(kpis.theme_count ?? themes.length)} sub="backend grouped" mono />
+              <MetricCard label="Evidence Items" value={String(kpis.evidence_count ?? 0)} sub="findings, signals, facts" mono />
+              <MetricCard label="Value Flagged" value={compactCurrency(kpis.aggregate_value_flagged || 0)} sub="visible portfolio" mono />
+            </div>
+
+            <div style={{ display:'grid', gridTemplateColumns:'1.15fr 0.85fr', gap:16, alignItems:'start', marginBottom:22 }}>
+              <InsightPanel title="Recurring Failure Points">
+                {priorityThemes.map(theme => (
+                  <PortfolioThemeSummary key={theme.id} theme={theme} onSelectContract={onSelectContract} />
+                ))}
+              </InsightPanel>
+              <div style={{ display:'grid', gap:16 }}>
+                <InsightPanel title="Recommended Review Controls">
+                  {controls.map((item, i) => (
+                    <div key={`${item.control}-${i}`} style={{ display:'grid', gridTemplateColumns:'22px 1fr', gap:10, padding:'8px 0', borderBottom: i < controls.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                      <span style={{ fontSize:11, color:'var(--accent)', fontFamily:'var(--mono)', fontWeight:700 }}>{String(i + 1).padStart(2, '0')}</span>
+                      <div>
+                        <div style={{ fontSize:12.5, color:'var(--ink)', lineHeight:1.45 }}>{item.control}</div>
+                        <div style={{ fontSize:10.5, color:'var(--ink-faint)', lineHeight:1.4, marginTop:3 }}>{item.basis}</div>
+                      </div>
+                    </div>
+                  ))}
+                </InsightPanel>
+                <InsightPanel title="Contracts To Review">
+                  {contractRows.map((row, i) => (
+                    <div key={row.id} onClick={() => onSelectContract(row.contract)} style={{ display:'grid', gridTemplateColumns:'125px 1fr 70px', gap:10, alignItems:'center', cursor:'pointer', padding:'8px 0', borderBottom: i < contractRows.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                      <span style={{ fontFamily:'var(--mono)', fontSize:11.5, fontWeight:600, color:'var(--accent)' }}>{row.number}</span>
+                      <div style={{ minWidth:0 }}>
+                        <div style={{ fontSize:12.5, color:'var(--ink)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{row.title}</div>
+                        <div style={{ fontSize:10.5, color:'var(--ink-faint)', marginTop:2 }}>{row.themeCount} theme{row.themeCount === 1 ? '' : 's'} · {row.evidenceCount} evidence item{row.evidenceCount === 1 ? '' : 's'}</div>
+                      </div>
+                      <Tag>{row.severity}</Tag>
+                    </div>
+                  ))}
+                </InsightPanel>
+              </div>
+            </div>
+
+            <SectionHeader
+              title="All Evidence Themes"
+              subtitle="Expandable backend theme cards with linked visible contracts"
+            />
+            <div style={{ display:'grid', gap:10 }}>
+              {themes.map(theme => <ThemeCard key={theme.id} theme={theme} onSelectContract={onSelectContract} />)}
+            </div>
+          </>
+        )}
         {portfolio && themes.length === 0 && (
           <EmptyState title="No backend insights yet" sub={(portfolio.limitations || [])[0] || 'Process contract documents to create evidence-backed themes.'} />
         )}
@@ -2629,6 +2800,98 @@ function InsightsPage({ onSelectContract }) {
       </div>
     </div>
   );
+}
+
+function PortfolioThemeSummary({ theme, onSelectContract }) {
+  const sev = SEVERITY_META[theme.severity] || SEVERITY_META.watch;
+  const contracts = (theme.contracts || []).map(normalizeThemeContract).filter(Boolean).slice(0, 3);
+  return (
+    <div style={{ padding:'10px 0 12px', borderBottom:'1px solid var(--border)' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6 }}>
+        <span style={{ fontSize:9.5, fontWeight:700, letterSpacing:'0.10em', textTransform:'uppercase', color:sev.clr, background:sev.bg, border:`1px solid ${sev.border}`, padding:'2px 7px', borderRadius:2, fontFamily:'var(--mono)' }}>{sev.label}</span>
+        <Tag>{theme.psc}</Tag>
+        <Tag>{theme.flagged} / {theme.total}</Tag>
+      </div>
+      <div style={{ fontSize:13, color:'var(--ink)', fontWeight:600, lineHeight:1.4 }}>{theme.title}</div>
+      <div style={{ fontSize:11.5, color:'var(--ink-mute)', lineHeight:1.5, marginTop:4 }}>{theme.insight}</div>
+      {contracts.length > 0 && (
+        <div style={{ marginTop:9, display:'flex', gap:6, flexWrap:'wrap' }}>
+          {contracts.map(contract => (
+            <button key={contract.id} type="button" onClick={() => onSelectContract(contract)} style={{ border:'1px solid var(--border-md)', background:'var(--surface-alt)', color:'var(--accent)', borderRadius:3, padding:'4px 7px', fontSize:11, fontFamily:'var(--mono)', cursor:'pointer' }}>
+              {contract.number}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function portfolioContractRows(themes) {
+  const byId = new Map();
+  for (const theme of themes || []) {
+    for (const raw of theme.contracts || []) {
+      const contract = normalizeThemeContract(raw);
+      if (!contract?.id) continue;
+      const current = byId.get(contract.id) || {
+        id: contract.id,
+        number: contract.number,
+        title: contract.title,
+        contract,
+        themeCount: 0,
+        evidenceCount: 0,
+        severity: 'watch',
+        severityRank: 0,
+      };
+      current.themeCount += 1;
+      current.evidenceCount += raw.evidence_count || theme.evidence_count || 0;
+      const rank = theme.severity === 'critical' ? 2 : theme.severity === 'watch' ? 1 : 0;
+      if (rank > current.severityRank) {
+        current.severity = theme.severity;
+        current.severityRank = rank;
+      }
+      byId.set(contract.id, current);
+    }
+  }
+  return [...byId.values()].sort((a, b) => b.severityRank - a.severityRank || b.evidenceCount - a.evidenceCount || a.number.localeCompare(b.number));
+}
+
+function portfolioControlPrompts(themes) {
+  const controls = [];
+  const seen = new Set();
+  for (const theme of themes || []) {
+    const text = `${theme.title || ''} ${theme.insight || ''}`.toLowerCase();
+    const control = portfolioControlForTheme(text);
+    if (!control || seen.has(control)) continue;
+    seen.add(control);
+    controls.push({
+      control,
+      basis: `${theme.title} · ${theme.flagged || 0} contract${theme.flagged === 1 ? '' : 's'} flagged`,
+    });
+  }
+  return controls;
+}
+
+function portfolioControlForTheme(text) {
+  if (/schedule|late|delay|milestone|deliverable|cdrl/.test(text)) {
+    return 'Add explicit deliverable due dates, recovery-plan triggers, and government acceptance timelines.';
+  }
+  if (/staff|personnel|vacancy|turnover|pm substitution|coverage/.test(text)) {
+    return 'Require named key-person backup coverage, vacancy notice timing, and transition plans.';
+  }
+  if (/cost|funding|invoice|eac|variance|overrun|odc/.test(text)) {
+    return 'Set cost-variance thresholds, invoice evidence requirements, and escalation rules.';
+  }
+  if (/scope|change|modification|equitable|direction|gfe|gfi/.test(text)) {
+    return 'Clarify government-furnished information, direction authority, and change-control gates.';
+  }
+  if (/quality|defect|rework|acceptance|inspection/.test(text)) {
+    return 'Add quality gates, acceptance criteria, and rework reporting requirements.';
+  }
+  if (/compliance|cyber|security|license|regulatory/.test(text)) {
+    return 'Add compliance evidence cadence, owner assignments, and deadline-based escalation.';
+  }
+  return 'Review whether recurring evidence themes need clearer ownership, cadence, and escalation language.';
 }
 
 // ─── BENCHMARKS TAB (within contract) ───────────────────────────────────────

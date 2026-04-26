@@ -134,6 +134,10 @@ export async function getContractCohort(contractId: string) {
   return request(`/api/contracts/${encodeURIComponent(contractId)}/cohort`);
 }
 
+export async function getContractSimilarityInsights(contractId: string) {
+  return request(`/api/contracts/${encodeURIComponent(contractId)}/similarity-insights`);
+}
+
 export async function getPortfolioThemes(period?: string) {
   const params = new URLSearchParams();
   if (period) params.set('period', period);
