@@ -1,0 +1,210 @@
+{
+  "contract": {
+    "number": "N0024426C0087",
+    "solicitation": "N0024426QS006",
+    "contractor": "ClearOps Systems LLC",
+    "cage_code": "9TW42",
+    "award_date": "2026-03-28",
+    "naics": "611710",
+    "type": "Firm Fixed Price",
+    "set_aside": "Small Business",
+    "program": "Virtual Machine Support Services — NPS NATO Cybersecurity Education",
+    "issuing_office": "NAVSUP FLT LOG CTR San Diego (N00244)"
+  },
+  "periods_of_performance": [
+    { "period": "Base Year",    "label": "BY",  "start": "2026-03-31", "end": "2027-03-30" },
+    { "period": "Option Year 1","label": "OY1", "start": "2027-03-31", "end": "2028-03-30" },
+    { "period": "Option Year 2","label": "OY2", "start": "2028-03-31", "end": "2029-03-30" },
+    { "period": "Option Year 3","label": "OY3", "start": "2029-03-31", "end": "2030-03-30" },
+    { "period": "Option Year 4","label": "OY4", "start": "2030-03-31", "end": "2031-03-30" }
+  ],
+  "clins": [
+    {
+      "clin": "0001",
+      "period": "Base Year",
+      "description": "VM Support Services (development, guides, instruction support)",
+      "type": "FFP",
+      "budgeted": 487200,
+      "obligated": 487200,
+      "actual": 476330,
+      "variance": 10870,
+      "variance_pct": 2.23
+    },
+    {
+      "clin": "0002",
+      "period": "Base Year",
+      "description": "Travel (NSO Oberammergau, Germany)",
+      "type": "FFP",
+      "budgeted": 18400,
+      "obligated": 18400,
+      "actual": 17850,
+      "variance": 550,
+      "variance_pct": 2.99
+    },
+    {
+      "clin": "0003",
+      "period": "Base Year",
+      "description": "CDRL (Not Separately Priced)",
+      "type": "FFP",
+      "budgeted": 0,
+      "obligated": 0,
+      "actual": 0,
+      "variance": 0,
+      "variance_pct": 0
+    },
+    {
+      "clin": "1001",
+      "period": "Option Year 1",
+      "description": "VM Support Services (activation + instruction support)",
+      "type": "FFP",
+      "budgeted": 512000,
+      "obligated": null,
+      "actual": null,
+      "variance": null,
+      "variance_pct": null
+    },
+    {
+      "clin": "1002",
+      "period": "Option Year 1",
+      "description": "Travel",
+      "type": "FFP",
+      "budgeted": 18400,
+      "obligated": null,
+      "actual": null,
+      "variance": null,
+      "variance_pct": null
+    },
+    {
+      "clin": "2001", "period": "Option Year 2", "description": "VM Support Services", "type": "FFP", "budgeted": 524800, "obligated": null, "actual": null, "variance": null, "variance_pct": null
+    },
+    {
+      "clin": "2002", "period": "Option Year 2", "description": "Travel", "type": "FFP", "budgeted": 18400, "obligated": null, "actual": null, "variance": null, "variance_pct": null
+    },
+    {
+      "clin": "3001", "period": "Option Year 3", "description": "VM Support Services", "type": "FFP", "budgeted": 537700, "obligated": null, "actual": null, "variance": null, "variance_pct": null
+    },
+    {
+      "clin": "3002", "period": "Option Year 3", "description": "Travel", "type": "FFP", "budgeted": 18400, "obligated": null, "actual": null, "variance": null, "variance_pct": null
+    },
+    {
+      "clin": "4001", "period": "Option Year 4", "description": "VM Support Services", "type": "FFP", "budgeted": 643700, "obligated": null, "actual": null, "variance": null, "variance_pct": null
+    },
+    {
+      "clin": "4002", "period": "Option Year 4", "description": "Travel", "type": "FFP", "budgeted": 18400, "obligated": null, "actual": null, "variance": null, "variance_pct": null
+    }
+  ],
+  "contract_totals": {
+    "total_with_all_options": 2847320,
+    "base_year_obligated": 505600,
+    "base_year_actual": 494180,
+    "base_year_variance": 11420,
+    "base_year_cpi": 1.023
+  },
+  "quarterly_cost_tracking": [
+    {
+      "quarter": "Q1",
+      "period": "2026-04-01/2026-06-30",
+      "planned_value": 121800,
+      "earned_value": 126672,
+      "actual_cost": 97100,
+      "schedule_variance": 4872,
+      "cost_variance": 29572,
+      "spi": 1.04,
+      "cpi": 1.30,
+      "eac_projected": 374615,
+      "vac_projected": 112985,
+      "notes": "High CPI reflects infra buildout costs spread; EAC will normalize as SME labor increases in Q2-Q4."
+    },
+    {
+      "quarter": "Q2",
+      "period": "2026-07-01/2026-09-30",
+      "planned_value": 262000,
+      "earned_value": 272480,
+      "actual_cost": 236550,
+      "schedule_variance": 10480,
+      "cost_variance": 35930,
+      "spi": 1.04,
+      "cpi": 1.08,
+      "eac_projected": 468148,
+      "vac_projected": 37452,
+      "notes": "Midpoint review. SPI 1.04 reflects slightly ahead-of-schedule delivery of 3 VMs. Travel executed on budget."
+    },
+    {
+      "quarter": "Q3",
+      "period": "2026-10-01/2026-12-31",
+      "planned_value": 383800,
+      "earned_value": 393300,
+      "actual_cost": 366050,
+      "schedule_variance": 9500,
+      "cost_variance": 27250,
+      "spi": 1.025,
+      "cpi": 1.07,
+      "eac_projected": 472140,
+      "vac_projected": 33460,
+      "notes": "SME labor efficiencies identified in Q3 on mature VM environments. 6 of 9 VMs complete."
+    },
+    {
+      "quarter": "Q4",
+      "period": "2027-01-01/2027-03-30",
+      "planned_value": 505600,
+      "earned_value": 505600,
+      "actual_cost": 494180,
+      "schedule_variance": 0,
+      "cost_variance": 11420,
+      "spi": 1.02,
+      "cpi": 1.023,
+      "eac_projected": 494180,
+      "vac_projected": 11420,
+      "notes": "Contract close. All work complete. Final variance $11,420 favorable. No de-obligation required."
+    }
+  ],
+  "milestones": [
+    { "id": "M-001", "milestone": "Contract Award",                       "planned": "2026-03-28", "actual": "2026-03-28", "status": "Complete", "clin_ref": null },
+    { "id": "M-002", "milestone": "Kickoff Meeting",                       "planned": "2026-04-05", "actual": "2026-04-05", "status": "Complete", "clin_ref": "0001" },
+    { "id": "M-003", "milestone": "Infrastructure Architecture Approved",  "planned": "2026-04-15", "actual": "2026-04-17", "status": "Complete", "clin_ref": "0001" },
+    { "id": "M-004", "milestone": "Traffic Analysis VM — NPS Delivery",    "planned": "2026-07-17", "actual": "2026-07-14", "status": "Complete", "clin_ref": "0001" },
+    { "id": "M-005", "milestone": "Traffic Analysis VM — Pre-Class Test",  "planned": "2026-07-24", "actual": "2026-07-21", "status": "Complete", "clin_ref": "0001" },
+    { "id": "M-006", "milestone": "SRE VM — NPS Delivery",                 "planned": "2026-07-31", "actual": "2026-07-28", "status": "Complete", "clin_ref": "0001" },
+    { "id": "M-007", "milestone": "In-Residence Support — Traffic Analysis","planned": "2026-08-18","actual": "2026-08-18", "status": "Complete", "clin_ref": "0001" },
+    { "id": "M-008", "milestone": "Annual Travel to NSO (Q2)",              "planned": "2026-08-16", "actual": "2026-08-16", "status": "Complete", "clin_ref": "0002" },
+    { "id": "M-009", "milestone": "In-Residence Support — SRE",            "planned": "2026-09-08", "actual": "2026-09-08", "status": "Complete", "clin_ref": "0001" },
+    { "id": "M-010", "milestone": "Student/Instructor Guides Draft (Priority)", "planned": "2026-09-15", "actual": "2026-09-15", "status": "Complete", "clin_ref": "0001" },
+    { "id": "M-011", "milestone": "Mobile Apps VM — NPS Delivery",          "planned": "2026-10-15", "actual": "2026-10-10", "status": "Complete", "clin_ref": "0001" },
+    { "id": "M-012", "milestone": "In-Residence Support — Mobile Apps",    "planned": "2026-10-26", "actual": "2026-10-26", "status": "Complete", "clin_ref": "0001" },
+    { "id": "M-013", "milestone": "Instructional Guides — Final Acceptance","planned": "2026-10-31", "actual": "2026-11-03", "status": "Complete", "clin_ref": "0001" },
+    { "id": "M-014", "milestone": "OVA Export — Priority 3 VMs",           "planned": "2026-11-15", "actual": "2026-11-20", "status": "Complete", "clin_ref": "0001" },
+    { "id": "M-015", "milestone": "In-Residence Support — CSIRR",          "planned": "2026-12-01", "actual": "2026-12-01", "status": "Complete", "clin_ref": "0001" },
+    { "id": "M-016", "milestone": "NIST SP 800-61 Rev.3 Lab Update",       "planned": "2026-12-19", "actual": "2026-12-19", "status": "Complete", "clin_ref": "0001" },
+    { "id": "M-017", "milestone": "ML&AI VM — NPS Acceptance",             "planned": "2027-01-28", "actual": "2027-01-26", "status": "Complete", "clin_ref": "0001" },
+    { "id": "M-018", "milestone": "Intro ML&AI VM — NPS Acceptance",       "planned": "2027-02-14", "actual": "2027-02-12", "status": "Complete", "clin_ref": "0001" },
+    { "id": "M-019", "milestone": "Network Vuln VM — NPS Acceptance",      "planned": "2027-02-28", "actual": "2027-02-25", "status": "Complete", "clin_ref": "0001" },
+    { "id": "M-020", "milestone": "Network Security VM — NPS Acceptance",  "planned": "2027-03-15", "actual": "2027-03-13", "status": "Complete", "clin_ref": "0001" },
+    { "id": "M-021", "milestone": "CDRL A004 (All VMs) — Final Delivery",  "planned": "2027-03-15", "actual": "2027-03-15", "status": "Complete", "clin_ref": "0001" },
+    { "id": "M-022", "milestone": "CDRL A005 (All Guides) — Final Delivery","planned": "2027-03-20", "actual": "2027-03-20", "status": "Complete", "clin_ref": "0001" },
+    { "id": "M-023", "milestone": "All 14 High-Priority Feedback Resolved", "planned": "2027-03-30", "actual": "2027-03-24", "status": "Complete", "clin_ref": "0001" },
+    { "id": "M-024", "milestone": "Base Year Contract Close-Out",          "planned": "2027-03-30", "actual": "2027-03-30", "status": "Complete", "clin_ref": null }
+  ],
+  "vm_environments": [
+    { "env": "Network Traffic Analysis",             "cdrl": "A001", "students_supported": 110, "avg_availability_pct": 96.9, "delivery_date": "2026-07-14", "latency_compliance_pct": 99.1, "feedback_items_critical": 3, "feedback_resolved": 3 },
+    { "env": "Software Reverse Engineering",         "cdrl": "A002", "students_supported": 40,  "avg_availability_pct": 97.1, "delivery_date": "2026-07-28", "latency_compliance_pct": 100, "feedback_items_critical": 2, "feedback_resolved": 2 },
+    { "env": "Mobile Applications",                  "cdrl": "A003", "students_supported": 40,  "avg_availability_pct": 96.8, "delivery_date": "2026-10-10", "latency_compliance_pct": 100, "feedback_items_critical": 1, "feedback_resolved": 1 },
+    { "env": "Network Vulnerability Assessment",     "cdrl": "A004", "students_supported": 60,  "avg_availability_pct": 97.3, "delivery_date": "2027-02-25", "latency_compliance_pct": 100, "feedback_items_critical": 2, "feedback_resolved": 2 },
+    { "env": "Cyber Incident Handling & Disaster Response","cdrl": "A004", "students_supported": 50, "avg_availability_pct": 97.0, "delivery_date": "2026-12-01", "latency_compliance_pct": 100, "feedback_items_critical": 3, "feedback_resolved": 3 },
+    { "env": "ML&AI for Cyber Applications",         "cdrl": "A004", "students_supported": 35,  "avg_availability_pct": 96.5, "delivery_date": "2027-01-26", "latency_compliance_pct": 100, "feedback_items_critical": 1, "feedback_resolved": 1 },
+    { "env": "Introduction to ML & AI",              "cdrl": "A004", "students_supported": 35,  "avg_availability_pct": 96.7, "delivery_date": "2027-02-12", "latency_compliance_pct": 100, "feedback_items_critical": 1, "feedback_resolved": 1 },
+    { "env": "Network Security",                     "cdrl": "A004", "students_supported": 30,  "avg_availability_pct": 97.2, "delivery_date": "2027-03-13", "latency_compliance_pct": 100, "feedback_items_critical": 1, "feedback_resolved": 1 },
+    { "env": "Fundamentals of AI / Machine Reasoning","cdrl": "A004", "students_supported": 30, "avg_availability_pct": 96.6, "delivery_date": "2027-03-13", "latency_compliance_pct": 100, "feedback_items_critical": 0, "feedback_resolved": 0 }
+  ],
+  "performance_summary": {
+    "total_vm_environments_delivered": 9,
+    "total_students_supported": 430,
+    "in_residence_weeks_supported": 18,
+    "overall_avg_availability_pct": 97.1,
+    "latency_compliance_overall_pct": 98.6,
+    "critical_feedback_items_total": 14,
+    "critical_feedback_items_resolved": 14,
+    "critical_feedback_resolution_rate_pct": 100,
+    "cpar_overall_rating": "Purple / Very Good",
+    "recommendation": "Definitely Would Award Again"
+  }
+}
