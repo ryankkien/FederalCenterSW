@@ -121,7 +121,7 @@ EMAIL_INTAKE_STUB_BLOB_CONTAINER=app-assets
 EMAIL_INTAKE_STUB_BLOB_PREFIX=email-intake
 ```
 
-The Function App still needs `AZURE_STORAGE_CONNECTION_STRING` or `EMAIL_INTAKE_STUB_BLOB_CONNECTION_STRING` so it can write the JSON audit record to Blob Storage and read document artifacts for processing. It also needs `DATABASE_URL` for emailed attachments to appear in the portal and for queued jobs to be drained; the deploy workflow writes this from the `AZURE_FUNCTION_DATABASE_URL` GitHub secret.
+The Function App still needs `AZURE_STORAGE_CONNECTION_STRING` or `EMAIL_INTAKE_STUB_BLOB_CONNECTION_STRING` so it can write the JSON audit record to Blob Storage and read document artifacts for processing. It also needs `DATABASE_URL` for emailed attachments to appear in the portal and for queued jobs to be drained; the deploy workflow writes this from the `AZURE_FUNCTION_DATABASE_URL` GitHub secret. The deploy workflow also writes the non-secret Application Insights connection string from `fcsw-dev-aca-env-appi` so timer invocations and exceptions are exported with structured log fields.
 
 Useful Azure CLI shape:
 

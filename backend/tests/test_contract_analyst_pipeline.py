@@ -301,7 +301,12 @@ def test_processing_job_run_and_analysis_apis_are_contract_scoped(tmp_path, monk
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     feature_calls = []
 
-    def fake_trigger_feature_extractor(document_id: str, contract_id: str, doc_classification: str):
+    def fake_trigger_feature_extractor(
+        document_id: str,
+        contract_id: str,
+        doc_classification: str,
+        processing_run_id=None,
+    ):
         feature_calls.append((document_id, contract_id, doc_classification))
         return [
             FeatureExtractorStepResult(

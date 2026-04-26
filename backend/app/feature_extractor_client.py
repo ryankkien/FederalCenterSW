@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 import httpx
 
 from app.config import get_feature_extractor_request_timeout_seconds, get_feature_extractor_url
+from app.observability import outbound_request_headers
 
 
 @dataclass(frozen=True)
@@ -21,15 +22,24 @@ def trigger_feature_extractor(
     document_id: str,
     contract_id: Optional[str],
     doc_classification: str,
+    processing_run_id: Optional[str] = None,
     service_url: Optional[str] = None,
 ) -> list[FeatureExtractorStepResult]:
     base_url = (service_url or get_feature_extractor_url() or "").strip().rstrip("/")
     if not base_url:
         return []
 
+    headers = outbound_request_headers(
+        {
+            "X-Document-Upload-ID": document_id,
+            **({"X-Contract-ID": contract_id} if contract_id else {}),
+            **({"X-Processing-Run-ID": processing_run_id} if processing_run_id else {}),
+        }
+    )
+
     summary_metadata: Dict[str, Any] = {"endpoint": "/summarize", "service_url": base_url}
     try:
-        summary = _post_json(base_url, "/summarize", {"doc_id": document_id})
+        summary = _post_json(base_url, "/summarize", {"doc_id": document_id}, headers=headers)
     except Exception as error:
         return [
             FeatureExtractorStepResult(
@@ -68,7 +78,12 @@ def trigger_feature_extractor(
         "doc_classification": primitives_payload["doc_classification"],
     }
     try:
-        primitives = _post_json(base_url, "/extract-primitives", primitives_payload)
+        primitives = _post_json(
+            base_url,
+            "/extract-primitives",
+            primitives_payload,
+            headers=headers,
+        )
     except Exception as error:
         steps.append(
             FeatureExtractorStepResult(
@@ -98,10 +113,15 @@ def trigger_feature_extractor(
     return steps
 
 
-def _post_json(base_url: str, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+def _post_json(
+    base_url: str,
+    path: str,
+    payload: Dict[str, Any],
+    headers: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
     timeout = get_feature_extractor_request_timeout_seconds()
     with httpx.Client(timeout=timeout) as client:
-        response = client.post(f"{base_url}{path}", json=payload)
+        response = client.post(f"{base_url}{path}", json=payload, headers=headers)
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as error:

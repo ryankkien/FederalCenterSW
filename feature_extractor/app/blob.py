@@ -1,8 +1,7 @@
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Protocol
 
-from azure.storage.blob import BlobSasPermissions, BlobServiceClient, ContentSettings, generate_blob_sas
+from azure.storage.blob import BlobServiceClient, ContentSettings
 
 from app.config import (
     get_azure_storage_connection_string,
