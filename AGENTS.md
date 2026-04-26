@@ -93,7 +93,8 @@ logic in separate modules under `backend/app/` and cover it with pytest tests.
   strings. Use local `.env` files, GitHub environment configuration, Azure app settings,
   or Key Vault.
 - Function App app settings currently contain secrets and are not fully managed by Bicep.
-  Move secrets to Key Vault before making app settings fully declarative.
+  New secret-bearing app settings should use Key Vault references resolved by managed
+  identity; do not write raw secret values through workflows or Bicep parameters.
 
 ### Local Development Mirror
 
@@ -109,6 +110,9 @@ logic in separate modules under `backend/app/` and cover it with pytest tests.
   and Blob container name. Hosts, passwords, storage accounts, and credentials can differ.
 - Local Compose is not a replacement for Bicep. Use it for fast app testing; use
   `bun run infra:whatif` for Azure drift.
+- `backend/.env.example`, `backend/.env.local.example`, and
+  `feature_extractor/.env.example` should carry the same ordered env variable names so
+  backend and optional feature-extractor configuration does not drift.
 - The local mirror CI workflow is `.github/workflows/local-mirror.yml`.
 
 ### Docs And Config

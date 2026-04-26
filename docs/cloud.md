@@ -29,12 +29,15 @@ Everything for this project should live in the single resource group `federal-ce
 | App database | `federal_center_sw` | `centralus` | Database inside the PostgreSQL server. |
 | Blob storage account | `fcswdevcwm2xrlu` | `eastus` | Standard LRS StorageV2 account. |
 | Blob container | `app-assets` | `eastus` | Private container for app files/assets. |
+| Key Vault | `fcsw-dev-kv-e7e9f2` | `eastus` | Dev secret store for app settings consumed through managed identity. |
+| Function App managed identity | `fcsw-email-intake-dev-mi` | `eastus` | User-assigned identity used to resolve Function App Key Vault references. |
 | Function package storage account | `fcswemailfunce7e9f2` | `eastus` | Standard LRS StorageV2 account used by Azure Functions Flex Consumption deployment storage. |
 | Function package container | `app-package-fcswemailintakee7e9f2-3009836` | `eastus` | Private container for Function App package deployment. |
 | Function App plan | `ASP-federalcenterswdev-818f` | `eastus` | Flex Consumption plan. |
 | Backend worker Function App | `fcsw-email-intake-e7e9f2` | `eastus` | Timer-trigger Function App for email intake and queued document processing. |
 | Azure Container Registry | `fcswdevacr` | `eastus` | Stores deployable pipeline service images. |
 | Container Apps environment | `fcsw-dev-aca-env` | `eastus` | Managed environment for optional pipeline services. |
+| Feature extractor managed identity | `fcsw-feature-extractor-dev-mi` | `eastus` | User-assigned identity used by the Feature Extractor Container App for Key Vault references. |
 | Feature extractor Container App | `fcsw-feature-extractor-dev` | `eastus` | Optional service image built from `feature_extractor/`. This rename from the prior dev app name requires a delete/create cutover. |
 | GitHub Actions OIDC app registration | `fcsw-github-actions` | Entra ID | Client ID `4650ab5a-7546-45cd-8694-83fc65ae586c`; assigned Contributor on `federal-center-sw-dev` and federated to the GitHub `azure-dev` environment. |
 | Log Analytics workspace | `fcsw-dev-aca-env-logs` | `eastus` | Shared log workspace for Container Apps and Application Insights. |
@@ -269,6 +272,42 @@ AZURE_STORAGE_CONNECTION_STRING=<connection-string>
 ```
 
 Prefer managed identity or Azure app settings for deployed apps. Avoid committing storage keys or connection strings.
+
+## Key Vault
+
+The dev Key Vault stores secrets that are referenced from Function App app settings and
+Container App secrets. The Function App and Feature Extractor Container App use user-assigned
+managed identities with the `Key Vault Secrets User` role scoped to this vault.
+
+Show the vault:
+
+```sh
+az keyvault show \
+  --resource-group federal-center-sw-dev \
+  --name fcsw-dev-kv-e7e9f2 \
+  --output table
+```
+
+List secret names without showing values:
+
+```sh
+az keyvault secret list \
+  --vault-name fcsw-dev-kv-e7e9f2 \
+  --query "[].name" \
+  --output table
+```
+
+Set or rotate a secret:
+
+```sh
+az keyvault secret set \
+  --vault-name fcsw-dev-kv-e7e9f2 \
+  --name app-storage-connection-string \
+  --value "<connection-string>"
+```
+
+Required app secret names are documented in [infra.md](infra.md). Do not paste secret
+values into documentation, Bicep parameter files, or GitHub workflow YAML.
 
 ## Local Env File
 

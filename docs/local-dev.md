@@ -246,7 +246,9 @@ Configure `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENAI_LLM_MODEL`, and
 `MODEL_PREFERENCE` only in ignored local env files or shell exports. The backend
 default LLM model is `gpt-5.5`. The feature extractor also accepts
 `APPINSIGHTS_CONNECTION_STRING` and emits the same structured correlation fields as the
-backend API.
+backend API. `backend/.env.example`, `backend/.env.local.example`, and
+`feature_extractor/.env.example` intentionally carry the same ordered variable names so
+local backend and optional feature-extractor config do not drift.
 
 ## Boundaries
 
