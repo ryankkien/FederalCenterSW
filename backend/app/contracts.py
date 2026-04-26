@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -18,6 +18,7 @@ from app.models import (
     ContractAccessGrant,
     ContractHypothesis,
     ContractPrimitiveDeliverable,
+    BaselineObligation,
     DocumentProcessingJob,
     DocumentUpload,
     RegressionFinding,
@@ -249,50 +250,128 @@ def list_contract_documents(
 
 class DeliverableItemResponse(BaseModel):
     id: str
-    cdrl_item: Optional[str] = None
     deliverable_name: Optional[str] = None
-    period_label: Optional[str] = None
-    planned_due_date: Optional[str] = None
-    actual_delivery_date: Optional[str] = None
+    cdrl_item: Optional[str] = None
+    planned_due_date: Optional[date] = None
+    actual_delivery_date: Optional[date] = None
     status: Optional[str] = None
     acceptance_status: Optional[str] = None
     days_late: Optional[int] = None
+    source_document_ids: List[str] = []
+    period_label: Optional[str] = None
 
 
-@router.get("/contracts/{contract_id}/deliverables", response_model=List[DeliverableItemResponse])
+class DeliverableGroupResponse(BaseModel):
+    key: str
+    title: str
+    cdrl_item: Optional[str] = None
+    items: List[DeliverableItemResponse] = []
+
+
+class DeliverablesResponse(BaseModel):
+    contract_id: str
+    availability: str
+    groups: List[DeliverableGroupResponse] = []
+    limitations: List[str] = []
+
+
+@router.get("/contracts/{contract_id}/deliverables", response_model=DeliverablesResponse)
 def list_contract_deliverables(
     contract_id: str,
     user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> List[DeliverableItemResponse]:
+) -> DeliverablesResponse:
     require_contract_view(user, db, contract_id)
     rows = list(
         db.scalars(
             select(ContractPrimitiveDeliverable)
             .where(ContractPrimitiveDeliverable.contract_id == contract_id)
-            .order_by(ContractPrimitiveDeliverable.planned_due_date.asc())
+            .order_by(
+                ContractPrimitiveDeliverable.cdrl_item.asc(),
+                ContractPrimitiveDeliverable.planned_due_date.asc(),
+                ContractPrimitiveDeliverable.actual_delivery_date.asc(),
+                ContractPrimitiveDeliverable.deliverable_name.asc(),
+            )
         ).all()
     )
-
-    def _date_str(d) -> Optional[str]:
-        if d is None:
-            return None
-        return d.isoformat() if hasattr(d, "isoformat") else str(d)
-
-    return [
-        DeliverableItemResponse(
-            id=row.id,
-            cdrl_item=row.cdrl_item,
-            deliverable_name=row.deliverable_name,
-            period_label=row.period_label,
-            planned_due_date=_date_str(row.planned_due_date),
-            actual_delivery_date=_date_str(row.actual_delivery_date),
-            status=row.status,
-            acceptance_status=row.acceptance_status,
-            days_late=row.days_late,
+    if rows:
+        return DeliverablesResponse(
+            contract_id=contract_id,
+            availability="available",
+            groups=_deliverable_groups(rows),
         )
-        for row in rows
-    ]
+
+    document_count = len(
+        db.scalars(select(DocumentUpload.id).where(DocumentUpload.contract_id == contract_id)).all()
+    )
+    pending_count = len(
+        db.scalars(
+            select(DocumentProcessingJob.id)
+            .join(DocumentUpload, DocumentUpload.id == DocumentProcessingJob.document_upload_id)
+            .where(
+                DocumentUpload.contract_id == contract_id,
+                DocumentProcessingJob.status.in_(("queued", "processing")),
+            )
+        ).all()
+    )
+    obligation_count = len(
+        db.scalars(
+            select(BaselineObligation.id).where(
+                BaselineObligation.contract_id == contract_id,
+                BaselineObligation.obligation_type.in_(("deliverable", "reporting_cadence")),
+            )
+        ).all()
+    )
+    if pending_count:
+        availability = "processing_pending"
+        limitation = "Document processing is still queued or running; deliverable primitives are not available yet."
+    elif obligation_count:
+        availability = "not_extracted"
+        limitation = "Baseline deliverable obligations exist, but typed deliverable primitives have not been backfilled yet."
+    elif document_count:
+        availability = "not_extracted"
+        limitation = "Documents are linked to this contract, but no deliverable primitive was extracted from them."
+    else:
+        availability = "source_absent"
+        limitation = "No child documents are linked to this contract, so deliverable evidence is unavailable."
+    return DeliverablesResponse(
+        contract_id=contract_id,
+        availability=availability,
+        limitations=[limitation],
+    )
+
+
+def _deliverable_groups(rows: Sequence[ContractPrimitiveDeliverable]) -> List[DeliverableGroupResponse]:
+    grouped: Dict[str, List[ContractPrimitiveDeliverable]] = {}
+    for row in rows:
+        key = row.cdrl_item or (row.deliverable_name or "Deliverable").strip().lower()
+        grouped.setdefault(key, []).append(row)
+    groups: List[DeliverableGroupResponse] = []
+    for key, items in sorted(grouped.items(), key=lambda item: item[0]):
+        first = items[0]
+        groups.append(
+            DeliverableGroupResponse(
+                key=key,
+                title=first.deliverable_name or first.cdrl_item or "Deliverable",
+                cdrl_item=first.cdrl_item,
+                items=[
+                    DeliverableItemResponse(
+                        id=item.id,
+                        deliverable_name=item.deliverable_name or item.cdrl_item or "Deliverable",
+                        cdrl_item=item.cdrl_item,
+                        planned_due_date=item.planned_due_date,
+                        actual_delivery_date=item.actual_delivery_date,
+                        status=item.status,
+                        acceptance_status=item.acceptance_status,
+                        days_late=item.days_late,
+                        source_document_ids=item.source_doc_ids or [],
+                        period_label=item.period_label,
+                    )
+                    for item in items
+                ],
+            )
+        )
+    return groups
 
 
 def topics_for_contract(db: Session, contract_id: str) -> List[TopicResponse]:

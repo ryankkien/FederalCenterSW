@@ -13,6 +13,7 @@
     "db:upgrade": "PYTHONPATH=backend .venv/bin/alembic -c backend/alembic.ini upgrade head",
     "fixtures:seed": "PYTHONPATH=backend .venv/bin/python -m app.fixtures",
     "processing:run": "PYTHONPATH=backend .venv/bin/python -m app.processing_cli",
+    "data:backfill-primitives": "PYTHONPATH=backend .venv/bin/python -m app.primitive_backfill_cli",
     "knowledge:ingest": "PYTHONPATH=backend .venv/bin/python -m app.knowledge_cli ingest",
     "knowledge:build": "PYTHONPATH=backend .venv/bin/python -m app.knowledge_cli build",
     "corpus:build-synthetic": "PYTHONPATH=backend .venv/bin/python -m app.synthetic_corpus",

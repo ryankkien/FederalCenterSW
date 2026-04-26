@@ -118,6 +118,12 @@ processing jobs on `DOCUMENT_PROCESSING_TIMER_SCHEDULE`; locally, use
 `DOCUMENT_PROCESSING_MAX_WORKERS` controls the default worker count for CLI and Azure
 Function drains.
 
+If typed primitive rows are missing for already processed local evidence, run
+`bun run data:backfill-primitives`. The backfill writes only evidence-grounded rows
+from existing baselines, report facts, regression findings, and extracted document
+text; documents without enough evidence are marked as producing no rows rather than
+filled with placeholders.
+
 An optional local feature extractor service lives in `feature_extractor/`. It can read
 `contracts/{document_id}/text.json`, generate a layered summary, classify PSC/NAICS,
 extract structured primitives (deliverable, financial, decisions, issue, personnel) into
@@ -200,6 +206,9 @@ Kind-specific routing runs after the generic extraction pass. CPARS-style docume
 populate `cpars_ratings`, modifications populate `contract_primitives_decisions` and
 append `baseline_revisions`, and GAO/OIG reports are stored as official
 `external_source_refs` for the linked contract instead of becoming baseline evidence.
+Processed documents also run a deterministic typed-primitive backfill so existing
+baselines, report facts, regression findings, and extracted text populate the same
+deliverable, financial, issue, and personnel tables used by analysis.
 
 The knowledge wiki index is a server-backed Grokipedia-style layer for officials. It
 mines seeded local fixture contracts, processed report evidence, and the generated
@@ -304,6 +313,17 @@ The portal can request `process_inline=true` for source-contract/logging workflo
 the backend immediately runs the same AI-first processor that extracts pages, facts,
 baselines, regressions, hypotheses, and auto-scaffolded contracts where supported.
 Otherwise, the queued processor still runs the full analysis path later.
+
+The official home page consumes `/api/portfolio/themes` for portfolio KPIs and
+cross-contract themes. The endpoint aggregates backend evidence from processed
+contracts rather than the prototype UI fixtures: regression findings, hypotheses,
+report facts, and performance signals drive the displayed theme counts and linked
+contract rows.
+
+Contract detail and contractor upload views read `/api/contracts/{contract_id}/deliverables`
+for schedule evidence. The endpoint returns an explicit availability state such as
+`available`, `processing_pending`, `not_extracted`, or `source_absent`, so the portal
+can show missing evidence honestly instead of substituting fixture deliverables.
 
 Email or portal uploads that cannot match an existing contract remain unmatched unless
 processing can safely scaffold a new parent. Auto-scaffolding only runs for high

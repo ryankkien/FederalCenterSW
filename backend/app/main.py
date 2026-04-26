@@ -32,6 +32,7 @@ from app.observability import (
     get_logger,
     instrument_fastapi,
 )
+from app.portfolio import router as portfolio_router
 from app.processing_api import router as processing_router
 
 configure_observability("backend-api")
@@ -64,6 +65,7 @@ app.include_router(processing_router)
 app.include_router(admin_router)
 app.include_router(analysis_router)
 app.include_router(knowledge_router)
+app.include_router(portfolio_router)
 
 
 def _log_ai_runtime() -> None:

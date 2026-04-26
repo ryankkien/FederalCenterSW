@@ -786,6 +786,39 @@ class ContractPrimitiveDeliverable(Base):
     days_late: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
 
+class ContractPrimitiveFinancial(Base):
+    __tablename__ = "contract_primitives_financial"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    extraction_run_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("primitive_extraction_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    contract_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("contracts.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    source_doc_ids: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True)
+    period_label: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
+    period_end_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    planned_value: Mapped[Optional[float]] = mapped_column(Numeric, nullable=True)
+    earned_value: Mapped[Optional[float]] = mapped_column(Numeric, nullable=True)
+    actual_cost: Mapped[Optional[float]] = mapped_column(Numeric, nullable=True)
+    budget_at_completion: Mapped[Optional[float]] = mapped_column(Numeric, nullable=True)
+    estimate_at_completion: Mapped[Optional[float]] = mapped_column(Numeric, nullable=True)
+    estimate_to_complete: Mapped[Optional[float]] = mapped_column(Numeric, nullable=True)
+    cost_variance: Mapped[Optional[float]] = mapped_column(Numeric, nullable=True)
+    schedule_variance: Mapped[Optional[float]] = mapped_column(Numeric, nullable=True)
+    cpi: Mapped[Optional[float]] = mapped_column(Numeric, nullable=True)
+    spi: Mapped[Optional[float]] = mapped_column(Numeric, nullable=True)
+    percent_complete: Mapped[Optional[float]] = mapped_column(Numeric, nullable=True)
+    cumulative_obligations: Mapped[Optional[float]] = mapped_column(Numeric, nullable=True)
+
+
 class ContractPrimitiveDecision(Base):
     __tablename__ = "contract_primitives_decisions"
 
@@ -812,6 +845,61 @@ class ContractPrimitiveDecision(Base):
     scope_change_description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     decision_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     deciding_party: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+
+
+class ContractPrimitiveIssue(Base):
+    __tablename__ = "contract_primitives_issues"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    extraction_run_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("primitive_extraction_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    contract_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("contracts.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    source_doc_ids: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True)
+    period_label: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
+    issue_id: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    category: Mapped[Optional[str]] = mapped_column(String(60), nullable=True, index=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    severity: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    responsible_party: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    date_opened: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    date_resolved: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    recurrence_flag: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+
+class ContractPrimitivePersonnel(Base):
+    __tablename__ = "contract_primitives_personnel"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    extraction_run_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("primitive_extraction_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    contract_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("contracts.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    source_doc_ids: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True)
+    period_label: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
+    role: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    labor_category: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    fte_planned: Mapped[Optional[float]] = mapped_column(Numeric, nullable=True)
+    fte_actual: Mapped[Optional[float]] = mapped_column(Numeric, nullable=True)
+    staffing_gap_flag: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
 class CparsRating(Base):

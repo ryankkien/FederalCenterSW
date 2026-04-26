@@ -22,6 +22,7 @@ from app.contract_analysis import apply_contract_analysis_pipeline, classify_doc
 from app.document_assets import TEXT_JSON_FILENAME
 from app.feature_extractor_client import FeatureExtractorStepResult, trigger_feature_extractor
 from app.observability import get_logger, log_context
+from app.primitive_backfill import backfill_contract_primitives
 
 logger = get_logger(__name__)
 
@@ -354,6 +355,8 @@ def _process_job_with_status(
             ai_provider or NullAIProvider(),
             job=job,
         )
+        if result.status == "processed":
+            backfill_contract_primitives(session, document_id=_string_attr(document, "id", "document_id"))
         _set_first_existing(job, ("status", "state"), _job_status_for_result(result))
         _set_first_existing(job, ("result_json", "output_json", "processing_result"), _model_dump(result))
         _set_first_existing(job, ("output_blob_path", "result_blob_path"), result.output_blob_path)

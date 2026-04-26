@@ -7,7 +7,23 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import Base, get_db
 from app.main import app
-from app.models import Contract, ContractAccessGrant, DocumentProcessingJob, DocumentUpload
+from app.models import (
+    BaselineObligation,
+    Contract,
+    ContractAccessGrant,
+    ContractBaseline,
+    ContractPrimitiveDeliverable,
+    ContractPrimitiveFinancial,
+    ContractPrimitiveIssue,
+    ContractPrimitivePersonnel,
+    DocumentPage,
+    DocumentProcessingJob,
+    DocumentReportFact,
+    DocumentUpload,
+    PerformanceSignal,
+    RegressionFinding,
+)
+from app.primitive_backfill import backfill_contract_primitives
 
 
 def test_contract_routes_include_official_fallback_and_agent_citations(tmp_path, monkeypatch) -> None:
@@ -165,6 +181,270 @@ def test_official_can_create_contract_record_for_portal(tmp_path) -> None:
         json={"contract_number": "N00024-26-C-9002", "title": "Unauthorized"},
     )
     assert contractor_response.status_code == 403
+
+
+def test_portfolio_themes_are_built_from_backend_evidence(tmp_path) -> None:
+    client = _client_with_test_db(tmp_path)
+    official_token = _token(client, "official")
+
+    with next(_test_db_session(tmp_path)) as db:
+        db.add_all(
+            [
+                Contract(
+                    id="theme-c1",
+                    contract_number="N00024-26-C-9101",
+                    title="Logistics Support East",
+                    psc_code="R706",
+                    office_name="PMS 325",
+                    metadata_json={"obligated_value": "1000000"},
+                ),
+                Contract(
+                    id="theme-c2",
+                    contract_number="N00024-26-C-9102",
+                    title="Admin Support West",
+                    psc_code="R408",
+                    office_name="PMS 325",
+                    metadata_json={"obligated_value": "2500000"},
+                ),
+                Contract(
+                    id="theme-c3",
+                    contract_number="N00024-26-C-9103",
+                    title="Cyber Support",
+                    psc_code="D310",
+                    office_name="NAVWAR",
+                    metadata_json={"obligated_value": "4000000"},
+                ),
+                RegressionFinding(
+                    id="finding-1",
+                    contract_id="theme-c1",
+                    finding_type="schedule_regression",
+                    title="Weekly CDRL report filed late",
+                    summary="The report slipped by 5 days against the required cadence.",
+                    severity="high",
+                    status="open",
+                ),
+                PerformanceSignal(
+                    id="signal-1",
+                    contract_id="theme-c2",
+                    signal_type="schedule",
+                    label="Deliverable slip",
+                    summary="Monthly deliverable was late and pushed downstream review dates.",
+                    severity="medium",
+                ),
+                DocumentReportFact(
+                    id="fact-1",
+                    document_upload_id="theme-c3-doc",
+                    contract_id="theme-c3",
+                    fact_type="cost_variance",
+                    label="EAC growth",
+                    value_text="EAC increased after invoice variance review.",
+                ),
+            ]
+        )
+        db.commit()
+
+    response = client.get(
+        "/api/portfolio/themes",
+        headers={"Authorization": f"Bearer {official_token}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["kpis"]["source"] == "backend"
+    assert body["kpis"]["flagged"] == 3
+    assert body["kpis"]["evidence_count"] == 3
+    titles = {theme["title"] for theme in body["themes"]}
+    assert "Schedule and deliverable slip" in titles
+    assert "Cost or financial drift" in titles
+    schedule_theme = next(theme for theme in body["themes"] if theme["title"] == "Schedule and deliverable slip")
+    assert schedule_theme["flagged"] == 2
+    assert schedule_theme["total"] == 2
+    assert schedule_theme["value_flagged"] == "3500000"
+    assert {contract["id"] for contract in schedule_theme["contracts"]} == {"theme-c1", "theme-c2"}
+
+
+def test_deliverables_endpoint_reports_source_absence(tmp_path) -> None:
+    client = _client_with_test_db(tmp_path)
+    official_token = _token(client, "official")
+
+    with next(_test_db_session(tmp_path)) as db:
+        db.add(
+            Contract(
+                id="empty-contract",
+                contract_number="N00024-26-C-9201",
+                title="No Documents Yet",
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/api/contracts/empty-contract/deliverables",
+        headers={"Authorization": f"Bearer {official_token}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["availability"] == "source_absent"
+    assert body["groups"] == []
+    assert body["limitations"]
+
+
+def test_backfill_source_deliverables_populates_deliverables_endpoint(tmp_path) -> None:
+    client = _client_with_test_db(tmp_path)
+    official_token = _token(client, "official")
+
+    with next(_test_db_session(tmp_path)) as db:
+        db.add(
+            Contract(
+                id="deliverable-contract",
+                contract_number="N00024-26-C-9202",
+                title="Deliverable Contract",
+            )
+        )
+        db.add(
+            DocumentUpload(
+                id="source-doc",
+                contract_id="deliverable-contract",
+                title="Base award",
+                document_type="Source Contract",
+                document_kind="source_contract",
+                original_filename="base.pdf",
+                content_type="application/pdf",
+                size_bytes=5,
+                blob_path="contracts/source-doc/main.pdf",
+                uploader_id="official-demo",
+                uploader_role="official",
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+        db.add(
+            ContractBaseline(
+                id="baseline-1",
+                contract_id="deliverable-contract",
+                source_document_upload_id="source-doc",
+                summary="Baseline includes CDRL A001.",
+            )
+        )
+        db.add(
+            BaselineObligation(
+                id="obligation-1",
+                baseline_id="baseline-1",
+                contract_id="deliverable-contract",
+                source_document_upload_id="source-doc",
+                obligation_type="deliverable",
+                title="Weekly status report",
+                description="Submit CDRL A001 weekly status reports.",
+                reference_text="CDRL A001 Weekly Status Report",
+            )
+        )
+        db.flush()
+        totals = backfill_contract_primitives(db, contract_id="deliverable-contract")
+        db.commit()
+
+    assert totals["deliverable"] == 1
+
+    response = client.get(
+        "/api/contracts/deliverable-contract/deliverables",
+        headers={"Authorization": f"Bearer {official_token}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["availability"] == "available"
+    assert body["groups"][0]["cdrl_item"] == "A001"
+    assert body["groups"][0]["items"][0]["status"] == "requirement"
+
+
+def test_backfill_report_primitives_from_existing_evidence(tmp_path) -> None:
+    client = _client_with_test_db(tmp_path)
+    _token(client, "official")
+
+    with next(_test_db_session(tmp_path)) as db:
+        db.add(
+            Contract(
+                id="report-contract",
+                contract_number="N00024-26-C-9203",
+                title="Report Contract",
+            )
+        )
+        db.add(
+            DocumentUpload(
+                id="report-doc",
+                contract_id="report-contract",
+                title="Weekly status report",
+                document_type="Weekly Status",
+                document_kind="weekly_report",
+                report_period_end=datetime(2026, 4, 24, tzinfo=timezone.utc).date(),
+                original_filename="week.pdf",
+                content_type="application/pdf",
+                size_bytes=5,
+                blob_path="contracts/report-doc/main.pdf",
+                uploader_id="contractor-demo",
+                uploader_role="contractor",
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+        db.add(
+            DocumentPage(
+                id="page-1",
+                document_upload_id="report-doc",
+                page_number=1,
+                text="CDRL A001 was submitted 4 days late and accepted. EAC $1.2M. planned 3 FTE actual 2 FTE.",
+            )
+        )
+        db.add_all(
+            [
+                DocumentReportFact(
+                    id="report-fact-del",
+                    document_upload_id="report-doc",
+                    contract_id="report-contract",
+                    fact_type="deliverable",
+                    label="CDRL A001",
+                    value_text="Submitted 4 days late and accepted.",
+                ),
+                DocumentReportFact(
+                    id="report-fact-cost",
+                    document_upload_id="report-doc",
+                    contract_id="report-contract",
+                    fact_type="cost_variance",
+                    label="EAC",
+                    value_text="EAC $1.2M",
+                ),
+                DocumentReportFact(
+                    id="report-fact-staff",
+                    document_upload_id="report-doc",
+                    contract_id="report-contract",
+                    fact_type="personnel",
+                    label="Program manager staffing",
+                    value_text="planned 3 FTE actual 2 FTE with staffing gap",
+                ),
+                RegressionFinding(
+                    id="finding-report-1",
+                    contract_id="report-contract",
+                    document_upload_id="report-doc",
+                    finding_type="schedule_regression",
+                    title="Late report",
+                    summary="CDRL A001 was late.",
+                    severity="medium",
+                    status="open",
+                ),
+            ]
+        )
+        db.flush()
+        totals = backfill_contract_primitives(db, document_id="report-doc")
+        db.commit()
+
+        assert totals["deliverable"] == 1
+        assert totals["financial"] == 1
+        assert totals["issues"] == 1
+        assert totals["personnel"] == 1
+        deliverable = db.query(ContractPrimitiveDeliverable).one()
+        assert deliverable.contract_id == "report-contract"
+        assert deliverable.cdrl_item == "A001"
+        assert deliverable.days_late == 4
+        assert db.query(ContractPrimitiveFinancial).one().estimate_at_completion == 1200000
+        assert db.query(ContractPrimitiveIssue).one().issue_id == "finding-report-1"
+        assert db.query(ContractPrimitivePersonnel).one().staffing_gap_flag is True
 
 
 def test_processing_jobs_and_unmatched_admin_access(tmp_path) -> None:

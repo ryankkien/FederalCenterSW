@@ -137,6 +137,22 @@ logging a contract from a source document. That path stores the artifact, create
 processing job, and drains it immediately through the same AI-first extraction pipeline
 used by the background worker.
 
+The official home page reads `/api/portfolio/themes` for cross-contract themes and
+portfolio KPIs. Those themes are computed from backend evidence already produced by
+processing, including regression findings, hypotheses, report facts, and performance
+signals. If no processed evidence exists, the portal shows an empty backend-evidence
+state instead of treating the prototype theme fixtures as real data.
+
+Contract and contractor deliverable schedules are loaded from
+`/api/contracts/{contract_id}/deliverables`. The response includes an availability
+state, so missing source documents, pending processing, or non-extractable evidence are
+shown as limitations rather than replaced with generated CDRL rows. To populate typed
+primitive rows for evidence that was processed before this endpoint existed, run:
+
+```sh
+bun run data:backfill-primitives
+```
+
 During processing, unmatched uploads can auto-create a parent contract only when the
 document is classified as `source_contract` or `task_order` with high confidence and a
 single contract number is extracted by the regex matcher. The new contract is stored
@@ -250,6 +266,11 @@ after processing jobs complete. The backend calls `/summarize` first and then
 `/extract-primitives` with the document classification from the processing run.
 Extractor failures are logged to `processing_run_steps` and `audit_events` but do not
 roll back the completed processing job.
+
+The backend also has an internal deterministic primitive backfill for local and
+historical data. It uses only already stored baseline obligations, report facts,
+regression findings, and extracted text, and leaves no-row documents marked as
+unavailable rather than inventing deliverables or performance values.
 
 After primitive extraction succeeds for a document with a known `contract_id`, the
 service calls the backend internal analysis trigger when `BACKEND_API_URL` and
