@@ -28,8 +28,9 @@ from sqlalchemy.orm import Session
 
 from app.blob_storage import BlobStorage, get_blob_storage
 from app.database import SessionLocal, create_db_schema
-from app.documents import ALLOWED_CONTENT_TYPES, ALLOWED_EXTENSIONS, _clean_filename
-from app.models import DocumentUpload
+from app.document_assets import store_contract_document
+from app.document_files import ALLOWED_CONTENT_TYPES, ALLOWED_EXTENSIONS, clean_filename
+from app.models import DocumentProcessingJob, DocumentUpload
 
 
 DEFAULT_OUTPUT_PATH = Path(__file__).resolve().parents[1] / "data" / "email_intake.jsonl"
@@ -327,21 +328,43 @@ def save_email_documents(
             if db.get(DocumentUpload, document_id) is not None:
                 continue
 
-            blob_path = f"documents/{config.default_uploader_id}/{document_id}/{attachment.filename}"
-            storage.upload_bytes(blob_path, attachment.data, attachment.content_type)
+            stored = store_contract_document(
+                storage=storage,
+                document_id=document_id,
+                original_filename=attachment.filename,
+                content_type=attachment.content_type,
+                data=attachment.data,
+                source="email",
+            )
             db.add(
                 DocumentUpload(
                     id=document_id,
                     title=_document_title(record, attachment),
                     document_type=config.default_document_type,
+                    document_kind="email_context",
+                    intake_source="email",
                     notes=_document_notes(record),
                     original_filename=attachment.filename,
-                    content_type=attachment.content_type,
+                    content_type=stored.content_type,
                     size_bytes=len(attachment.data),
-                    blob_path=blob_path,
+                    blob_path=stored.blob_path,
+                    text_blob_path=stored.text_blob_path,
+                    source_sha256=hashlib.sha256(attachment.data).hexdigest(),
+                    email_message_id=record.message_id,
+                    match_status="pending",
+                    processing_status="queued",
                     uploader_id=config.default_uploader_id,
                     uploader_role="contractor",
                     created_at=_record_datetime(record) or datetime.now(timezone.utc),
+                )
+            )
+            db.add(
+                DocumentProcessingJob(
+                    id=str(uuid5(NAMESPACE_URL, f"processing:{document_id}")),
+                    document_upload_id=document_id,
+                    job_type="document_analysis",
+                    status="queued",
+                    metadata_json={"source": "email_intake"},
                 )
             )
             saved_count += 1
@@ -667,7 +690,7 @@ def _extract_attachment_payloads(raw_message: bytes) -> List[AttachmentPayload]:
         if not _is_attachment(part):
             continue
         payload = part.get_payload(decode=True) or b""
-        filename = _clean_filename(part.get_filename() or f"attachment-{index}")
+        filename = clean_filename(part.get_filename() or f"attachment-{index}")
         attachments.append(
             AttachmentPayload(
                 filename=filename,

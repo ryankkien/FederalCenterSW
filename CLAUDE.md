@@ -2,72 +2,92 @@
 
 ## Database Schema
 
-> **Rule:** Any change to an existing schema or introduction of a new schema must be reflected in this file immediately — before the task is considered complete. If a table, column, enum, index, or relationship is added, removed, or modified anywhere in the codebase, update the relevant section below. If a schema is referenced that does not yet appear here, add it.
+> **Rule:** Any change to an existing schema or introduction of a new schema must be
+> reflected in this file immediately before the task is considered complete. If a
+> table, column, enum, index, or relationship is added, removed, or modified anywhere
+> in the codebase, update the relevant section below and the full SQL mirror.
 
-Full schema: [psql/schema.sql](psql/schema.sql)
+Full SQL mirror: [psql/schema.sql](psql/schema.sql)
+
+Alembic migrations under `backend/migrations/versions/` are authoritative for live
+database upgrades. SQLAlchemy models in `backend/app/models.py` are the runtime schema
+contract. The SQL mirror is maintained for review and local psql reference.
 
 ### Extensions
-- **pgvector** — enables the `VECTOR` column type and HNSW indexing for similarity search
 
-### Enums
+- `vector`: PostgreSQL pgvector extension for chunk embeddings and HNSW cosine search.
 
-**`event_type`** — stages in a document's processing pipeline
-`Upload` | `OCR` | `Summary` | `Keywords` | `BI` | `Index` | `Chunking`
+### Core Contract Tables
 
-**`result_type`** — outcome of a pipeline event
-`success` | `fail`
+- `contracts`: contract master records, agency/vendor/category metadata, security
+  level, and optional source record blob path.
+- `contract_access_grants`: RBAC grants keyed by `contract_id`, `principal_id`,
+  `principal_type`, and role. Entra user and group ids map to `principal_id`.
+- `document_uploads`: canonical upload/intake rows. Hard parentage lives only on
+  `document_uploads.contract_id`.
+- `email_intake_messages`: append-only IMAP intake audit rows.
+- `audit_events`: append-only admin, matching, status, and workflow audit trail.
 
-### Tables
+### Processing Store
 
-#### `document_types`
-Mutable lookup table acting as a soft enum for document classification.
+- `document_processing_jobs`: queued/running/completed processing jobs.
+- `processing_runs`: run-level extraction, matching, classification, baseline,
+  regression, hypothesis, semantic-link, and research metadata.
+- `processing_run_steps`: step-level logs with status and optional metadata.
+- `document_pages`: page-level extracted text, extraction status, offsets, warnings,
+  and errors.
+- `document_chunks`: contract-scoped text chunks for retrieval and evidence links.
+- `chunk_embeddings`: pgvector embeddings per chunk/model.
+- `document_classification_decisions`: append-only classifier decisions, including
+  document kind, modification kind, confidence, rationale, and source run.
+- `document_entities`: extracted contract numbers, RFIs, people, offices, dates,
+  dollar values, deliverables, facilities, clauses, normalized values, citations, and
+  evidence hashes.
+- `document_report_facts`: report periods, counts, costs, schedule values, labor
+  metrics, deliverables, government-action items, quotes, and evidence hashes.
 
-| Column | Type | Constraints |
-|--------|------|-------------|
-| `id` | SERIAL | PK |
-| `name` | TEXT | NOT NULL, UNIQUE |
+### Analyst Tables
 
-#### `documents`
-Core metadata record for each ingested document.
+- `contract_baselines`: current interpreted baseline summary per contract.
+- `baseline_obligations`: baseline obligations with document/page/chunk/run citations.
+- `baseline_revisions`: append-only baseline history.
+- `regression_findings`: citation-backed baseline/prior-report regressions.
+- `contract_hypotheses`: proposed, investigating, supported, contradicted, or closed
+  hypothesis records.
+- `hypothesis_evidence`: uploaded-file or external-source evidence linked to
+  hypotheses. Only supported hypotheses may be presented as supported findings.
+- `investigation_runs`: official-source research runs.
+- `external_source_refs`: allowlisted official external citations stored separately
+  from uploaded-file evidence.
+- `contract_similarity_links`: cross-contract semantic relationships.
+- `document_semantic_links`: cross-document semantic relationships; these must not
+  rewrite `document_uploads.contract_id`.
 
-| Column | Type | Constraints |
-|--------|------|-------------|
-| `uuid` | UUID | PK, default `gen_random_uuid()` |
-| `filename` | TEXT | NOT NULL |
-| `title` | TEXT | NOT NULL |
-| `date_submitted` | TIMESTAMPTZ | NOT NULL, default `now()` |
-| `doc_type_id` | INTEGER | FK → `document_types.id`, nullable |
-| `summary_embedding` | VECTOR(1536) | nullable |
+### Earlier AI Knowledge Tables
 
-**Indices:** `doc_type_id`, `date_submitted`, `summary_embedding` (HNSW cosine)
-
-#### `chunks`
-Stores ordered chunks of a document for retrieval.
-
-| Column | Type | Constraints |
-|--------|------|-------------|
-| `doc_id` | UUID | FK → `documents.uuid`, CASCADE DELETE |
-| `chunk_index` | INTEGER | NOT NULL |
-
-**PK:** `(doc_id, chunk_index)`
-
-#### `document_log`
-Audit trail of pipeline events per document.
-
-| Column | Type | Constraints |
-|--------|------|-------------|
-| `doc_id` | UUID | FK → `documents.uuid`, CASCADE DELETE |
-| `timestamp` | TIMESTAMPTZ | NOT NULL, default `now()` |
-| `event` | event_type | NOT NULL |
-| `result` | result_type | NOT NULL |
-
-**PK:** `(doc_id, timestamp)`
-**Indices:** `event`, `timestamp`
+- `performance_signals`: extracted contract performance signals.
+- `contract_topics`: analyst-curated contract topics.
+- `topic_evidence`: evidence linked to topics.
+- `topic_links`: topic-to-topic semantic links.
+- `contract_topic_revisions`: append-only topic revision history.
 
 ### Relationships
 
-```
-document_types ──< documents ──< chunks
-                        │
-                        └──< document_log
+```text
+contracts
+  ├─< contract_access_grants
+  ├─< document_uploads
+  │    ├─< document_pages
+  │    ├─< document_chunks ──< chunk_embeddings
+  │    ├─< document_match_decisions
+  │    ├─< document_processing_jobs ──< processing_runs ──< processing_run_steps
+  │    ├─< document_classification_decisions
+  │    ├─< document_entities
+  │    └─< document_report_facts
+  ├─< contract_baselines ──< baseline_obligations
+  ├─< regression_findings
+  ├─< contract_hypotheses ──< hypothesis_evidence
+  ├─< investigation_runs ──< external_source_refs
+  ├─< contract_similarity_links
+  └─< contract_topics ──< topic_evidence/topic_links/contract_topic_revisions
 ```

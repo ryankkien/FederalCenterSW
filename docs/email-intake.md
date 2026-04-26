@@ -34,7 +34,7 @@ bun run email:intake -- --limit 5 --commit
 
 Commit mode writes the JSON audit record, stores supported attachments as portal documents, and then moves the email to the `Processed` mailbox. If a processing error occurs, it moves the email to `Failed`.
 
-Until real contractor accounts are added, emailed attachments are assigned to `EMAIL_INTAKE_DEFAULT_UPLOADER_ID`, which defaults to the mock contractor `contractor-demo`. That means they appear on the mock contractor page and on the official review page. Unsupported attachment types are skipped; the accepted types match the web upload form: PDF, DOC, DOCX, TXT, CSV, XLSX, PNG, JPG, and JPEG.
+Until real contractor accounts are added, emailed attachments are assigned to `EMAIL_INTAKE_DEFAULT_UPLOADER_ID`, which defaults to the mock contractor `contractor-demo`. That means they appear on the mock contractor portal and on the official analyst workspace. Unsupported attachment types are skipped; the accepted types match the web upload form: PDF, DOC, DOCX, TXT, CSV, XLSX, PNG, JPG, and JPEG.
 
 ## Auto Reply
 

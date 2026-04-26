@@ -26,13 +26,17 @@ users. Future work should build toward:
 
 1. Contract record foundation with one structured JSON-style record per contract,
    role-aware Entra ID/RBAC access, security-level visibility, contract metadata,
-   OCR-ed contract text, report references, and official government category codes.
+   OCR-ed contract text, report references, and official government identifiers and
+   category codes such as DUNS, PSC, and NAICS.
 2. Report intake through email, automated contract matching, manual portal upload, and
    scanned report upload by authorized contractor or federal users.
-3. Document processing through OCR, named entity recognition, and LLM-assisted review.
-4. Contract-level UI showing contract records, ingested reports, processing outputs,
+3. CPARS and IPMDAR support: CPARS unclassified evaluation narratives/ratings, IPMDAR
+   CPD and SPD JSON datasets, and IPMDAR narrative performance reports.
+4. Document processing through OCR, named entity recognition, and LLM-assisted review;
+   structured JSON sources should bypass OCR and use direct schema-based ingestion.
+5. Contract-level UI showing contract records, ingested reports, processing outputs,
    and extracted performance signals.
-5. Cross-contract aggregation with dashboards and reports for lessons learned,
+6. Cross-contract aggregation with dashboards and reports for lessons learned,
    category-level comparisons, risks, delays, staffing issues, deliverables, costs,
    timeliness, inconsistencies, successes, and benchmarking.
 
@@ -58,9 +62,6 @@ same-origin routing can both work.
 - `backend/app/main.py` creates the FastAPI app, configures CORS, and defines API routes.
 - `backend/app/email_intake.py` contains the IMAP email intake worker, message parsing,
   JSONL/Azure Blob stub persistence, and auto-reply logic.
-- `backend/app/discord_html_renderer.py` contains the Discord bot worker that renders
-  posted HTML snippets to PNG through Playwright and posts them back through a Discord
-  webhook.
 - `backend/function_app.py` is the Azure Functions timer-trigger entry point for
   running email intake in Azure.
 - `backend/host.json` contains Azure Functions host configuration.
@@ -95,6 +96,9 @@ logic in separate modules under `backend/app/` and cover it with pytest tests.
 - Local service dependencies live in `compose.yaml`.
 - `bun run local:up` starts local PostgreSQL and Azurite and creates the local
   `app-assets` Blob container.
+- Local PostgreSQL uses a pgvector-enabled Postgres 16 image. Run `bun run db:upgrade`
+  after starting local services so Alembic creates the app schema and `vector`
+  extension.
 - `backend/.env.local.example` is the local-only env template.
 - `backend/.env.local` is ignored and should contain local-only values.
 - Keep local and cloud mirrored by env variable names, database name, database user,
@@ -159,6 +163,7 @@ bun run dev:backend
 Run checks:
 
 ```sh
+bun run db:upgrade
 bun run build
 bun run lint
 bun run test
@@ -172,10 +177,10 @@ bun run email:intake -- --limit 5
 
 Use `--commit` only after dry-run output has been checked.
 
-Run the Discord HTML renderer worker:
+Build the file-first Navy service fixture corpus:
 
 ```sh
-bun run discord:html-renderer
+bun run corpus:build-synthetic
 ```
 
 Preview or apply infrastructure:
@@ -226,20 +231,63 @@ bun run infra:deploy
 
 ## Current Feature Notes
 
-- `/api/health` is the basic backend health endpoint consumed by the starter frontend.
+- `/api/health` is the basic backend health endpoint.
+- New portal uploads, fixture documents, and committed email uploads store blobs in
+  immutable document artifact folders:
+  `contracts/{document_id}/main.{ext}` and `contracts/{document_id}/text.json`.
+  The hard parent contract is stored in Postgres on `document_uploads.contract_id`.
+- Contract hard-link parentage lives on `document_uploads.contract_id`. Cross-contract
+  and cross-document pattern relationships live in semantic link tables and must not
+  rewrite the hard parent contract.
+- The contract analyst pipeline stores page text, classifier decisions, extracted
+  entities, report facts, interpreted baselines, baseline obligations, baseline
+  revisions, regression findings, hypotheses, hypothesis evidence, investigation
+  runs, official external-source references, processing run logs, and semantic
+  similarity links.
+- The knowledge wiki index stores official-source ingestion runs, source records,
+  wiki nodes, edges, citations, and contractor evidence profiles. The frontend uses
+  `/api/wiki/*` for the Grokipedia workspace; it should not rebuild the full wiki
+  client-side from every contract analysis endpoint.
+- External research references are restricted in v1 to official sources such as `.gov`,
+  `.mil`, Acquisition.gov, Federal Register, GAO/OIG, Congress.gov, and agency domains.
+  Uploaded contract-file evidence remains authoritative for contract-specific findings.
+- Official-source mining should be bulk-first when possible. For Department of Navy
+  service-contract discovery, prefer local USAspending/SAM/govinfo/Regulations bulk
+  exports and PSC service-family filters before keyed live API drill-downs.
+- Federal Register source records should come from govinfo FR XML/ZIP bulk mirrors and
+  be filtered to high-signal acquisition context such as FAR, DFARS, OFPP, and Navy
+  acquisition documents.
+- SAM.gov public Contract Opportunities bulk rows are discovery/source evidence.
+  Store Navy service solicitations, presolicitations, sources-sought notices, award
+  notices, and related notices as source records until linked to a first-class contract
+  record.
+- `bun run corpus:build-synthetic` creates an ignored file corpus under
+  `backend/data/corpus/navy-service-v1/` from the WWR, AGOR, and Natalie fixture
+  families. Treat `real_fixture` downloaded anchors separately from
+  `synthetic_fixture` reports, CPARS-style narratives, IPMDAR-style JSON, decision
+  logs, and cross-contract lesson notes.
+- Optional knowledge sources use `SAM_API_KEY`, `REGULATIONS_API_KEY`, and
+  `CPARS_IMPORT_DIR`; absent optional sources should be logged as unavailable rather
+  than failing ingestion. CPARS data must come from authorized exports/imports, not
+  unauthenticated scraping.
+- Product source planning includes CPARS unclassified evaluations, SAM.gov as a
+  potential source for contract-number discovery, IPMDAR CPD/SPD monthly JSON datasets,
+  and IPMDAR narrative performance reports. CPD/SPD JSON should be direct-ingested
+  without OCR; Word/PDF narratives should use OCR, NER, and LLM-assisted review.
+- Postgres is the canonical store for contracts, RBAC grants, processing jobs,
+  processing run steps, pages, chunks, embeddings, signals, entities, facts,
+  agent-curated topics, evidence links, topic revisions, and audit events. Blob Storage
+  stores source artifacts and extracted text artifacts.
+- AI processing is feature-flagged with `AI_PROCESSING_ENABLED` and
+  `AI_INLINE_PROCESSING_ENABLED`. Keep OpenAI and future provider keys out of git.
 - Email intake is currently a worker-style module, not a FastAPI route.
 - Email intake persistence is intentionally stubbed: it writes JSONL locally by default
   and can write JSON records to Azure Blob Storage when configured.
-- Discord HTML rendering is a worker-style bot, not a FastAPI route or GitHub Actions
-  workflow. It requires `DISCORD_HTML_RENDERER_BOT_TOKEN` to read messages and
-  `DISCORD_HTML_RENDERER_WEBHOOK_URL` to post rendered PNGs.
 - In Azure Functions, email intake should use Blob Storage for durable stub output
   because local function storage is ephemeral.
 - Cloud setup and Azure resource notes belong in `docs/cloud.md`.
 - Infrastructure workflow and drift policy belong in `docs/infra.md`.
 - Local development mirror instructions belong in `docs/local-dev.md`.
 - Email intake configuration and operating notes belong in `docs/email-intake.md`.
-- Discord HTML renderer configuration and operating notes belong in
-  `docs/discord-html-renderer.md`.
 - Product direction, users, contract records, intake sources, processing signals, and
   deliverables belong in `docs/product.md`.

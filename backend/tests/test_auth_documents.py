@@ -1,3 +1,6 @@
+import base64
+import json
+import time
 from typing import Dict, Generator
 
 from fastapi.testclient import TestClient
@@ -7,7 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.blob_storage import get_blob_storage
 from app.database import Base, get_db
 from app.main import app
-from app.models import DocumentUpload
+from app.models import Contract, ContractAccessGrant, DocumentUpload
 
 
 class FakeBlobStorage:
@@ -57,7 +60,8 @@ def test_contractor_uploads_document_and_official_can_review(tmp_path) -> None:
     body = upload.json()
     assert body["title"] == "Monthly progress report"
     assert body["original_filename"] == "progress.pdf"
-    assert len(fake_storage.files) == 1
+    assert len(fake_storage.files) == 2
+    assert body["stored_filename"] == "main.pdf"
 
     contractor_list = client.get(
         "/api/documents",
@@ -86,7 +90,7 @@ def test_contractor_uploads_document_and_official_can_review(tmp_path) -> None:
     )
     assert sas_url.status_code == 200
     assert sas_url.json() == {
-        "url": f"https://storage.example.test/app-assets/documents/contractor-demo/{body['id']}/progress.pdf?sas=true&expires=15",
+        "url": f"https://storage.example.test/app-assets/contracts/{body['id']}/main.pdf?sas=true&expires=15",
         "expires_in_minutes": 15,
     }
 
@@ -178,6 +182,65 @@ def test_contractor_cannot_create_sas_url_for_other_contractors_document(tmp_pat
     assert response.status_code == 404
 
 
+def test_entra_jwt_group_mapping_authorizes_contract_access(tmp_path, monkeypatch) -> None:
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    import jwt
+
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    issuer = "https://login.microsoftonline.com/test-tenant/v2.0"
+    audience = "api://fcsw-test"
+    monkeypatch.setenv("AUTH_MODE", "entra")
+    monkeypatch.setenv("ENTRA_ISSUER", issuer)
+    monkeypatch.setenv("ENTRA_AUDIENCE", audience)
+    monkeypatch.setenv("ENTRA_OFFICIAL_GROUP_IDS", "official-group")
+    monkeypatch.setenv("ENTRA_CONTRACTOR_GROUP_IDS", "contractor-group")
+    monkeypatch.setenv(
+        "ENTRA_JWKS_JSON",
+        json.dumps({"keys": [_public_jwk(private_key.public_key(), "test-key")]}),
+    )
+
+    client = _client_with_test_dependencies(tmp_path, FakeBlobStorage())
+    token = jwt.encode(
+        {
+            "iss": issuer,
+            "aud": audience,
+            "exp": int(time.time()) + 300,
+            "oid": "entra-user-1",
+            "preferred_username": "official@example.gov",
+            "name": "Entra Official",
+            "groups": ["official-group"],
+        },
+        private_key,
+        algorithm="RS256",
+        headers={"kid": "test-key"},
+    )
+
+    with next(_test_db_session(tmp_path)) as db:
+        db.add(Contract(id="contract-1", contract_number="N00000-26-C-0001", title="Granted Contract"))
+        db.add(
+            ContractAccessGrant(
+                id="grant-entra-group",
+                contract_id="contract-1",
+                principal_id="official-group",
+                principal_type="group",
+                role="viewer",
+            )
+        )
+        db.commit()
+
+    me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    contracts = client.get("/api/contracts", headers={"Authorization": f"Bearer {token}"})
+    mock_login = client.post("/api/auth/mock-login", json={"role": "official"})
+
+    assert me.status_code == 200
+    assert me.json()["id"] == "entra-user-1"
+    assert me.json()["role"] == "official"
+    assert me.json()["group_ids"] == ["official-group"]
+    assert contracts.status_code == 200
+    assert "contract-1" in {contract["id"] for contract in contracts.json()}
+    assert mock_login.status_code == 404
+
+
 def _client_with_test_dependencies(tmp_path, fake_storage: FakeBlobStorage) -> TestClient:
     def override_get_db() -> Generator[Session, None, None]:
         yield from _test_db_session(tmp_path)
@@ -205,3 +268,20 @@ def _token(client: TestClient, role: str) -> str:
     response = client.post("/api/auth/mock-login", json={"role": role})
     assert response.status_code == 200
     return response.json()["access_token"]
+
+
+def _public_jwk(public_key, kid: str) -> Dict[str, str]:
+    numbers = public_key.public_numbers()
+    return {
+        "kty": "RSA",
+        "use": "sig",
+        "kid": kid,
+        "alg": "RS256",
+        "n": _b64int(numbers.n),
+        "e": _b64int(numbers.e),
+    }
+
+
+def _b64int(value: int) -> str:
+    data = value.to_bytes((value.bit_length() + 7) // 8, "big")
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
