@@ -87,11 +87,12 @@ The repo includes four Azure-facing workflows:
 - `.github/workflows/function-deploy.yml` deploys the backend worker Function App from
   `backend/` on pushes to `main` that touch backend files, configures the non-secret
   Application Insights connection string, and can also be run manually.
-  The Function App currently hosts the email intake timer and the queued document
-  processing timer. The workflow always runs backend lint and tests. It skips the Azure
-  login, app setting writes, and Function App deployment when required deployment
-  variables or secrets are missing, so code validation can still pass in repositories
-  that have not completed Azure secret setup.
+  The Function App currently hosts the email intake timer, queued document processing
+  timer, and portfolio lessons timer. The portfolio timer writes semantic global
+  Insights lessons to `analysis_runs` for `/api/portfolio/lessons`. The workflow always
+  runs backend lint and tests. It skips the Azure login, app setting writes, and Function
+  App deployment when required deployment variables or secrets are missing, so code
+  validation can still pass in repositories that have not completed Azure secret setup.
 - `.github/workflows/feature-extractor-deploy.yml` builds `feature_extractor/`, pushes
   the `feature-extractor` image to ACR, and updates the dev Container App. It skips
   Azure login and deploy steps when the GitHub OIDC variable is missing, and skips the
@@ -124,6 +125,8 @@ environment variables:
 | `DOCUMENT_PROCESSING_TIMER_SCHEDULE` | Optional Azure Functions NCRONTAB schedule; defaults to every five minutes. |
 | `DOCUMENT_PROCESSING_LIMIT` | Optional queued document jobs to drain per timer tick; defaults to `25`. |
 | `DOCUMENT_PROCESSING_MAX_WORKERS` | Optional concurrent document processing workers per drain; defaults to `4`. |
+| `PORTFOLIO_LESSONS_TIMER_SCHEDULE` | Optional Azure Functions NCRONTAB schedule for semantic portfolio lesson refreshes; defaults to every six hours at minute 15. |
+| `PORTFOLIO_LESSONS_PERIOD` | Optional portfolio lesson evidence period; defaults to `fy26`. |
 
 Configure these GitHub repository secrets for deployment and notifications:
 

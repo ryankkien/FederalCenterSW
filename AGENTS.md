@@ -258,6 +258,11 @@ bun run infra:deploy
   KPIs and cross-contract themes. Theme counts and linked contracts should come from
   processed regression findings, hypotheses, report facts, and performance signals;
   prototype UI theme fixtures must not be presented as real backend evidence.
+- The global Insights page uses `/api/portfolio/lessons` for semantic portfolio
+  lessons and recommended controls. The Azure Function portfolio lessons timer writes
+  AI-authored or deterministic lesson runs into `analysis_runs` with
+  `run_type="portfolio_lessons"`; the API should prefer stored background runs and
+  fall back to deterministic evidence-theme lessons when no visible stored run exists.
 - Contract and contractor deliverable schedules use
   `GET /api/contracts/{contract_id}/deliverables`. The endpoint returns availability
   states such as `available`, `processing_pending`, `not_extracted`, and
@@ -326,6 +331,11 @@ bun run infra:deploy
   `CPARS_IMPORT_DIR`; absent optional sources should be logged as unavailable rather
   than failing ingestion. CPARS data must come from authorized exports/imports, not
   unauthenticated scraping.
+- Official-source enrichment can run as an opt-in post-processing pipeline step when
+  `OFFICIAL_ENRICHMENT_ENABLED=true`. It writes official source records and external
+  references, and only fills empty contract metadata from high-confidence exact API
+  matches. Uploaded contract-file evidence remains authoritative for contract-specific
+  findings.
 - Product source planning includes CPARS unclassified evaluations, SAM.gov as a
   potential source for contract-number discovery, IPMDAR CPD/SPD monthly JSON datasets,
   and IPMDAR narrative performance reports. CPD/SPD JSON should be direct-ingested
