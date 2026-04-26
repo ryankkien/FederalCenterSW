@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 from urllib.parse import urlparse
@@ -16,17 +17,21 @@ from app.models import (
     Contract,
     ContractBaseline,
     ContractHypothesis,
+    ContractPrimitiveDecision,
     ContractSimilarityLink,
+    CparsRating,
     DocumentSemanticLink,
     ExternalSourceRef,
     HypothesisEvidence,
     InvestigationRun,
+    PrimitiveExtractionRun,
     RegressionFinding,
 )
 
 
 BASELINE_DOCUMENT_KINDS = {"source_contract", "task_order", "modification", "email_context"}
 REPORT_DOCUMENT_KINDS = {"weekly_report", "monthly_report", "status_report"}
+CPARS_DOCUMENT_KINDS = {"cpars", "cpars_evaluation"}
 OFFICIAL_DOMAIN_SUFFIXES = (".gov", ".mil")
 OFFICIAL_DOMAINS = {
     "acquisition.gov",
@@ -34,6 +39,23 @@ OFFICIAL_DOMAINS = {
     "federalregister.gov",
     "gao.gov",
     "oversight.gov",
+}
+CPARS_RATINGS = {
+    "exceptional": "Exceptional",
+    "very good": "Very Good",
+    "satisfactory": "Satisfactory",
+    "marginal": "Marginal",
+    "unsatisfactory": "Unsatisfactory",
+    "not applicable": "Not Applicable",
+    "n/a": "Not Applicable",
+}
+CPARS_FACTOR_FIELDS = {
+    "quality": ("Quality", "quality_rating"),
+    "schedule": ("Schedule", "schedule_rating"),
+    "cost_control": ("Cost Control", "cost_control_rating"),
+    "management": ("Management", "management_rating"),
+    "small_business": ("Small Business", "small_business_rating"),
+    "regulatory_compliance": ("Regulatory Compliance", "regulatory_compliance_rating"),
 }
 
 
@@ -44,6 +66,7 @@ def apply_contract_analysis_pipeline(
     text: str,
     chunk_rows: Sequence[object],
     processing_run_id: Optional[str] = None,
+    ai_provider: Optional[object] = None,
 ) -> None:
     """Run deterministic v1 contract analysis against already-extracted text."""
 
@@ -77,6 +100,21 @@ def apply_contract_analysis_pipeline(
         if findings:
             update_semantic_links(session, contract_id)
 
+    if document_kind == "cpars":
+        handle_cpars_document(session, contract_id, document, text, ai_provider=ai_provider)
+    elif document_kind == "modification":
+        handle_modification_document(
+            session,
+            contract_id,
+            document,
+            text,
+            chunk_rows,
+            processing_run_id=processing_run_id,
+            ai_provider=ai_provider,
+        )
+    elif document_kind == "gao_oig_report":
+        handle_gao_oig_report_document(session, contract_id, document, text, ai_provider=ai_provider)
+
 
 def classify_document(document: object, text: str = "") -> Tuple[str, Optional[str]]:
     existing_kind = (_string_attr(document, "document_kind") or "").strip().lower()
@@ -93,7 +131,12 @@ def classify_document(document: object, text: str = "") -> Tuple[str, Optional[s
         if value
     ).lower()
 
-    if _contains_any(haystack, ("weekly status report", "weekly report", "_wsr-", " wsr-")):
+    if _contains_any(
+        haystack,
+        ("cpars", "contractor performance assessment", "performance assessment reporting system"),
+    ) or existing_kind in CPARS_DOCUMENT_KINDS:
+        document_kind = "cpars"
+    elif _contains_any(haystack, ("weekly status report", "weekly report", "_wsr-", " wsr-")):
         document_kind = "weekly_report"
     elif _contains_any(haystack, ("monthly status report", "monthly report", "_msr", " msr")):
         document_kind = "monthly_report"
@@ -118,12 +161,14 @@ def classify_document(document: object, text: str = "") -> Tuple[str, Optional[s
         "weekly_report",
         "monthly_report",
         "status_report",
+        "cpars",
+        "cpars_evaluation",
         "gao_oig_report",
         "policy_or_regulation",
         "email_context",
         "other",
     }:
-        document_kind = existing_kind
+        document_kind = "cpars" if existing_kind == "cpars_evaluation" else existing_kind
     else:
         document_kind = "other"
 
@@ -425,6 +470,175 @@ def detect_regression_findings(
     return [finding for finding in findings if finding is not None]
 
 
+def handle_cpars_document(
+    session: Session,
+    contract_id: Optional[str],
+    document: object,
+    text: str,
+    ai_provider: Optional[object] = None,
+) -> List[CparsRating]:
+    """Persist CPARS adjectival factor ratings for one evaluation document."""
+
+    document_id = _string_attr(document, "id")
+    if document_id:
+        existing = list(
+            session.scalars(select(CparsRating).where(CparsRating.doc_upload_id == document_id)).all()
+        )
+        if existing:
+            return existing
+
+    items = _provider_results(ai_provider, "extract_cpars_ratings", text)
+    if not items:
+        items = _extract_cpars_ratings_deterministic(text)
+
+    rows: List[CparsRating] = []
+    for item in items:
+        normalized = _normalize_cpars_item(item)
+        if not any(normalized.get(field) for _, field in CPARS_FACTOR_FIELDS.values()):
+            continue
+        row = CparsRating(
+            id=str(uuid4()),
+            contract_id=contract_id,
+            doc_upload_id=document_id,
+            evaluation_period=normalized.get("evaluation_period"),
+            evaluation_date=_parse_date_value(normalized.get("evaluation_date")),
+            quality_rating=normalized.get("quality_rating"),
+            schedule_rating=normalized.get("schedule_rating"),
+            cost_control_rating=normalized.get("cost_control_rating"),
+            management_rating=normalized.get("management_rating"),
+            small_business_rating=normalized.get("small_business_rating"),
+            regulatory_compliance_rating=normalized.get("regulatory_compliance_rating"),
+            overall_rating=normalized.get("overall_rating"),
+            narrative=normalized.get("narrative"),
+        )
+        session.add(row)
+        rows.append(row)
+    if rows:
+        session.flush()
+    return rows
+
+
+def handle_modification_document(
+    session: Session,
+    contract_id: Optional[str],
+    document: object,
+    text: str,
+    chunk_rows: Sequence[object],
+    processing_run_id: Optional[str] = None,
+    ai_provider: Optional[object] = None,
+) -> List[ContractPrimitiveDecision]:
+    """Persist modification decision primitives and append baseline revisions."""
+
+    if not contract_id:
+        return []
+    document_id = _string_attr(document, "id")
+    items = _provider_results(ai_provider, "extract_modification_decisions", text)
+    if not items:
+        items = _extract_modification_decisions_deterministic(text)
+    if not items:
+        return []
+    normalized_items = [_normalize_modification_item(item) for item in items]
+    new_items = [
+        item for item in normalized_items if not _decision_exists(session, contract_id, document_id, item)
+    ]
+    if not new_items:
+        return []
+
+    run = PrimitiveExtractionRun(
+        id=str(uuid4()),
+        contract_id=contract_id,
+        doc_upload_id=document_id,
+        period_label=_extract_period_label(text),
+        extracted_at=datetime.now(timezone.utc),
+        model=_provider_model_name(ai_provider) or "deterministic_v1",
+        status="success",
+    )
+    session.add(run)
+    session.flush()
+
+    rows: List[ContractPrimitiveDecision] = []
+    baseline = _ensure_contract_baseline(session, contract_id, document, text, chunk_rows, processing_run_id)
+    for normalized in new_items:
+        row = ContractPrimitiveDecision(
+            id=str(uuid4()),
+            extraction_run_id=run.id,
+            contract_id=contract_id,
+            source_doc_ids=[document_id] if document_id else [],
+            period_label=run.period_label,
+            decision_type=normalized.get("decision_type") or "modification",
+            mod_number=normalized.get("mod_number"),
+            mod_reason=normalized.get("mod_reason"),
+            value_change=_parse_numeric_value(normalized.get("value_change")),
+            pop_change_days=_parse_int_value(normalized.get("pop_change_days")),
+            scope_change_description=normalized.get("scope_change_description"),
+            decision_date=_parse_date_value(normalized.get("effective_date") or normalized.get("decision_date")),
+            deciding_party=normalized.get("deciding_party"),
+        )
+        session.add(row)
+        rows.append(row)
+        _append_modification_baseline_revision(
+            session,
+            baseline,
+            document_id,
+            row,
+            processing_run_id=processing_run_id,
+        )
+    if rows:
+        session.flush()
+    return rows
+
+
+def handle_gao_oig_report_document(
+    session: Session,
+    contract_id: Optional[str],
+    document: object,
+    text: str,
+    ai_provider: Optional[object] = None,
+) -> List[ExternalSourceRef]:
+    """Store GAO/OIG findings as official external references for the contract."""
+
+    items = _provider_results(ai_provider, "extract_gao_oig_findings", text)
+    if not items:
+        items = _extract_gao_oig_findings_deterministic(text)
+    rows: List[ExternalSourceRef] = []
+    for item in items:
+        citation_text = str(item.get("citation_text") or item.get("summary") or item.get("title") or "").strip()
+        if not citation_text:
+            continue
+        url = str(item.get("url") or "").strip() or _default_gao_oig_url(text)
+        if not is_official_external_source(url):
+            continue
+        evidence_hash = hashlib.sha256(
+            f"{contract_id}:{_string_attr(document, 'id')}:{url}:{citation_text}".encode("utf-8")
+        ).hexdigest()
+        if _external_source_ref_exists(session, evidence_hash):
+            continue
+        domain = urlparse(url).netloc.lower().split("@")[-1].split(":")[0].strip(".")
+        row = ExternalSourceRef(
+            id=str(uuid4()),
+            contract_id=contract_id,
+            url=url,
+            title=str(item.get("title") or _string_attr(document, "title") or "GAO/OIG contract report")[:300],
+            source_domain=domain,
+            source_type="gao_oig_report",
+            citation_text=_trim(citation_text, 1600),
+            is_official=True,
+            confidence=_bounded_float(item.get("confidence"), default=0.65),
+            evidence_hash=evidence_hash,
+            metadata_json={
+                "extractor": "kind_specific_v1",
+                "document_kind": "gao_oig_report",
+                "source_document_upload_id": _string_attr(document, "id"),
+                "evidence_kind": item.get("kind") or "finding",
+            },
+        )
+        session.add(row)
+        rows.append(row)
+    if rows:
+        session.flush()
+    return rows
+
+
 def upsert_hypothesis_from_finding(
     session: Session,
     finding: RegressionFinding,
@@ -620,6 +834,444 @@ def create_investigation_run(
             citation_text=source.get("citation_text"),
         )
     return run
+
+
+def _provider_results(ai_provider: Optional[object], method_name: str, text: str) -> List[Dict[str, Any]]:
+    if ai_provider is None:
+        return []
+    status = getattr(ai_provider, "status", None)
+    if not bool(getattr(status, "available", False)):
+        return []
+    method = getattr(ai_provider, method_name, None)
+    if method is None:
+        return []
+    try:
+        result = method(text)
+    except Exception:
+        return []
+    data = getattr(result, "data", None)
+    if data is None and isinstance(result, dict):
+        data = result
+    if not isinstance(data, dict):
+        return []
+    raw_items = data.get("results", [])
+    if not isinstance(raw_items, list):
+        return []
+    return [item for item in raw_items if isinstance(item, dict)]
+
+
+def _provider_model_name(ai_provider: Optional[object]) -> Optional[str]:
+    status = getattr(ai_provider, "status", None)
+    name = getattr(status, "name", None)
+    return str(name) if name else None
+
+
+def _extract_cpars_ratings_deterministic(text: str) -> List[Dict[str, Any]]:
+    item: Dict[str, Any] = {
+        "evaluation_period": _extract_evaluation_period(text),
+        "evaluation_date": _extract_labeled_date(text, ("evaluation date", "date")),
+        "narrative": _trim(" ".join(_meaningful_lines(text)[:8]), 1200),
+    }
+    for key, (label, field) in CPARS_FACTOR_FIELDS.items():
+        item[field] = _extract_cpars_factor_rating(text, label)
+    overall = _rating_after_label(text, "overall")
+    if overall:
+        item["overall_rating"] = overall
+    return [item] if any(item.get(field) for _, field in CPARS_FACTOR_FIELDS.values()) else []
+
+
+def _extract_modification_decisions_deterministic(text: str) -> List[Dict[str, Any]]:
+    mod_number = _extract_mod_number(text)
+    scope_summary = _extract_scope_summary(text)
+    item = {
+        "decision_type": "modification",
+        "mod_number": mod_number,
+        "mod_reason": scope_summary,
+        "value_change": _extract_value_delta(text),
+        "pop_change_days": _extract_pop_delta_days(text),
+        "scope_change_description": scope_summary,
+        "decision_date": _extract_labeled_date(text, ("executed", "issued", "signed", "dated")),
+        "effective_date": _extract_labeled_date(text, ("effective",)),
+        "deciding_party": _extract_deciding_party(text),
+    }
+    if not any(item.get(key) for key in ("mod_number", "value_change", "pop_change_days", "scope_change_description")):
+        return []
+    return [item]
+
+
+def _extract_gao_oig_findings_deterministic(text: str) -> List[Dict[str, Any]]:
+    lines = _meaningful_lines(text)
+    items: List[Dict[str, Any]] = []
+    for line in lines:
+        lower = line.lower()
+        if not _contains_any(lower, ("finding", "recommendation", "gao", "oig", "inspector general")):
+            continue
+        kind = "recommendation" if "recommendation" in lower else "finding"
+        items.append(
+            {
+                "kind": kind,
+                "title": "Official oversight report finding",
+                "citation_text": line,
+                "url": _first_official_url(text),
+                "confidence": 0.68,
+            }
+        )
+        if len(items) >= 8:
+            break
+    if not items and _contains_any(text.lower(), ("gao", "oig", "inspector general")):
+        items.append(
+            {
+                "kind": "finding",
+                "title": "Official oversight report",
+                "citation_text": _trim(text.strip(), 1000),
+                "url": _first_official_url(text),
+                "confidence": 0.55,
+            }
+        )
+    return items
+
+
+def _normalize_cpars_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = dict(item)
+    for _, field in CPARS_FACTOR_FIELDS.values():
+        normalized[field] = _normalize_cpars_rating(normalized.get(field))
+    normalized["overall_rating"] = _normalize_cpars_rating(normalized.get("overall_rating"))
+    if not normalized.get("evaluation_period"):
+        normalized["evaluation_period"] = None
+    return normalized
+
+
+def _normalize_modification_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = dict(item)
+    if normalized.get("effective_date") is None and normalized.get("decision_date") is not None:
+        normalized["effective_date"] = normalized.get("decision_date")
+    if normalized.get("decision_type") is None:
+        normalized["decision_type"] = "modification"
+    mod_number = normalized.get("mod_number")
+    if mod_number:
+        normalized["mod_number"] = str(mod_number).strip().upper()
+    return normalized
+
+
+def _ensure_contract_baseline(
+    session: Session,
+    contract_id: str,
+    document: object,
+    text: str,
+    chunk_rows: Sequence[object],
+    processing_run_id: Optional[str],
+) -> ContractBaseline:
+    baseline = session.scalars(
+        select(ContractBaseline).where(ContractBaseline.contract_id == contract_id)
+    ).first()
+    if baseline is not None:
+        return baseline
+    return update_contract_baseline_from_document(
+        session,
+        contract_id,
+        document,
+        text,
+        chunk_rows,
+        processing_run_id=processing_run_id,
+    )
+
+
+def _append_modification_baseline_revision(
+    session: Session,
+    baseline: ContractBaseline,
+    document_id: Optional[str],
+    decision: ContractPrimitiveDecision,
+    processing_run_id: Optional[str],
+) -> None:
+    if _modification_revision_exists(session, baseline.id, document_id, decision.mod_number):
+        return
+    revision_number = baseline.current_revision_number + 1
+    baseline.current_revision_number = revision_number
+    summary_parts = []
+    if decision.mod_number:
+        summary_parts.append(f"Modification {decision.mod_number}")
+    else:
+        summary_parts.append("Contract modification")
+    if decision.decision_date:
+        summary_parts.append(f"effective {decision.decision_date.isoformat()}")
+    if decision.value_change is not None:
+        summary_parts.append(f"value delta {decision.value_change}")
+    if decision.pop_change_days is not None:
+        summary_parts.append(f"PoP delta {decision.pop_change_days} day(s)")
+    if decision.scope_change_description:
+        summary_parts.append(_trim(decision.scope_change_description, 300))
+    session.add(
+        BaselineRevision(
+            id=str(uuid4()),
+            baseline_id=baseline.id,
+            contract_id=baseline.contract_id,
+            source_document_upload_id=document_id,
+            processing_run_id=processing_run_id,
+            revision_number=revision_number,
+            change_type="modification",
+            summary="; ".join(summary_parts),
+            created_by_id="agent",
+            metadata_json={
+                "document_kind": "modification",
+                "mod_number": decision.mod_number,
+                "decision_id": decision.id,
+                "extractor": "kind_specific_v1",
+            },
+        )
+    )
+
+
+def _decision_exists(
+    session: Session,
+    contract_id: str,
+    document_id: Optional[str],
+    item: Dict[str, Any],
+) -> bool:
+    rows = list(
+        session.scalars(
+            select(ContractPrimitiveDecision).where(ContractPrimitiveDecision.contract_id == contract_id)
+        ).all()
+    )
+    for row in rows:
+        source_doc_ids = row.source_doc_ids or []
+        if document_id and document_id not in source_doc_ids:
+            continue
+        if row.mod_number and item.get("mod_number") and row.mod_number == item.get("mod_number"):
+            return True
+        if row.scope_change_description == item.get("scope_change_description"):
+            return True
+    return False
+
+
+def _modification_revision_exists(
+    session: Session,
+    baseline_id: str,
+    document_id: Optional[str],
+    mod_number: Optional[str],
+) -> bool:
+    rows = list(
+        session.scalars(
+            select(BaselineRevision).where(
+                BaselineRevision.baseline_id == baseline_id,
+                BaselineRevision.change_type == "modification",
+            )
+        ).all()
+    )
+    for row in rows:
+        metadata = row.metadata_json or {}
+        if document_id and row.source_document_upload_id == document_id:
+            return True
+        if mod_number and metadata.get("mod_number") == mod_number:
+            return True
+    return False
+
+
+def _external_source_ref_exists(session: Session, evidence_hash: str) -> bool:
+    return (
+        session.scalars(
+            select(ExternalSourceRef).where(ExternalSourceRef.evidence_hash == evidence_hash)
+        ).first()
+        is not None
+    )
+
+
+def _extract_cpars_factor_rating(text: str, factor_label: str) -> Optional[str]:
+    escaped = re.escape(factor_label)
+    section = re.search(
+        rf"(?:^|\n)\s*(?:#+\s*)?{escaped}\s*(?:\n|:)(.{0,900}?)(?=\n\s*(?:#+\s*)?(?:Quality|Schedule|Cost Control|Management|Small Business|Regulatory Compliance|Overall|Reusable Lesson)\b|\Z)",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if section:
+        rating = _rating_after_label(section.group(1), "rating")
+        if rating:
+            return rating
+    return _rating_after_label(text, factor_label)
+
+
+def _rating_after_label(text: str, label: str) -> Optional[str]:
+    label_pattern = re.escape(label).replace(r"\ ", r"\s+")
+    pattern = rf"{label_pattern}\s*(?:rating)?\s*[:\-]\s*(Exceptional|Very Good|Satisfactory|Marginal|Unsatisfactory|Not Applicable|N/A)\b"
+    match = re.search(pattern, text, flags=re.IGNORECASE)
+    if not match:
+        return None
+    return _normalize_cpars_rating(match.group(1))
+
+
+def _normalize_cpars_rating(value: object) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip().rstrip(".").lower()
+    return CPARS_RATINGS.get(text)
+
+
+def _extract_evaluation_period(text: str) -> Optional[str]:
+    match = re.search(
+        r"(?:\*\*)?evaluation period\s*[:\-](?:\*\*)?\s*([A-Za-z0-9 ,/\-]+?)(?:\n|$)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if match:
+        return _trim(match.group(1).strip(), 80)
+    match = re.search(r"\b(FY\s?\d{4})\b", text, flags=re.IGNORECASE)
+    return match.group(1).upper().replace(" ", "") if match else None
+
+
+def _extract_period_label(text: str) -> Optional[str]:
+    match = re.search(r"\b(20\d{2})[-/](0[1-9]|1[0-2])\b", text)
+    if match:
+        return f"{match.group(1)}-{match.group(2)}"
+    match = re.search(r"\b(20\d{2})\s+Q([1-4])\b", text, flags=re.IGNORECASE)
+    if match:
+        return f"{match.group(1)}-Q{match.group(2)}"
+    return None
+
+
+def _extract_mod_number(text: str) -> Optional[str]:
+    patterns = (
+        r"\b(P\d{5}|A\d{5})\b",
+        r"\bmodification\s+(?:no\.?|number)?\s*[:#\-]?\s*([A-Z]?\d{4,6})\b",
+        r"\bmod\s+(?:no\.?|number)?\s*[:#\-]?\s*([A-Z]?\d{4,6})\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            value = match.group(1).upper()
+            if value.startswith("P") or value.startswith("A"):
+                return value
+            if value.isdigit():
+                return f"P{int(value):05d}"
+            return value
+    return None
+
+
+def _extract_labeled_date(text: str, labels: Sequence[str]) -> Optional[str]:
+    label_pattern = "|".join(re.escape(label) for label in labels)
+    patterns = (
+        rf"(?:{label_pattern})(?:\s+date)?(?:\s+on)?\s*[:\-]?\s*(\d{{4}}-\d{{2}}-\d{{2}})",
+        rf"(?:{label_pattern})(?:\s+date)?(?:\s+on)?\s*[:\-]?\s*(\d{{1,2}}\s+[A-Za-z]+\s+\d{{4}})",
+        rf"(?:{label_pattern})(?:\s+date)?(?:\s+on)?\s*[:\-]?\s*([A-Za-z]+\s+\d{{1,2}},\s+\d{{4}})",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            parsed = _parse_date_value(match.group(1))
+            if parsed:
+                return parsed.isoformat()
+    return None
+
+
+def _extract_value_delta(text: str) -> Optional[float]:
+    lower = text.lower()
+    if "no cost" in lower or "no-cost" in lower:
+        return 0.0
+    match = re.search(
+        r"(increase|decrease|adds?|added|deducts?|deobligates?|obligates?|value delta|value change)[^$\n]{0,100}\$\s*([\d,]+(?:\.\d+)?)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    value = _parse_numeric_value(match.group(2))
+    if value is None:
+        return None
+    direction = match.group(1).lower()
+    if direction in {"decrease", "deduct", "deducts", "deobligate", "deobligates"}:
+        return -abs(value)
+    return value
+
+
+def _extract_pop_delta_days(text: str) -> Optional[int]:
+    match = re.search(
+        r"(?:period of performance|pop|performance period|extend|extension)[^.]{0,100}?(\d+)\s+days?",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if match:
+        return _parse_int_value(match.group(1))
+    return None
+
+
+def _extract_scope_summary(text: str) -> Optional[str]:
+    for line in _meaningful_lines(text):
+        lower = line.lower()
+        if _contains_any(
+            lower,
+            ("scope", "pws", "sow", "adds", "added", "labor", "position", "deliverable", "period of performance"),
+        ):
+            return _trim(line, 800)
+    return _trim(_first_sentence(text), 800) if text.strip() else None
+
+
+def _extract_deciding_party(text: str) -> Optional[str]:
+    if re.search(r"\bcontracting officer\b|\bCO\b|\bKO\b", text, flags=re.IGNORECASE):
+        return "Contracting Officer"
+    if re.search(r"\bCOR\b", text, flags=re.IGNORECASE):
+        return "COR"
+    return None
+
+
+def _first_official_url(text: str) -> Optional[str]:
+    for match in re.finditer(r"https?://[^\s)>\]]+", text):
+        url = match.group(0).rstrip(".,;")
+        if is_official_external_source(url):
+            return url
+    return None
+
+
+def _default_gao_oig_url(text: str) -> str:
+    lower = text.lower()
+    if "gao" in lower:
+        return "https://www.gao.gov/"
+    if "oversight.gov" in lower:
+        return "https://www.oversight.gov/"
+    return "https://www.oversight.gov/"
+
+
+def _parse_date_value(value: object) -> Optional[date]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%d", "%d %B %Y", "%d %b %Y", "%B %d, %Y", "%b %d, %Y"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _parse_numeric_value(value: object) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(str(value).replace("$", "").replace(",", "").strip())
+    except ValueError:
+        return None
+
+
+def _parse_int_value(value: object) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(float(str(value).strip()))
+    except ValueError:
+        return None
+
+
+def _bounded_float(value: object, default: float = 0.0) -> float:
+    number = _parse_numeric_value(value)
+    if number is None:
+        number = default
+    return max(0.0, min(1.0, number))
+
+
+def _first_sentence(text: str) -> str:
+    match = re.search(r"(.+?[.!?])(?:\s|$)", text.strip(), flags=re.DOTALL)
+    if match:
+        return " ".join(match.group(1).split())
+    return " ".join(text.strip().split())
 
 
 def seed_contract_from_markdown(

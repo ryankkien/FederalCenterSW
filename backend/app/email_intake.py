@@ -19,7 +19,7 @@ from email.utils import formatdate, getaddresses, parsedate_to_datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 from urllib.error import HTTPError
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 from uuid import NAMESPACE_URL, uuid5
 
@@ -252,6 +252,7 @@ def _put_blob_if_absent(
         account_name=account_name,
         account_key=account_key,
         method="PUT",
+        blob_endpoint=storage["BlobEndpoint"],
         container_name=container_name,
         blob_name=blob_name,
         headers=headers,
@@ -271,6 +272,7 @@ def _storage_authorization_header(
     account_name: str,
     account_key: str,
     method: str,
+    blob_endpoint: str,
     container_name: str,
     blob_name: str,
     headers: Dict[str, str],
@@ -280,7 +282,12 @@ def _storage_authorization_header(
         for key, value in sorted(headers.items())
         if key.lower().startswith("x-ms-")
     )
-    canonicalized_resource = f"/{account_name}/{container_name}/{blob_name}"
+    canonicalized_resource = _canonicalized_blob_resource(
+        account_name,
+        blob_endpoint,
+        container_name,
+        blob_name,
+    )
     string_to_sign = (
         f"{method}\n"
         "\n"
@@ -302,6 +309,19 @@ def _storage_authorization_header(
         hmac.new(decoded_key, string_to_sign.encode("utf-8"), hashlib.sha256).digest()
     ).decode("ascii")
     return f"SharedKey {account_name}:{signature}"
+
+
+def _canonicalized_blob_resource(
+    account_name: str,
+    blob_endpoint: str,
+    container_name: str,
+    blob_name: str,
+) -> str:
+    endpoint_path = urlparse(blob_endpoint).path.strip("/")
+    resource_path = f"{container_name}/{blob_name}"
+    if endpoint_path:
+        resource_path = f"{endpoint_path}/{resource_path}"
+    return f"/{account_name}/{resource_path}"
 
 
 def save_email_documents(

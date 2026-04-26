@@ -12,6 +12,7 @@ import resend
 from app.email_intake import (
     AutoReplyConfig,
     EmailIntakeConfig,
+    _canonicalized_blob_resource,
     build_auto_reply_params,
     load_env_files,
     parse_email,
@@ -84,7 +85,8 @@ def test_parse_email_uses_raw_hash_when_message_id_is_missing():
     assert record.message_id.startswith("sha256:")
 
 
-def test_save_email_intake_writes_jsonl_stub(tmp_path):
+def test_save_email_intake_writes_jsonl_stub(tmp_path, monkeypatch):
+    monkeypatch.setenv("EMAIL_INTAKE_STUB_BLOB_ENABLED", "false")
     message = EmailMessage()
     message["Message-ID"] = "<abc123@example.com>"
     message["From"] = "sender@example.com"
@@ -102,6 +104,20 @@ def test_save_email_intake_writes_jsonl_stub(tmp_path):
     assert saved["message_id"] == "<abc123@example.com>"
     assert saved["subject"] == "Persist me"
     assert saved["body_text"] == "Body"
+
+
+def test_canonicalized_blob_resource_includes_azurite_endpoint_path():
+    resource = _canonicalized_blob_resource(
+        account_name="devstoreaccount1",
+        blob_endpoint="http://127.0.0.1:10000/devstoreaccount1",
+        container_name="app-assets",
+        blob_name="email-intake/2026/04/26/message.json",
+    )
+
+    assert resource == (
+        "/devstoreaccount1/devstoreaccount1/app-assets/"
+        "email-intake/2026/04/26/message.json"
+    )
 
 
 def test_load_env_files_supports_local_overrides_without_replacing_exported_values(
