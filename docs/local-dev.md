@@ -43,7 +43,8 @@ Seed and process local contract analyst fixtures:
 ```sh
 bun run fixtures:seed -- --fixtures all
 bun run processing:run -- --limit 200
-bun run knowledge:ingest -- --scope fixtures --sources open --limit 500
+bun run corpus:build-synthetic
+bun run knowledge:ingest -- --scope fixtures --sources local --limit 500
 bun run knowledge:build -- --scope fixtures
 ```
 
@@ -55,9 +56,9 @@ documents while keeping the source PDFs and contract/document rows:
 bun run fixtures:seed -- --fixtures wwr,natalie --reset-analysis
 ```
 
-Knowledge ingestion uses keyless official sources by default: USAspending,
-Federal Register, and Acquisition.gov/FAR. Optional keyed/import sources are controlled
-with local-only env vars:
+Knowledge ingestion uses local fixture documents and generated synthetic fixture
+evidence by default. Optional keyed/import sources are controlled with local-only env
+vars and should be used only for deliberate research runs:
 
 ```env
 SAM_API_KEY=
@@ -65,7 +66,7 @@ REGULATIONS_API_KEY=
 CPARS_IMPORT_DIR=
 ```
 
-When optional sources are not configured, the ingestion run persists
+When optional sources are not configured, deliberate optional-source runs persist
 `source_unavailable` records so the wiki can show the limitation without failing.
 
 ## Mirroring Rules
@@ -146,39 +147,6 @@ OPENAI_EMBEDDING_MODEL=text-embedding-3-large
 Set `OPENAI_API_KEY` only in ignored local env files or deployed app settings. When AI is
 disabled or misconfigured, uploads and email intake still store documents and create
 processing jobs; extraction and indexing remain blocked until configuration is enabled.
-
-## Bulk Knowledge Notes
-
-Official-source mining should default to local bulk files instead of keyed live APIs.
-For Department of Navy service-contract work, import USAspending custom/download-center
-CSV or ZIP exports, govinfo eCFR Title 48 XML mirrors, and SAM.gov public Contract
-Opportunities CSV snapshots with:
-
-```sh
-bun run knowledge:import-usaspending-bulk -- --paths backend/data/bulk/usaspending --build-index
-bun run knowledge:import-ecfr-title48-bulk -- --paths backend/data/bulk/ecfr
-bun run knowledge:import-sam-opportunities-bulk -- --paths backend/data/bulk/sam_opportunities
-bun run knowledge:import-federal-register-bulk -- --paths backend/data/bulk/federal_register
-```
-
-The importer filters to Department of Navy (`1700`) records whose PSC code falls in a
-service family such as `A`, `B`, `C`, `D`, `J`, `R`, `S`, `U`, `V`, `Y`, or `Z`, then
-labels each contract with PSC family, NAICS, command/office, vendor UEI, competition,
-set-aside, dates, value, and place-of-performance metadata. The eCFR Title 48 importer
-stores each section as an official bulk source record for FAR/DFARS acquisition-rule
-context. The SAM.gov opportunity importer stores Navy service solicitations,
-presolicitations, sources-sought notices, award notices, and related notices as official
-source records without promoting them to canonical contract records. The Federal
-Register importer stores high-signal FAR/DFARS/OFPP and Navy acquisition documents from
-govinfo bulk XML archives. Export a sanitized packet for Claude Code CLI aggregation
-with:
-
-```sh
-bun run knowledge:export-claude -- --output-dir backend/data/claude_knowledge
-```
-
-Run Claude only against that ignored output directory. Do not give Claude Code access to
-ignored env files or API keys.
 
 ## Synthetic Corpus Notes
 

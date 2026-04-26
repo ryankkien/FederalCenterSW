@@ -244,27 +244,20 @@ bun run infra:deploy
   revisions, regression findings, hypotheses, hypothesis evidence, investigation
   runs, official external-source references, processing run logs, and semantic
   similarity links.
-- The knowledge wiki index stores official-source ingestion runs, source records,
-  wiki nodes, edges, citations, and contractor evidence profiles. The frontend uses
-  `/api/wiki/*` for the Grokipedia workspace; it should not rebuild the full wiki
-  client-side from every contract analysis endpoint.
+- The knowledge wiki index stores local fixture/synthetic ingestion runs, source
+  records, wiki nodes, edges, citations, and contractor evidence profiles. The
+  frontend uses `/api/wiki/*` for the Grokipedia workspace; it should not rebuild the
+  full wiki client-side from every contract analysis endpoint.
 - External research references are restricted in v1 to official sources such as `.gov`,
   `.mil`, Acquisition.gov, Federal Register, GAO/OIG, Congress.gov, and agency domains.
   Uploaded contract-file evidence remains authoritative for contract-specific findings.
-- Official-source mining should be bulk-first when possible. For Department of Navy
-  service-contract discovery, prefer local USAspending/SAM/govinfo/Regulations bulk
-  exports and PSC service-family filters before keyed live API drill-downs.
+- Default knowledge ingestion should use local fixture documents and the generated
+  synthetic fixture corpus only. Do not make bulk downloads or live official-source
+  calls part of the default local ingest path.
 - The optional `summarizer/` service reads canonical `contracts/{document_id}/text.json`
   artifacts, writes `contracts/{document_id}/summary.json`, and may provide
   supplemental PSC/NAICS classification evidence. It is not the canonical analyst
   store.
-- Federal Register source records should come from govinfo FR XML/ZIP bulk mirrors and
-  be filtered to high-signal acquisition context such as FAR, DFARS, OFPP, and Navy
-  acquisition documents.
-- SAM.gov public Contract Opportunities bulk rows are discovery/source evidence.
-  Store Navy service solicitations, presolicitations, sources-sought notices, award
-  notices, and related notices as source records until linked to a first-class contract
-  record.
 - `bun run corpus:build-synthetic` creates an ignored file corpus under
   `backend/data/corpus/navy-service-v1/` from the WWR, AGOR, and Natalie fixture
   families. Treat `real_fixture` downloaded anchors separately from

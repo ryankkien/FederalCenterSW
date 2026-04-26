@@ -6,6 +6,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import Base, get_db
+from app.knowledge_sources import collect_contract_source_documents, normalize_sources
 from app.knowledge_bulk import (
     import_ecfr_title48_bulk,
     import_federal_register_bulk,
@@ -108,6 +109,40 @@ def test_knowledge_ingestion_builds_cited_contract_and_contractor_wiki(tmp_path,
     assert {record.status for record in source_records} == {"unavailable"}
     assert len(nodes) >= 2
     assert len(citations) >= 1
+
+
+def test_local_knowledge_sources_default_to_fixtures_and_synthetic(tmp_path, monkeypatch) -> None:
+    corpus_dir = tmp_path / "corpus"
+    corpus_dir.mkdir()
+    packet = corpus_dir / "extraction_packet.jsonl"
+    packet.write_text(
+        "\n".join(
+            [
+                '{"contract_number":"N40080-24-D-1042","document_id":"syn-1","document_kind":"cpars","filename":"synthetic_cpars.md","source_type":"synthetic_fixture","synthetic":true,"title":"Synthetic CPARS interim","text":"Synthetic CPARS schedule narrative."}',
+                '{"contract_number":"OTHER","document_id":"syn-2","source_type":"synthetic_fixture","synthetic":true,"title":"Other","text":"Other contract."}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("app.knowledge_sources.DEFAULT_SYNTHETIC_CORPUS_DIR", corpus_dir)
+    contract = Contract(
+        id="atlantic",
+        contract_number="N40080-24-D-1042",
+        title="Environmental Compliance and Permitting Support Services",
+        vendor_name="Atlantic Environmental",
+        vendor_uei="UEIATLANTIC1",
+    )
+    contract.documents = [_document("doc-1", "atlantic")]
+
+    documents = collect_contract_source_documents(contract, normalize_sources(None), limit=10)
+
+    assert normalize_sources(None) == ["fixtures", "synthetic"]
+    assert {document.source_name for document in documents} == {"fixture", "synthetic_fixture"}
+    synthetic = [document for document in documents if document.source_name == "synthetic_fixture"]
+    assert len(synthetic) == 1
+    assert synthetic[0].source_type == "synthetic_fixture"
+    assert synthetic[0].title == "Synthetic CPARS interim"
 
 
 def test_usaspending_bulk_import_filters_navy_service_awards(tmp_path) -> None:
