@@ -19,7 +19,7 @@ services:
   azurite:
     image: mcr.microsoft.com/azure-storage/azurite:3.35.0
     container_name: fcsw-azurite-local
-    command: azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0
+    command: azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 --skipApiVersionCheck
     ports:
       - "10000:10000"
       - "10001:10001"
@@ -56,6 +56,8 @@ services:
       AI_INLINE_PROCESSING_ENABLED: ${AI_INLINE_PROCESSING_ENABLED:-false}
       FEATURE_EXTRACTOR_URL: ${FEATURE_EXTRACTOR_URL:-http://feature_extractor:8000}
       FEATURE_EXTRACTOR_REQUEST_TIMEOUT_SECONDS: ${FEATURE_EXTRACTOR_REQUEST_TIMEOUT_SECONDS:-120}
+      APPINSIGHTS_CONNECTION_STRING: ${APPINSIGHTS_CONNECTION_STRING:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       azurite:
         condition: service_healthy
@@ -77,6 +79,8 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
       BACKEND_API_URL: http://backend:8000
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-local-dev-internal-token}
+      APPINSIGHTS_CONNECTION_STRING: ${APPINSIGHTS_CONNECTION_STRING:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       azurite:
         condition: service_healthy

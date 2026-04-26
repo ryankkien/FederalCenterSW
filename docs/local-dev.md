@@ -16,8 +16,8 @@ Start local dependencies:
 bun run local:up
 ```
 
-This requires Docker Desktop and Azure CLI. The Azure CLI is used only to initialize the
-local Azurite blob container.
+This requires Docker Desktop. The startup script initializes the local Azurite blob
+container directly through the emulator's Blob REST endpoint.
 
 Stop local dependencies:
 
@@ -92,6 +92,12 @@ must remain local-only and should not be copied into Bicep or Azure app settings
 - Real local app env file: `backend/.env.local`, ignored by git.
 - Shared env contract examples: `backend/.env.example`.
 
+Local services emit structured JSON logs by default. Leave
+`APPINSIGHTS_CONNECTION_STRING` blank for local-only logs, or set it in an ignored env
+file or shell export when you intentionally want local telemetry sent to the shared Azure
+Application Insights component. `X-Request-ID` is echoed on FastAPI responses and
+forwarding helpers preserve it for service-to-service calls.
+
 ## Azurite Notes
 
 `bun run local:up` creates the local `app-assets` container in Azurite. The email intake
@@ -102,6 +108,16 @@ EMAIL_INTAKE_STUB_BLOB_ENABLED=true
 EMAIL_INTAKE_STUB_BLOB_CONTAINER=app-assets
 AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;...
 ```
+
+On slow Docker hosts or cold CI runners, `local-up.sh` waits for PostgreSQL and Azurite
+before creating the blob container. Override `POSTGRES_READY_ATTEMPTS` or
+`AZURITE_READY_ATTEMPTS` only when the default readiness window is not long enough.
+Compose starts Azurite with `--skipApiVersionCheck` so newer Blob API clients can still
+talk to the pinned local emulator image.
+
+`local-up.sh` creates the container against the emulator account explicitly. Override
+`AZURITE_ACCOUNT_NAME`, `AZURITE_ACCOUNT_KEY`, `AZURITE_BLOB_ENDPOINT`, or
+`AZURITE_API_VERSION` only when running a non-default Azurite instance.
 
 Portal uploads, fixture PDFs, and committed email attachments use the same local blob
 layout as Azure:
@@ -232,7 +248,9 @@ successful or partial primitive extraction. Low-N cohorts still run and are tagg
 
 Configure `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENAI_LLM_MODEL`, and
 `MODEL_PREFERENCE` only in ignored local env files or shell exports. The backend
-default LLM model is `gpt-5.5`.
+default LLM model is `gpt-5.5`. The feature extractor also accepts
+`APPINSIGHTS_CONNECTION_STRING` and emits the same structured correlation fields as the
+backend API.
 
 ## Boundaries
 

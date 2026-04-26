@@ -21,6 +21,9 @@ from app.contract_matching import ContractMatchContext, ContractMatchResult, mat
 from app.contract_analysis import apply_contract_analysis_pipeline
 from app.document_assets import TEXT_JSON_FILENAME
 from app.feature_extractor_client import FeatureExtractorStepResult, trigger_feature_extractor
+from app.observability import get_logger, log_context
+
+logger = get_logger(__name__)
 
 
 class TextJsonPayload(BaseModel):
@@ -63,11 +66,19 @@ def load_text_json(
     try:
         data = storage.download_bytes(path)
     except Exception as error:
+        logger.warning(
+            "Failed to load text artifact",
+            extra={"document_upload_id": document_id, "text_blob_path": path, "error": str(error)},
+        )
         return None, str(error)
 
     try:
         payload = json.loads(data.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        logger.warning(
+            "Failed to parse text artifact",
+            extra={"document_upload_id": document_id, "text_blob_path": path, "error": str(error)},
+        )
         return None, str(error)
     if not isinstance(payload, dict):
         return None, "text.json must contain a JSON object"
@@ -306,11 +317,19 @@ def _process_job_with_status(
         return result
     except Exception as error:
         session.rollback()
+        document_id = _string_attr(job, "document_id", "document_upload_id", "upload_id") or ""
+        logger.exception(
+            "Processing job failed",
+            extra={
+                "processing_job_id": _string_attr(job, "id"),
+                "document_upload_id": document_id,
+                "error": str(error),
+            },
+        )
         _set_first_existing(job, ("status", "state"), "failed")
         _set_first_existing(job, ("error_message", "error", "failure_reason"), str(error))
         _set_first_existing(job, ("completed_at", "processed_at", "finished_at"), datetime.now(timezone.utc))
         session.commit()
-        document_id = _string_attr(job, "document_id", "document_upload_id", "upload_id") or ""
         return ProcessingResult(
             document_id=document_id,
             status="failed",
@@ -458,8 +477,19 @@ def _trigger_feature_extractor_after_commit(
 
     contract_id = _string_attr(document, "contract_id")
     doc_classification = _document_classification(document)
+    processing_run_id = _string_attr(run, "id")
     try:
-        step_results = trigger_feature_extractor(document_id, contract_id, doc_classification)
+        with log_context(
+            document_upload_id=document_id,
+            contract_id=contract_id,
+            processing_run_id=processing_run_id,
+        ):
+            step_results = trigger_feature_extractor(
+                document_id,
+                contract_id,
+                doc_classification,
+                processing_run_id=processing_run_id,
+            )
     except Exception as error:
         step_results = [
             FeatureExtractorStepResult(

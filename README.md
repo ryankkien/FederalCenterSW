@@ -74,6 +74,11 @@ The frontend runs on `http://localhost:5173` and proxies `/api/*` requests to th
 
 See [docs/local-dev.md](docs/local-dev.md) for the Docker-based local mirror of PostgreSQL and Blob Storage.
 
+Backend, feature extractor, and email intake logs are emitted as structured JSON with
+`request_id`, `contract_id`, `document_upload_id`, and `processing_run_id` fields when
+available. Set `APPINSIGHTS_CONNECTION_STRING` to export telemetry to Azure Application
+Insights; leave it blank for local-only JSON logs.
+
 ## Product Direction
 
 The product direction is documented in [docs/product.md](docs/product.md). It covers the
@@ -127,6 +132,8 @@ processing store.
 ## Infrastructure
 
 Azure infrastructure is defined with Bicep in `infra/`.
+The template provisions the shared Log Analytics workspace, Azure Application Insights
+component, Function App resources, storage, database, ACR, and Container Apps environment.
 
 Preview infrastructure changes:
 

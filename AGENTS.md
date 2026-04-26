@@ -300,6 +300,10 @@ bun run infra:deploy
   `AI_PROCESSING_ENABLED`/`AI_INLINE_PROCESSING_ENABLED` are omitted. Set either flag
   to `false` to force-disable that path. Keep OpenAI and future provider keys out of
   git.
+- Backend API, feature extractor, and email intake Function logs use structured JSON
+  with `request_id`, `contract_id`, `document_upload_id`, and `processing_run_id` when
+  available. Set `APPINSIGHTS_CONNECTION_STRING` to export telemetry to Application
+  Insights; leave it blank for local-only logs.
 - Email intake is currently a worker-style module, not a FastAPI route.
 - Queued document processing is drained by the Azure Function timer in
   `backend/function_app.py`; the worker skips jobs whose `text.json` still reports
