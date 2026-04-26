@@ -1,15 +1,19 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
+  BarChart3,
   BookOpen,
+  CheckCircle2,
   Download,
   FileText,
   Filter,
+  Layers3,
   Link2,
   LockKeyhole,
   LogOut,
   RefreshCw,
   Search,
   ShieldCheck,
+  TrendingDown,
   Upload,
 } from 'lucide-react';
 
@@ -59,6 +63,85 @@ type DocumentRecord = {
   match_status: string;
   processing_status: string;
   created_at: string;
+};
+
+type TimelineSignal = {
+  id: string;
+  category: string;
+  label: string;
+  summary: string;
+  polarity: string;
+  severity?: string | null;
+  confidence?: number | null;
+  document_id?: string | null;
+  quote?: string | null;
+  responsible_party?: string | null;
+  recurrence_key: string;
+};
+
+type TimelineReport = {
+  document_id: string;
+  title: string;
+  document_kind: string;
+  period_label: string;
+  report_period_start?: string | null;
+  report_period_end?: string | null;
+  created_at: string;
+  processing_status: string;
+  signals: TimelineSignal[];
+};
+
+type ContractPattern = {
+  key: string;
+  title: string;
+  count: number;
+  document_count: number;
+  first_period_label?: string | null;
+  last_period_label?: string | null;
+  examples: string[];
+};
+
+type CparsRating = {
+  label: string;
+  rating: string;
+  period_label?: string | null;
+  summary?: string | null;
+  source: string;
+};
+
+type ContractTimelineAnalysis = {
+  contract_id: string;
+  contract_title: string;
+  timeline: TimelineReport[];
+  recurring_issues: ContractPattern[];
+  one_off_issues: ContractPattern[];
+  early_warning_signals: TimelineSignal[];
+  positive_signals: TimelineSignal[];
+  execution_patterns: TimelineSignal[];
+  cpars_ratings: CparsRating[];
+  limitations: string[];
+};
+
+type CohortContractBrief = {
+  contract_id: string;
+  contract_title: string;
+  performance_band: string;
+  document_count: number;
+  recurring_issue_count: number;
+  positive_signal_count: number;
+  execution_pattern_count: number;
+  cpars_rating_count: number;
+};
+
+type CohortAnalysis = {
+  contract_count: number;
+  contracts: CohortContractBrief[];
+  poor_contract_common_patterns: ContractPattern[];
+  well_performing_common_patterns: ContractPattern[];
+  delta_lessons: string[];
+  qualitative_quantitative_correlations: string[];
+  execution_correlations: string[];
+  limitations: string[];
 };
 
 type WikiNodeSummary = {
@@ -167,7 +250,7 @@ export function App() {
       <header className="topbar">
         <div>
           <p className="eyebrow">Federal Center SW</p>
-          <h1>{user.role === 'official' ? 'Grokipedia Workspace' : 'Contractor Document Portal'}</h1>
+          <h1>{user.role === 'official' ? 'Contract Analysis Workspace' : 'Contractor Document Portal'}</h1>
         </div>
         <div className="session">
           <span>{user.name}</span>
@@ -178,7 +261,7 @@ export function App() {
       </header>
       {error ? <p className="alert">{error}</p> : null}
       {user.role === 'official' ? (
-        <WikiWorkspace token={token} setError={setError} />
+        <OfficialWorkspace token={token} setError={setError} />
       ) : (
         <ContractorPortal token={token} setError={setError} />
       )}
@@ -227,6 +310,279 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, user: User) => void
         </button>
       </form>
     </main>
+  );
+}
+
+function OfficialWorkspace({ token, setError }: { token: string; setError: (message: string) => void }) {
+  return (
+    <div className="official-stack">
+      <OfficialAnalysisWorkspace token={token} setError={setError} />
+      <WikiWorkspace token={token} setError={setError} />
+    </div>
+  );
+}
+
+function OfficialAnalysisWorkspace({ token, setError }: { token: string; setError: (message: string) => void }) {
+  const [contracts, setContracts] = useState<ContractRecord[]>([]);
+  const [selectedContractId, setSelectedContractId] = useState('');
+  const [analysis, setAnalysis] = useState<ContractTimelineAnalysis | null>(null);
+  const [article, setArticle] = useState<WikiArticle | null>(null);
+  const [cohort, setCohort] = useState<CohortAnalysis | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const nextContracts = await api<ContractRecord[]>('/api/contracts', token);
+      setContracts(nextContracts);
+      const nextSelectedId = selectedContractId || nextContracts[0]?.id || '';
+      setSelectedContractId(nextSelectedId);
+      const [nextAnalysis, nextCohort] = await Promise.all([
+        nextSelectedId ? api<ContractTimelineAnalysis>(`/api/analysis/contracts/${nextSelectedId}`, token) : Promise.resolve(null),
+        api<CohortAnalysis>('/api/analysis/cohort', token),
+      ]);
+      setAnalysis(nextAnalysis);
+      setArticle(nextSelectedId ? await api<WikiArticle>(`/api/wiki/contracts/${nextSelectedId}`, token) : null);
+      setCohort(nextCohort);
+    } catch (currentError) {
+      setError(currentError instanceof Error ? currentError.message : 'Could not load contract analysis');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [selectedContractId, setError, token]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function selectContract(contractId: string) {
+    setSelectedContractId(contractId);
+    setIsLoading(true);
+    try {
+      const [nextAnalysis, nextArticle] = await Promise.all([
+        api<ContractTimelineAnalysis>(`/api/analysis/contracts/${contractId}`, token),
+        api<WikiArticle>(`/api/wiki/contracts/${contractId}`, token),
+      ]);
+      setAnalysis(nextAnalysis);
+      setArticle(nextArticle);
+    } catch (currentError) {
+      setError(currentError instanceof Error ? currentError.message : 'Could not load contract analysis');
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  const latestSignals = analysis?.timeline.flatMap((report) => report.signals.slice(0, 3)).slice(0, 8) ?? [];
+
+  return (
+    <section className="analysis-workspace" aria-labelledby="analysis-title">
+      <div className="analysis-header">
+        <div>
+          <p className="eyebrow">Government Analysis</p>
+          <h2 id="analysis-title">Contract Timeline And Cohort Patterns</h2>
+        </div>
+        <label className="compact-field">
+          <span>Contract</span>
+          <select value={selectedContractId} onChange={(event) => void selectContract(event.target.value)}>
+            {contracts.map((contract) => (
+              <option key={contract.id} value={contract.id}>
+                {contract.id}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <section className="contract-brief">
+        <div className="article-header">
+          <div>
+            <p className="eyebrow">Contract Brief</p>
+            <h3>{article?.title ?? analysis?.contract_title ?? 'Contract'}</h3>
+          </div>
+          <span className="security-badge">
+            <ShieldCheck size={14} /> {toTitle(article?.security_level ?? 'standard')}
+          </span>
+        </div>
+        <p className="article-summary">{article?.summary ?? 'Run knowledge ingestion to build a cited contract brief.'}</p>
+        <div className="brief-section-grid">
+          {(article?.sections ?? []).slice(0, 4).map((section) => (
+            <article className="brief-section" key={section.title}>
+              <strong>{section.title}</strong>
+              <p>{section.body}</p>
+            </article>
+          ))}
+        </div>
+        {article?.citations.length ? (
+          <div className="brief-citations">
+            {article.citations.slice(0, 4).map((citation) => (
+              <span key={citation.id}>{citation.label}</span>
+            ))}
+          </div>
+        ) : null}
+      </section>
+      <div className="metric-grid">
+        <MetricCard label="Reports" value={analysis?.timeline.length ?? 0} icon={<FileText size={17} />} />
+        <MetricCard label="Recurring Issues" value={analysis?.recurring_issues.length ?? 0} icon={<TrendingDown size={17} />} />
+        <MetricCard label="Positive Signals" value={analysis?.positive_signals.length ?? 0} icon={<CheckCircle2 size={17} />} />
+        <MetricCard label="Cohort Contracts" value={cohort?.contract_count ?? 0} icon={<Layers3 size={17} />} />
+      </div>
+      <div className="analysis-grid">
+        <AnalysisPanel title="Chronological Report Signals" icon={<BarChart3 size={16} />}>
+          {analysis?.timeline.length ? (
+            <div className="timeline-list">
+              {analysis.timeline.map((report) => (
+                <article className="timeline-row" key={report.document_id}>
+                  <div>
+                    <strong>{report.period_label}</strong>
+                    <span>{report.title}</span>
+                  </div>
+                  <small>{toTitle(report.document_kind)} · {report.signals.length} signal(s)</small>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="empty">{isLoading ? 'Loading analysis.' : 'No child reports are linked to this contract.'}</p>
+          )}
+        </AnalysisPanel>
+        <AnalysisPanel title="Recurring Vs One-Off" icon={<Filter size={16} />}>
+          <PatternList patterns={analysis?.recurring_issues ?? []} empty="No recurring issues detected yet." />
+          <div className="rail-divider" />
+          <PatternList patterns={analysis?.one_off_issues ?? []} empty="No one-off issues detected yet." compact />
+        </AnalysisPanel>
+        <AnalysisPanel title="Early Warnings And Positives" icon={<CheckCircle2 size={16} />}>
+          <SignalList signals={analysis?.early_warning_signals ?? []} empty="No pre-degradation warning signals found yet." />
+          <div className="rail-divider" />
+          <SignalList signals={analysis?.positive_signals ?? []} empty="No positive signals extracted yet." />
+        </AnalysisPanel>
+        <AnalysisPanel title="Execution Patterns" icon={<Layers3 size={16} />}>
+          <SignalList signals={analysis?.execution_patterns ?? latestSignals} empty="No sequencing, subcontractor, QC, staffing, or PMP execution signals found yet." />
+        </AnalysisPanel>
+        <AnalysisPanel title="CPARS Outcome Context" icon={<TrendingDown size={16} />}>
+          <CparsList ratings={analysis?.cpars_ratings ?? []} />
+          <div className="rail-divider" />
+          <CohortBriefList contracts={cohort?.contracts ?? []} />
+        </AnalysisPanel>
+        <AnalysisPanel title="Cohort Lessons" icon={<BookOpen size={16} />}>
+          <TextList items={cohort?.delta_lessons ?? []} empty="No cohort deltas are available yet." />
+          <div className="rail-divider" />
+          <TextList items={cohort?.qualitative_quantitative_correlations ?? []} empty="Import CPARS ratings to test qualitative-to-quantitative correlations." />
+        </AnalysisPanel>
+        <AnalysisPanel title="Cohort Pattern Sets" icon={<Link2 size={16} />}>
+          <PatternList patterns={cohort?.poor_contract_common_patterns ?? []} empty="No poor-performing cohort pattern set yet." compact />
+          <div className="rail-divider" />
+          <PatternList patterns={cohort?.well_performing_common_patterns ?? []} empty="No well-performing or recovered cohort pattern set yet." compact />
+        </AnalysisPanel>
+      </div>
+      {analysis?.limitations.length || cohort?.limitations.length ? (
+        <div className="limitations-row">
+          {[...(analysis?.limitations ?? []), ...(cohort?.limitations ?? [])].map((item) => (
+            <span key={item}>{item}</span>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function MetricCard({ label, value, icon }: { label: string; value: number; icon: ReactNode }) {
+  return (
+    <div className="metric-card">
+      <span>{icon}</span>
+      <strong>{value}</strong>
+      <small>{label}</small>
+    </div>
+  );
+}
+
+function AnalysisPanel({ title, icon, children }: { title: string; icon: ReactNode; children: ReactNode }) {
+  return (
+    <section className="analysis-panel">
+      <div className="section-heading">
+        <h3>{title}</h3>
+        {icon}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function PatternList({ patterns, empty, compact = false }: { patterns: ContractPattern[]; empty: string; compact?: boolean }) {
+  if (!patterns.length) {
+    return <p className="empty">{empty}</p>;
+  }
+  return (
+    <div className="pattern-list">
+      {patterns.slice(0, compact ? 4 : 6).map((pattern) => (
+        <article className="pattern-row" key={pattern.key}>
+          <strong>{pattern.title}</strong>
+          <small>{pattern.document_count} contract/report item(s) · {pattern.count} signal(s)</small>
+          {pattern.examples[0] ? <span>{pattern.examples[0]}</span> : null}
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function SignalList({ signals, empty }: { signals: TimelineSignal[]; empty: string }) {
+  if (!signals.length) {
+    return <p className="empty">{empty}</p>;
+  }
+  return (
+    <div className="signal-list">
+      {signals.slice(0, 6).map((signal) => (
+        <article className="signal-row" key={signal.id}>
+          <span className={`status ${signal.severity ?? signal.polarity}`}>{signal.polarity}</span>
+          <strong>{signal.label}</strong>
+          {signal.responsible_party ? <small>{toTitle(signal.responsible_party)}</small> : null}
+          <p>{signal.summary}</p>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function TextList({ items, empty }: { items: string[]; empty: string }) {
+  if (!items.length) {
+    return <p className="empty">{empty}</p>;
+  }
+  return (
+    <div className="text-list">
+      {items.slice(0, 5).map((item) => (
+        <p key={item}>{item}</p>
+      ))}
+    </div>
+  );
+}
+
+function CparsList({ ratings }: { ratings: CparsRating[] }) {
+  if (!ratings.length) {
+    return <p className="empty">No actual CPARS ratings are imported for this contract.</p>;
+  }
+  return (
+    <div className="pattern-list">
+      {ratings.slice(0, 6).map((rating) => (
+        <article className="pattern-row" key={`${rating.label}-${rating.rating}-${rating.period_label ?? rating.source}`}>
+          <strong>{rating.label}: {rating.rating}</strong>
+          <small>{rating.period_label || rating.source}</small>
+          {rating.summary ? <span>{rating.summary}</span> : null}
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function CohortBriefList({ contracts }: { contracts: CohortContractBrief[] }) {
+  if (!contracts.length) {
+    return <p className="empty">No comparable visible contracts are available.</p>;
+  }
+  return (
+    <div className="pattern-list">
+      {contracts.slice(0, 5).map((contract) => (
+        <article className="pattern-row" key={contract.contract_id}>
+          <strong>{contract.contract_title}</strong>
+          <small>{toTitle(contract.performance_band)} · {contract.document_count} report(s)</small>
+        </article>
+      ))}
+    </div>
   );
 }
 
@@ -563,16 +919,24 @@ function scoreEntry(entry: WikiNodeSummary, query: string) {
 }
 
 function ContractorPortal({ token, setError }: { token: string; setError: (message: string) => void }) {
+  const [contracts, setContracts] = useState<ContractRecord[]>([]);
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
+  const [selectedContractId, setSelectedContractId] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const loadDocuments = useCallback(async () => {
-    setDocuments(await api<DocumentRecord[]>('/api/documents', token));
+  const loadPortal = useCallback(async () => {
+    const [nextContracts, nextDocuments] = await Promise.all([
+      api<ContractRecord[]>('/api/contracts', token),
+      api<DocumentRecord[]>('/api/documents', token),
+    ]);
+    setContracts(nextContracts);
+    setDocuments(nextDocuments);
+    setSelectedContractId((current) => current || nextContracts[0]?.id || '');
   }, [token]);
 
   useEffect(() => {
-    loadDocuments().catch((error) => setError(error instanceof Error ? error.message : 'Could not load documents'));
-  }, [loadDocuments, setError]);
+    loadPortal().catch((error) => setError(error instanceof Error ? error.message : 'Could not load documents'));
+  }, [loadPortal, setError]);
 
   async function handleUpload(form: HTMLFormElement) {
     setIsLoading(true);
@@ -580,7 +944,7 @@ function ContractorPortal({ token, setError }: { token: string; setError: (messa
     try {
       await api('/api/documents/upload', token, { method: 'POST', body: new FormData(form) });
       form.reset();
-      await loadDocuments();
+      await loadPortal();
     } catch (currentError) {
       setError(currentError instanceof Error ? currentError.message : 'Upload failed');
     } finally {
@@ -613,6 +977,16 @@ function ContractorPortal({ token, setError }: { token: string; setError: (messa
           <Upload size={18} />
         </div>
         <form className="upload-form" onSubmit={(event) => { event.preventDefault(); void handleUpload(event.currentTarget); }}>
+          <label className="field">
+            <span>Contract</span>
+            <select name="contract_id" required value={selectedContractId} onChange={(event) => setSelectedContractId(event.target.value)}>
+              {contracts.map((contract) => (
+                <option key={contract.id} value={contract.id}>
+                  {contract.id} · {contract.title}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="field"><span>Title</span><input name="title" required maxLength={200} /></label>
           <label className="field"><span>Document type</span><input name="document_type" required maxLength={80} /></label>
           <label className="field"><span>Notes</span><textarea name="notes" rows={4} /></label>
@@ -628,7 +1002,7 @@ function ContractorPortal({ token, setError }: { token: string; setError: (messa
             <tbody>
               {documents.map((document) => (
                 <tr key={document.id}>
-                  <td><strong>{document.title}</strong><span className="muted">{document.notes}</span></td>
+                  <td><strong>{document.title}</strong><span className="muted">{document.contract_id ?? 'Contract pending'} · {document.notes}</span></td>
                   <td>{document.processing_status}</td>
                   <td>{document.original_filename}<span className="muted">{formatBytes(document.size_bytes)}</span></td>
                   <td><button className="icon-button" type="button" onClick={() => void handleDownload(document)} title="Download"><Download size={16} /></button></td>
