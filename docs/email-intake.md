@@ -38,23 +38,19 @@ Until real contractor accounts are added, emailed attachments are assigned to `E
 
 ## Auto Reply
 
-Auto-replies are disabled by default. Enable them only after dry-run parsing looks correct:
+Auto-replies are sent through [Resend](https://resend.com). They are disabled by default. Enable them only after dry-run parsing looks correct and the sender domain is verified in Resend:
 
 ```env
 EMAIL_INTAKE_AUTO_REPLY_ENABLED=true
-EMAIL_INTAKE_SMTP_HOST=smtp.gmail.com
-EMAIL_INTAKE_SMTP_PORT=587
-EMAIL_INTAKE_SMTP_STARTTLS=true
-EMAIL_INTAKE_SMTP_USERNAME=<intake-email-address>
-EMAIL_INTAKE_SMTP_PASSWORD=<mailbox-app-password>
-EMAIL_INTAKE_AUTO_REPLY_FROM=<intake-email-address>
+RESEND_API_KEY=<resend-api-key>
+EMAIL_INTAKE_AUTO_REPLY_FROM=<verified-sender-on-resend-domain>
 EMAIL_INTAKE_AUTO_REPLY_SUBJECT=Your email has been received
 EMAIL_INTAKE_AUTO_REPLY_BODY=Your email has been received. Thank you.
 ```
 
-If `EMAIL_INTAKE_SMTP_USERNAME` or `EMAIL_INTAKE_SMTP_PASSWORD` are omitted, the worker reuses `EMAIL_INTAKE_USERNAME` and `EMAIL_INTAKE_PASSWORD`.
+`EMAIL_INTAKE_AUTO_REPLY_FROM` must be on a domain you have verified in Resend (SPF, DKIM, DMARC). Keep `RESEND_API_KEY` in an ignored local env file, Azure app settings, or Key Vault.
 
-The worker sends auto-replies only in commit mode. It skips obvious automated, list, bulk, postmaster, mailer-daemon, and no-reply messages to reduce mail loops.
+The worker sends auto-replies only in commit mode. It threads each reply by setting `In-Reply-To` and `References` headers on the Resend send request, sets `Auto-Submitted: auto-replied`, and skips obvious automated, list, bulk, postmaster, mailer-daemon, and no-reply messages to reduce mail loops.
 
 ## JSONL Audit Record
 

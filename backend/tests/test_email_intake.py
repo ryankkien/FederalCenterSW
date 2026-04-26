@@ -7,14 +7,17 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
+import resend
+
 from app.email_intake import (
     AutoReplyConfig,
     EmailIntakeConfig,
-    build_auto_reply_message,
+    build_auto_reply_params,
     load_env_files,
     parse_email,
     save_email_documents,
     save_email_intake,
+    send_auto_reply,
     should_send_auto_reply,
 )
 from app.models import DocumentUpload
@@ -211,7 +214,7 @@ def test_save_email_documents_is_idempotent_for_same_email(tmp_path):
     assert db.query(DocumentUpload).count() == 1
 
 
-def test_auto_reply_message_targets_reply_to_and_threads_to_original_message():
+def test_auto_reply_params_target_reply_to_and_thread_to_original_message():
     message = EmailMessage()
     message["Message-ID"] = "<abc123@example.com>"
     message["From"] = "sender@example.com"
@@ -221,21 +224,49 @@ def test_auto_reply_message_targets_reply_to_and_threads_to_original_message():
     message.set_content("Body")
     record = parse_email(message.as_bytes())
     config = AutoReplyConfig(
-        smtp_host="smtp.example.com",
-        smtp_username="intake@example.com",
-        smtp_password="secret",
+        api_key="re_test_key",
         from_address="intake@example.com",
     )
 
-    reply = build_auto_reply_message(record, config, "reply@example.com")
+    params = build_auto_reply_params(record, config, "reply@example.com")
 
     assert should_send_auto_reply(record)
-    assert reply["To"] == "reply@example.com"
-    assert reply["From"] == "intake@example.com"
-    assert reply["Subject"] == "Your email has been received"
-    assert reply["Auto-Submitted"] == "auto-replied"
-    assert reply["In-Reply-To"] == "<abc123@example.com>"
-    assert "Your email has been received. Thank you." in reply.get_content()
+    assert params["to"] == ["reply@example.com"]
+    assert params["from"] == "intake@example.com"
+    assert params["subject"] == "Your email has been received"
+    assert params["text"] == "Your email has been received. Thank you."
+    headers = params["headers"]
+    assert headers["Auto-Submitted"] == "auto-replied"
+    assert headers["In-Reply-To"] == "<abc123@example.com>"
+
+
+def test_send_auto_reply_invokes_resend_with_built_params(monkeypatch):
+    message = EmailMessage()
+    message["Message-ID"] = "<send123@example.com>"
+    message["From"] = "sender@example.com"
+    message["To"] = "intake@example.com"
+    message["Subject"] = "Hello"
+    message.set_content("Body")
+    record = parse_email(message.as_bytes())
+    config = AutoReplyConfig(
+        api_key="re_test_key",
+        from_address="intake@example.com",
+    )
+
+    captured = {}
+
+    def fake_send(params):
+        captured["api_key"] = resend.api_key
+        captured["params"] = params
+        return {"id": "stub"}
+
+    monkeypatch.setattr(resend.Emails, "send", fake_send)
+
+    assert send_auto_reply(record, config) is True
+    assert captured["api_key"] == "re_test_key"
+    assert captured["params"]["to"] == ["sender@example.com"]
+    assert captured["params"]["from"] == "intake@example.com"
+    assert captured["params"]["headers"]["In-Reply-To"] == "<send123@example.com>"
 
 
 def test_auto_reply_skips_automated_or_bulk_messages():

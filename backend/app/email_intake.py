@@ -9,7 +9,6 @@ import hmac
 import imaplib
 import json
 import os
-import smtplib
 import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -24,6 +23,7 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 from uuid import NAMESPACE_URL, uuid5
 
+import resend
 from sqlalchemy.orm import Session
 
 from app.blob_storage import BlobStorage, get_blob_storage
@@ -86,12 +86,8 @@ class EmailIntakeConfig:
 
 @dataclass
 class AutoReplyConfig:
-    smtp_host: str
-    smtp_username: str
-    smtp_password: str
+    api_key: str
     from_address: str
-    smtp_port: int = 587
-    use_starttls: bool = True
     subject: str = "Your email has been received"
     body: str = "Your email has been received. Thank you."
 
@@ -100,20 +96,9 @@ class AutoReplyConfig:
         if not _env_bool("EMAIL_INTAKE_AUTO_REPLY_ENABLED", default=False):
             return None
 
-        smtp_username = os.getenv("EMAIL_INTAKE_SMTP_USERNAME") or _require_env(
-            "EMAIL_INTAKE_USERNAME"
-        )
-        smtp_password = os.getenv("EMAIL_INTAKE_SMTP_PASSWORD") or _require_env(
-            "EMAIL_INTAKE_PASSWORD"
-        )
-
         return cls(
-            smtp_host=_require_env("EMAIL_INTAKE_SMTP_HOST"),
-            smtp_username=smtp_username,
-            smtp_password=smtp_password,
-            smtp_port=int(os.getenv("EMAIL_INTAKE_SMTP_PORT", "587")),
-            from_address=os.getenv("EMAIL_INTAKE_AUTO_REPLY_FROM", smtp_username),
-            use_starttls=_env_bool("EMAIL_INTAKE_SMTP_STARTTLS", default=True),
+            api_key=_require_env("RESEND_API_KEY"),
+            from_address=_require_env("EMAIL_INTAKE_AUTO_REPLY_FROM"),
             subject=os.getenv(
                 "EMAIL_INTAKE_AUTO_REPLY_SUBJECT",
                 "Your email has been received",
@@ -409,12 +394,9 @@ def send_auto_reply(record: EmailIntakeRecord, config: AutoReplyConfig) -> bool:
     if not recipient:
         return False
 
-    message = build_auto_reply_message(record, config, recipient)
-    with smtplib.SMTP(config.smtp_host, config.smtp_port) as smtp:
-        if config.use_starttls:
-            smtp.starttls()
-        smtp.login(config.smtp_username, config.smtp_password)
-        smtp.send_message(message)
+    params = build_auto_reply_params(record, config, recipient)
+    resend.api_key = config.api_key
+    resend.Emails.send(params)
     return True
 
 
@@ -443,24 +425,25 @@ def should_send_auto_reply(record: EmailIntakeRecord) -> bool:
     return True
 
 
-def build_auto_reply_message(
+def build_auto_reply_params(
     record: EmailIntakeRecord,
     config: AutoReplyConfig,
     recipient: str,
-) -> EmailMessage:
-    message = EmailMessage()
-    message["From"] = config.from_address
-    message["To"] = recipient
-    message["Subject"] = config.subject
-    message["Auto-Submitted"] = "auto-replied"
+) -> Dict[str, object]:
+    headers: Dict[str, str] = {"Auto-Submitted": "auto-replied"}
 
     if record.message_id and not record.message_id.startswith("sha256:"):
-        message["In-Reply-To"] = record.message_id
+        headers["In-Reply-To"] = record.message_id
         references = _record_header(record, "References")
-        message["References"] = f"{references} {record.message_id}".strip()
+        headers["References"] = f"{references} {record.message_id}".strip()
 
-    message.set_content(config.body)
-    return message
+    return {
+        "from": config.from_address,
+        "to": [recipient],
+        "subject": config.subject,
+        "text": config.body,
+        "headers": headers,
+    }
 
 
 def _reply_recipient(record: EmailIntakeRecord) -> Optional[str]:
