@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+import uuid
 
 import psycopg
 
@@ -14,10 +15,26 @@ def get_connection():
         yield conn
 
 
-def log_event(conn, doc_id: str, event: str, result: str) -> None:
+def log_event(conn: psycopg.Connection, doc_id: str, event_type: str, status: str) -> None:
+    """Write a summarizer pipeline event to audit_events.
+
+    event_type examples: 'summarizer.summary', 'summarizer.chunking', 'summarizer.index'
+    status: 'success' or 'fail'
+    """
     with conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO document_log (doc_id, event, result) VALUES (%s, %s::event_type, %s::result_type)",
-            (doc_id, event, result),
+            """
+            INSERT INTO audit_events
+                (id, event_type, entity_type, entity_id, document_upload_id, metadata_json)
+            VALUES (%s, %s, %s, %s, %s, %s::json)
+            """,
+            (
+                str(uuid.uuid4()),
+                event_type,
+                "document_upload",
+                doc_id,
+                doc_id,
+                f'{{"status": "{status}"}}',
+            ),
         )
     conn.commit()

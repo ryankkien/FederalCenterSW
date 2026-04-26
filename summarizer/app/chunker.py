@@ -1,30 +1,38 @@
+import uuid
+
 import psycopg
 
 _CHUNK_WORDS = 256
 
 
-def chunk_and_store(conn: psycopg.Connection, doc_id: str, pages: list[str]) -> int:
-    """Split all OCR pages into 256-word chunks and bulk-insert into the chunks table.
+def chunk_and_store(
+    conn: psycopg.Connection, document_upload_id: str, pages: list[str]
+) -> list[tuple[str, str]]:
+    """Split all pages into 256-word chunks and bulk-insert into document_chunks.
 
-    Returns the number of chunks written.
+    Returns list of (chunk_id, text) for use by the embedder.
     """
     full_text = " ".join(pages)
     words = full_text.split()
 
-    chunks: list[tuple[str, int, str]] = []
-    for i in range(0, len(words), _CHUNK_WORDS):
-        chunk_text = " ".join(words[i : i + _CHUNK_WORDS])
-        chunks.append((doc_id, len(chunks), chunk_text))
+    rows: list[tuple[str, str, None, int, str]] = []
+    for i, start in enumerate(range(0, len(words), _CHUNK_WORDS)):
+        chunk_text = " ".join(words[start : start + _CHUNK_WORDS])
+        rows.append((str(uuid.uuid4()), document_upload_id, None, i, chunk_text))
 
-    if not chunks:
-        return 0
+    if not rows:
+        return []
 
     with conn.cursor() as cur:
-        # Delete any existing chunks for this doc before reinserting (idempotent)
-        cur.execute("DELETE FROM chunks WHERE doc_id = %s", (doc_id,))
+        cur.execute(
+            "DELETE FROM document_chunks WHERE document_upload_id = %s",
+            (document_upload_id,),
+        )
         cur.executemany(
-            "INSERT INTO chunks (doc_id, chunk_index, text) VALUES (%s, %s, %s)",
-            chunks,
+            "INSERT INTO document_chunks (id, document_upload_id, contract_id, chunk_index, text)"
+            " VALUES (%s, %s, %s, %s, %s)",
+            rows,
         )
     conn.commit()
-    return len(chunks)
+
+    return [(row[0], row[4]) for row in rows]  # (id, text)
