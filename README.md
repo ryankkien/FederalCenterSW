@@ -161,10 +161,9 @@ cross-contract and cross-document pattern relationships are stored separately as
 semantic links.
 
 The knowledge wiki index is a server-backed Grokipedia-style layer for officials. It
-mines local contract/report analysis plus official bulk exports by default. For the
-Department of Navy service-contract corpus, prefer USAspending CSV/ZIP exports and
-local govinfo/Regulations/SAM bulk mirrors before any live keyed drill-downs.
-Optional-source gaps are still recorded when authorized CPARS/IPMDAR imports are absent.
+mines seeded local fixture contracts, processed report evidence, and the generated
+synthetic fixture corpus by default. Optional official-source clients remain available
+for deliberate research runs, but they are not part of the default local ingest.
 Contractor profiles use evidence labels such as schedule variance, funding variance,
 unresolved issues, and contradiction counts; they do not make unsupported honesty or
 responsibility judgments.
@@ -203,20 +202,9 @@ Uploaded contract-file evidence remains authoritative for contract-specific find
 Build the local wiki index after fixture processing:
 
 ```sh
-bun run knowledge:ingest -- --scope fixtures --sources open --limit 500
+bun run corpus:build-synthetic
+bun run knowledge:ingest -- --scope fixtures --sources local --limit 500
 bun run knowledge:build -- --scope fixtures
-```
-
-Import bulk USAspending awards, eCFR Title 48 sections, SAM.gov public opportunity
-snapshots, Federal Register XML archives, and prepare a sanitized Claude Code CLI
-packet:
-
-```sh
-bun run knowledge:import-usaspending-bulk -- --paths backend/data/bulk/usaspending --build-index
-bun run knowledge:import-ecfr-title48-bulk -- --paths backend/data/bulk/ecfr
-bun run knowledge:import-sam-opportunities-bulk -- --paths backend/data/bulk/sam_opportunities
-bun run knowledge:import-federal-register-bulk -- --paths backend/data/bulk/federal_register
-bun run knowledge:export-claude -- --output-dir backend/data/claude_knowledge
 ```
 
 Build a file-first Navy service fixture corpus from the three downloaded fixture

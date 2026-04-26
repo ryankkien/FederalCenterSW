@@ -11,10 +11,13 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from app.config import get_cpars_import_dir, get_regulations_api_key, get_sam_api_key
+from app.synthetic_corpus import DEFAULT_OUTPUT_DIR, FIXTURE_ROOT, build_synthetic_corpus
 
 
+LOCAL_SOURCE_GROUP = ("fixtures", "synthetic")
 OPEN_SOURCE_GROUP = ("usaspending", "federal_register", "acquisition")
 OPTIONAL_SOURCE_GROUP = ("sam", "regulations", "cpars")
+DEFAULT_SYNTHETIC_CORPUS_DIR = DEFAULT_OUTPUT_DIR
 
 
 @dataclass(frozen=True)
@@ -35,12 +38,14 @@ class KnowledgeSourceDocument:
 
 
 def normalize_sources(sources: Optional[Sequence[str]]) -> List[str]:
-    requested = [source.strip().lower() for source in (sources or ("open",)) if source.strip()]
+    requested = [source.strip().lower() for source in (sources or ("local",)) if source.strip()]
     if not requested:
-        requested = ["open"]
+        requested = ["local"]
     normalized: List[str] = []
     for source in requested:
-        if source == "open":
+        if source == "local":
+            normalized.extend(LOCAL_SOURCE_GROUP)
+        elif source == "open":
             normalized.extend(OPEN_SOURCE_GROUP)
         elif source == "optional":
             normalized.extend(OPTIONAL_SOURCE_GROUP)
@@ -57,7 +62,11 @@ def collect_contract_source_documents(
     documents: List[KnowledgeSourceDocument] = []
     for source in normalize_sources(sources):
         try:
-            if source == "usaspending":
+            if source == "fixtures":
+                documents.extend(_fixture_documents(contract, limit))
+            elif source == "synthetic":
+                documents.extend(_synthetic_documents(contract, limit))
+            elif source == "usaspending":
                 documents.extend(_usaspending_contract_awards(contract, limit))
             elif source == "federal_register":
                 documents.extend(_federal_register_documents(contract, max(1, min(limit, 10))))
@@ -74,6 +83,139 @@ def collect_contract_source_documents(
         except Exception as error:
             documents.append(_unavailable(source, "fetch_error", str(error)[:500]))
     return documents[: max(1, limit)]
+
+
+def _fixture_documents(contract: object, limit: int) -> List[KnowledgeSourceDocument]:
+    contract_id = _attr(contract, "id")
+    contract_number = _attr(contract, "contract_number")
+    documents = list(getattr(contract, "documents", None) or [])
+    if not documents:
+        return [
+            KnowledgeSourceDocument(
+                source_name="fixture",
+                source_key=f"fixture:no-documents:{contract_id or contract_number}",
+                title="No local fixture documents linked",
+                source_type="real_fixture",
+                status="unavailable",
+                unavailable_reason="No seeded fixture documents are linked to this contract.",
+                contract_id=contract_id,
+                vendor_uei=_attr(contract, "vendor_uei"),
+                metadata={"record_type": "fixture_gap"},
+            )
+        ]
+
+    source_documents: List[KnowledgeSourceDocument] = []
+    for document in documents[:limit]:
+        source_documents.append(
+            KnowledgeSourceDocument(
+                source_name="fixture",
+                source_key=f"fixture:{_attr(document, 'id')}",
+                title=_attr(document, "title", "original_filename") or "Fixture document",
+                source_type="real_fixture",
+                url=None,
+                text=" ".join(
+                    item
+                    for item in (
+                        _attr(document, "title"),
+                        _attr(document, "document_kind"),
+                        _attr(document, "notes"),
+                        _attr(document, "original_filename"),
+                    )
+                    if item
+                ),
+                raw_json={
+                    "document_id": _attr(document, "id"),
+                    "blob_path": _attr(document, "blob_path"),
+                    "text_blob_path": _attr(document, "text_blob_path"),
+                },
+                contract_id=contract_id,
+                vendor_uei=_attr(contract, "vendor_uei"),
+                metadata={
+                    "record_type": "fixture_document",
+                    "document_kind": _attr(document, "document_kind"),
+                    "source_path": _attr(document, "blob_path"),
+                },
+            )
+        )
+    return source_documents
+
+
+def _synthetic_documents(contract: object, limit: int) -> List[KnowledgeSourceDocument]:
+    corpus_dir = DEFAULT_SYNTHETIC_CORPUS_DIR
+    packet_path = corpus_dir / "extraction_packet.jsonl"
+    if not packet_path.exists():
+        build_synthetic_corpus(fixture_root=FIXTURE_ROOT, output_dir=corpus_dir)
+
+    contract_number = _attr(contract, "contract_number")
+    contract_id = _attr(contract, "id")
+    source_documents: List[KnowledgeSourceDocument] = []
+    try:
+        rows = packet_path.read_text(encoding="utf-8").splitlines()
+    except OSError as error:
+        return [
+            KnowledgeSourceDocument(
+                source_name="synthetic_fixture",
+                source_key=f"synthetic:error:{contract_id or contract_number}",
+                title="Synthetic fixture corpus unavailable",
+                source_type="synthetic_fixture",
+                status="unavailable",
+                unavailable_reason=str(error),
+                contract_id=contract_id,
+                vendor_uei=_attr(contract, "vendor_uei"),
+            )
+        ]
+
+    for line in rows:
+        if len(source_documents) >= limit:
+            break
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if row.get("source_type") != "synthetic_fixture":
+            continue
+        row_contract = row.get("contract_number")
+        if row_contract and contract_number and row_contract != contract_number:
+            continue
+        if row_contract and contract_number is None:
+            continue
+        if row_contract is None and source_documents:
+            continue
+        text = str(row.get("text") or row.get("summary") or row.get("title") or "")
+        source_documents.append(
+            KnowledgeSourceDocument(
+                source_name="synthetic_fixture",
+                source_key=f"synthetic:{row.get('document_id') or row.get('path') or len(source_documents)}",
+                title=str(row.get("title") or row.get("filename") or "Synthetic fixture evidence")[:500],
+                source_type="synthetic_fixture",
+                text=text[:20_000],
+                raw_json=row,
+                contract_id=contract_id,
+                vendor_uei=_attr(contract, "vendor_uei"),
+                metadata={
+                    "record_type": "synthetic_fixture_document",
+                    "source_path": row.get("path"),
+                    "document_kind": row.get("document_kind"),
+                    "synthetic": True,
+                },
+            )
+        )
+
+    return source_documents or [
+        KnowledgeSourceDocument(
+            source_name="synthetic_fixture",
+            source_key=f"synthetic:no-match:{contract_id or contract_number}",
+            title="No matching synthetic fixture evidence",
+            source_type="synthetic_fixture",
+            status="unavailable",
+            unavailable_reason="No synthetic fixture rows matched this contract.",
+            contract_id=contract_id,
+            vendor_uei=_attr(contract, "vendor_uei"),
+            metadata={"record_type": "synthetic_gap"},
+        )
+    ]
 
 
 def _usaspending_contract_awards(contract: object, limit: int) -> List[KnowledgeSourceDocument]:
