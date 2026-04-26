@@ -31,6 +31,7 @@ CREATE TABLE documents (
 CREATE TABLE chunks (
     doc_id      UUID    NOT NULL REFERENCES documents(uuid) ON DELETE CASCADE,
     chunk_index INTEGER NOT NULL,
+    text        TEXT    NOT NULL,
     PRIMARY KEY (doc_id, chunk_index)
 );
 
