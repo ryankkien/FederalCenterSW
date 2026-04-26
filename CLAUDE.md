@@ -71,25 +71,48 @@ contract. The SQL mirror is maintained for review and local psql reference.
 - `topic_links`: topic-to-topic semantic links.
 - `contract_topic_revisions`: append-only topic revision history.
 
-### Knowledge Wiki Tables
+- `contractor_profiles`: contractor evidence summaries, award counts, and issue/contradiction counts.
 
-- `knowledge_ingestion_runs`: fixture/synthetic and optional-source index build runs.
-- `knowledge_source_records`: normalized source records from uploaded evidence,
-  fixtures, generated synthetic evidence, and deliberate optional-source imports.
-- `knowledge_nodes`: contract, contractor, topic, and source wiki articles.
-- `knowledge_edges`: typed links between wiki nodes.
-- `knowledge_citations`: article citations to uploaded documents, fixture/synthetic
-  records, optional-source records, or external-source references.
-- `contractor_profiles`: contractor evidence summaries and counts.
+### Summarizer Service (`summarizer/`)
 
-### Optional Summarizer Service
+The optional `summarizer/` ACA reads a text artifact from blob, runs hierarchical summarization, classifies the document with a PSC and NAICS code, splits the full text into 256-word chunks written to `document_chunks`, and generates per-chunk embeddings written to `chunk_embeddings`. Pipeline events are logged to `audit_events` with `entity_type = 'document_upload'`.
 
-The optional `summarizer/` service can summarize and PSC/NAICS-classify extracted
-document text. It reads canonical `contracts/{document_id}/text.json` artifacts first,
-falls back to legacy `documents/{doc_id}/ocr.json`, and writes
-`contracts/{document_id}/summary.json`. The core analyst pipeline remains DB-backed;
-summarizer output is supplemental classification evidence, not the canonical contract
-record.
+**Blob paths** (container: `app-assets`, env: `AZURE_STORAGE_CONTAINER`):
+
+| Path | Stage | Format |
+|------|-------|--------|
+| `contracts/{document_upload_id}/text.json` | Primary text input | `{"pages": ["page 1 text", ...]}` |
+| `documents/{document_upload_id}/ocr.json` | Legacy text input (fallback) | `{"doc_id": "...", "pages": [...]}` |
+| `contracts/{document_upload_id}/summary.json` | Summarizer output | See schema below |
+
+**`summary.json` schema:**
+```json
+{
+  "doc_id": "document_upload_id",
+  "generated_at": "2026-04-26T12:00:00+00:00",
+  "model": "claude-sonnet-4-6",
+  "source_path": "contracts/{id}/text.json",
+  "classification": {
+    "psc_code": "D302",
+    "psc_description": "ADP Software Development",
+    "naics_code": "541511",
+    "naics_description": "Custom Computer Programming Services",
+    "rationale": "..."
+  },
+  "layers": [
+    {
+      "layer": 0,
+      "chunks": [{"chunk_index": 0, "page_range": [0, 7], "summary": "..."}]
+    }
+  ],
+  "final_summary": "..."
+}
+```
+
+- `layers[0]` chunks reference `page_range` (0-indexed page numbers from input)
+- Subsequent layers reference `summary_range` (indices into previous layer summaries)
+- `classification.psc_code` / `naics_code` are written to `contracts.psc_code` / `contracts.naics_code` by the orchestrator
+- Audit events use `event_type` values: `summarizer.summary`, `summarizer.chunking`, `summarizer.index`
 
 ### Relationships
 
@@ -109,6 +132,5 @@ contracts
   ├─< contract_hypotheses ──< hypothesis_evidence
   ├─< investigation_runs ──< external_source_refs
   ├─< contract_similarity_links
-  ├─< contract_topics ──< topic_evidence/topic_links/contract_topic_revisions
-  └─< knowledge_nodes ──< knowledge_citations/knowledge_edges
+  └─< contract_topics ──< topic_evidence/topic_links/contract_topic_revisions
 ```

@@ -4,8 +4,9 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from app import classifier, summarizer
+from app import classifier, chunker, embedder, summarizer
 from app.blob import get_blob_storage
+from app.db import get_connection, log_event
 from app.models import get_llm_client
 
 app = FastAPI(title="Summarizer")
@@ -39,7 +40,7 @@ def health():
 @app.post("/summarize", response_model=SummarizeResponse)
 def summarize(req: SummarizeRequest):
     blob = get_blob_storage()
-    client = get_llm_client()
+    llm = get_llm_client()
 
     raw, source_path = _download_text_artifact(blob, req.doc_id)
 
@@ -53,17 +54,39 @@ def summarize(req: SummarizeRequest):
     if not pages:
         raise HTTPException(status_code=422, detail="text artifact contains no pages")
 
-    # Run hierarchical summarization
-    result = summarizer.run(pages, client)
+    with get_connection() as conn:
+        # 1. Hierarchical summarization
+        try:
+            result = summarizer.run(pages, llm)
+            log_event(conn, req.doc_id, "summarizer.summary", "success")
+        except Exception as exc:
+            log_event(conn, req.doc_id, "summarizer.summary", "fail")
+            raise HTTPException(status_code=500, detail=f"Summarization failed: {exc}")
 
-    # Classify document
-    classification = classifier.classify(result["final_summary"], client)
+        # 2. Classification (part of the Summary step — no separate log entry)
+        classification = classifier.classify(result["final_summary"], llm)
 
-    # Build and upload summary.json
+        # 3. Chunking
+        try:
+            chunk_list = chunker.chunk_and_store(conn, req.doc_id, pages)
+            log_event(conn, req.doc_id, "summarizer.chunking", "success")
+        except Exception as exc:
+            log_event(conn, req.doc_id, "summarizer.chunking", "fail")
+            raise HTTPException(status_code=500, detail=f"Chunking failed: {exc}")
+
+        # 4. Embedding — one API call for all chunks (batched by OpenAI client)
+        try:
+            embedder.embed_chunks(conn, chunk_list)
+            log_event(conn, req.doc_id, "summarizer.index", "success")
+        except Exception as exc:
+            log_event(conn, req.doc_id, "summarizer.index", "fail")
+            raise HTTPException(status_code=500, detail=f"Embedding failed: {exc}")
+
+    # 5. Upload summary.json to blob
     summary_doc = {
         "doc_id": req.doc_id,
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "model": client.model_name,
+        "model": llm.model_name,
         "source_path": source_path,
         "classification": classification,
         **result,
@@ -78,7 +101,7 @@ def summarize(req: SummarizeRequest):
     return SummarizeResponse(
         doc_id=req.doc_id,
         blob_path=summary_path,
-        model=client.model_name,
+        model=llm.model_name,
         final_summary=result["final_summary"],
         classification=ClassificationResult(**classification),
     )

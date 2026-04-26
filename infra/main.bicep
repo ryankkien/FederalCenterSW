@@ -53,6 +53,10 @@ param anthropicApiKey string = ''
 @secure()
 param openaiApiKey string = ''
 
+@description('PostgreSQL connection string for the Summarizer.')
+@secure()
+param summarizerDatabaseUrl string = ''
+
 resource appStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: appStorageAccountName
   location: appLocation
@@ -314,6 +318,10 @@ resource summarizerApp 'Microsoft.App/containerApps@2024-03-01' = {
           name: 'openai-api-key'
           value: openaiApiKey
         }
+        {
+          name: 'database-url'
+          value: summarizerDatabaseUrl
+        }
       ]
     }
     template: {
@@ -345,6 +353,14 @@ resource summarizerApp 'Microsoft.App/containerApps@2024-03-01' = {
             {
               name: 'MODEL_PREFERENCE'
               value: 'claude'
+            }
+            {
+              name: 'DATABASE_URL'
+              secretRef: 'database-url'
+            }
+            {
+              name: 'EMBEDDING_MODEL'
+              value: 'text-embedding-3-small'
             }
           ]
         }
