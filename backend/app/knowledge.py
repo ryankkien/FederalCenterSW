@@ -66,7 +66,7 @@ def run_knowledge_ingestion(
         limit=limit,
         model_name=provider.status.name,
         prompt_version="knowledge_index_v1",
-        metadata_json={"source_policy": "open_default_optional_keyed"},
+        metadata_json={"source_policy": "local_fixtures_and_synthetic_default"},
     )
     db.add(run)
     db.flush()

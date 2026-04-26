@@ -73,13 +73,13 @@ contract. The SQL mirror is maintained for review and local psql reference.
 
 ### Knowledge Wiki Tables
 
-- `knowledge_ingestion_runs`: official-source and fixture-index build runs.
+- `knowledge_ingestion_runs`: fixture/synthetic and optional-source index build runs.
 - `knowledge_source_records`: normalized source records from uploaded evidence,
-  fixtures, and official bulk imports.
+  fixtures, generated synthetic evidence, and deliberate optional-source imports.
 - `knowledge_nodes`: contract, contractor, topic, and source wiki articles.
 - `knowledge_edges`: typed links between wiki nodes.
-- `knowledge_citations`: article citations to uploaded documents, official-source
-  records, or external-source references.
+- `knowledge_citations`: article citations to uploaded documents, fixture/synthetic
+  records, optional-source records, or external-source references.
 - `contractor_profiles`: contractor evidence summaries and counts.
 
 ### Optional Summarizer Service
