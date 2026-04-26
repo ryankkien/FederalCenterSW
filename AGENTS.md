@@ -75,6 +75,9 @@ logic in separate modules under `backend/app/` and cover it with pytest tests.
 - Use `bun run infra:whatif` before changing Azure resources.
 - Use `bun run infra:deploy` only when the what-if output is understood.
 - GitHub Actions workflows for infrastructure live in `.github/workflows/`.
+- Pull request Discord notifications live in
+  `.github/workflows/discord-pr-notifications.yml` and require the GitHub repository
+  secret `DISCORD_PULL_REQUEST_WEBHOOK_URL`.
 - Keep cloud inventory, access notes, and manual CLI operations in `docs/cloud.md`.
 - Keep infrastructure workflow and drift policy in `docs/infra.md`.
 - The active development resource group is `federal-center-sw-dev`.
