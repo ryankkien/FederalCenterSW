@@ -4,12 +4,12 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from app import classifier, chunker, embedder, summarizer
+from app import classifier, chunker, embedder, primitive_extractor, summarizer
 from app.blob import get_blob_storage
 from app.db import get_connection, log_event
 from app.models import get_llm_client
 
-app = FastAPI(title="Summarizer")
+app = FastAPI(title="Feature Extractor")
 
 
 class SummarizeRequest(BaseModel):
@@ -30,6 +30,18 @@ class SummarizeResponse(BaseModel):
     model: str
     final_summary: str
     classification: ClassificationResult
+
+
+class ExtractPrimitivesRequest(BaseModel):
+    doc_id: str
+    contract_id: str | None = None
+    doc_classification: str
+
+
+class ExtractPrimitivesResponse(BaseModel):
+    doc_id: str
+    extraction_run_id: str | None
+    primitives_extracted: dict[str, int]
 
 
 @app.get("/health")
@@ -58,9 +70,9 @@ def summarize(req: SummarizeRequest):
         # 1. Hierarchical summarization
         try:
             result = summarizer.run(pages, llm)
-            log_event(conn, req.doc_id, "summarizer.summary", "success")
+            log_event(conn, req.doc_id, "feature_extractor.summary", "success")
         except Exception as exc:
-            log_event(conn, req.doc_id, "summarizer.summary", "fail")
+            log_event(conn, req.doc_id, "feature_extractor.summary", "fail")
             raise HTTPException(status_code=500, detail=f"Summarization failed: {exc}")
 
         # 2. Classification (part of the Summary step — no separate log entry)
@@ -69,17 +81,17 @@ def summarize(req: SummarizeRequest):
         # 3. Chunking
         try:
             chunk_list = chunker.chunk_and_store(conn, req.doc_id, pages)
-            log_event(conn, req.doc_id, "summarizer.chunking", "success")
+            log_event(conn, req.doc_id, "feature_extractor.chunking", "success")
         except Exception as exc:
-            log_event(conn, req.doc_id, "summarizer.chunking", "fail")
+            log_event(conn, req.doc_id, "feature_extractor.chunking", "fail")
             raise HTTPException(status_code=500, detail=f"Chunking failed: {exc}")
 
         # 4. Embedding — one API call for all chunks (batched by OpenAI client)
         try:
             embedder.embed_chunks(conn, chunk_list)
-            log_event(conn, req.doc_id, "summarizer.index", "success")
+            log_event(conn, req.doc_id, "feature_extractor.index", "success")
         except Exception as exc:
-            log_event(conn, req.doc_id, "summarizer.index", "fail")
+            log_event(conn, req.doc_id, "feature_extractor.index", "fail")
             raise HTTPException(status_code=500, detail=f"Embedding failed: {exc}")
 
     # 5. Upload summary.json to blob
@@ -104,6 +116,47 @@ def summarize(req: SummarizeRequest):
         model=llm.model_name,
         final_summary=result["final_summary"],
         classification=ClassificationResult(**classification),
+    )
+
+
+@app.post("/extract-primitives", response_model=ExtractPrimitivesResponse)
+def extract_primitives(req: ExtractPrimitivesRequest):
+    blob = get_blob_storage()
+    llm = get_llm_client()
+
+    raw, _ = _download_text_artifact(blob, req.doc_id)
+
+    try:
+        ocr = json.loads(raw)
+    except (json.JSONDecodeError, KeyError) as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid text artifact format: {exc}")
+
+    pages = _artifact_pages(ocr)
+    if not pages:
+        raise HTTPException(status_code=422, detail="text artifact contains no pages")
+
+    summary_text = ""
+    try:
+        summary_raw = blob.download_bytes(f"contracts/{req.doc_id}/summary.json")
+        summary_doc = json.loads(summary_raw)
+        summary_text = summary_doc.get("final_summary", "")
+    except Exception:
+        pass
+
+    with get_connection() as conn:
+        try:
+            run_id, counts = primitive_extractor.run(
+                conn, req.doc_id, req.contract_id, req.doc_classification, pages, summary_text, llm
+            )
+            log_event(conn, req.doc_id, "feature_extractor.primitives", "success")
+        except Exception as exc:
+            log_event(conn, req.doc_id, "feature_extractor.primitives", "fail")
+            raise HTTPException(status_code=500, detail=f"Primitive extraction failed: {exc}")
+
+    return ExtractPrimitivesResponse(
+        doc_id=req.doc_id,
+        extraction_run_id=run_id,
+        primitives_extracted=counts,
     )
 
 
