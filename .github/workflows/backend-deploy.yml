@@ -20,9 +20,8 @@ env:
   AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID || '99596387-8247-4e94-9917-cf8bc695f106' }}
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
-    environment: azure-dev
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -40,13 +39,30 @@ jobs:
       - name: Build and push image
         run: |
           IMAGE="${{ env.ACR_LOGIN_SERVER }}/backend"
-          docker build -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" backend/
+          docker build --platform linux/amd64 -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" backend/
           docker push "$IMAGE:${{ github.sha }}"
           docker push "$IMAGE:latest"
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: azure-dev
+    steps:
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID || 'c821732f-0ded-4db0-96c8-cf2013d16974' }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
 
       - name: Deploy to Container App
         run: |
           az containerapp update \
             --name "$ACA_APP_NAME" \
             --resource-group "$AZURE_RESOURCE_GROUP" \
-            --image "${{ env.ACR_LOGIN_SERVER }}/backend:${{ github.sha }}"
+            --image "${{ env.ACR_LOGIN_SERVER }}/backend:${{ github.sha }}" \
+            --set-env-vars \
+              AUTH_MODE=mock \
+              AZURE_STORAGE_CONTAINER=app-assets \
+              AI_PROVIDER=openai \
+              AI_PROCESSING_ENABLED=true

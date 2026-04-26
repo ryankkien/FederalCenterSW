@@ -10,9 +10,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
-    environment: azure-dev
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,13 +21,28 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Install dependencies
-        run: bun install
+      - name: Install and build
+        run: |
+          bun install
+          bun run build
         working-directory: frontend
 
-      - name: Build
-        run: bun run build
-        working-directory: frontend
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: azure-dev
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
 
       - name: Deploy to Static Web Apps
         uses: Azure/static-web-apps-deploy@v1
@@ -36,6 +50,5 @@ jobs:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: upload
-          app_location: frontend
-          output_location: dist
+          app_location: frontend/dist
           skip_api_build: true
