@@ -38,8 +38,12 @@ Core metadata record for each ingested document.
 | `date_submitted` | TIMESTAMPTZ | NOT NULL, default `now()` |
 | `doc_type_id` | INTEGER | FK → `document_types.id`, nullable |
 | `summary_embedding` | VECTOR(1536) | nullable |
+| `psc_code` | TEXT | nullable — 4-char DoD Product and Service Code (PSC Manual Apr 2022) |
+| `naics_code` | TEXT | nullable — 6-digit North American Industry Classification System code |
 
 **Indices:** `doc_type_id`, `date_submitted`, `summary_embedding` (HNSW cosine)
+
+`psc_code` and `naics_code` are written by the Durable Functions orchestrator after the Summarizer ACA returns its classification result.
 
 #### `chunks`
 Stores ordered chunks of a document for retrieval.
@@ -63,6 +67,15 @@ Audit trail of pipeline events per document.
 
 **PK:** `(doc_id, timestamp)`
 **Indices:** `event`, `timestamp`
+
+### Blob Storage Path Conventions
+
+Container: `app-assets` (env: `AZURE_STORAGE_CONTAINER`, default `app-assets`)
+
+| Blob path | Stage | Format |
+|-----------|-------|--------|
+| `documents/{doc_id}/ocr.json` | OCR output | `{"doc_id": "uuid", "pages": ["page 1 text", ...]}` |
+| `documents/{doc_id}/summary.json` | Summarizer output | See Summarizer ACA docs |
 
 ### Relationships
 
